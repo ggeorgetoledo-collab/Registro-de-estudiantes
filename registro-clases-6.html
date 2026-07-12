@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Registro de Clases</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --primary:#6C4EE3;
+    --primary-dark:#5638C4;
+    --primary-light:#F1ECFC;
+    --primary-border:rgba(108,78,227,0.3);
+    --bg:#F6F5FB;
+    --card-bg:#FFFFFF;
+    --text:#2B2A3D;
+    --text-dim:#7C7A94;
+    --border:#E9E6F5;
+    --border-strong:#DAD4F0;
+    --success:#22B573;
+    --success-light:#E6F8EF;
+    --success-border:rgba(34,181,115,0.35);
+    --danger:#F0554A;
+    --danger-light:#FDECEA;
+    --danger-border:rgba(240,85,74,0.35);
+    --shadow: 0 6px 20px rgba(76,60,150,0.08);
+    --radius: 12px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    min-height:100vh;
+  }
+  .app-font{ font-family:'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+  h1, h2, .heading-font{ font-family:'Poppins', 'Inter', sans-serif; }
+  header{
+    background:var(--card-bg);
+    color:var(--text);
+    padding:18px 24px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:10px;
+    border-bottom:1px solid var(--border);
+    box-shadow: 0 2px 10px rgba(76,60,150,0.05);
+  }
+  header h1{
+    margin:0;
+    font-size:1.35rem;
+    font-weight:700;
+    letter-spacing:0.1px;
+    color:var(--primary-dark);
+  }
+  header .subtitle{
+    font-family:'Inter', sans-serif;
+    font-size:0.78rem;
+    color:var(--text-dim);
+    margin-top:2px;
+    letter-spacing:0.1px;
+  }
+  #group-select-wrap{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-family:'Inter', sans-serif;
+  }
+  select, input, textarea, button{
+    font-family:'Inter', sans-serif;
+    font-size:0.92rem;
+  }
+  select#groupSelect{
+    padding:8px 12px;
+    border-radius:8px;
+    border:1px solid var(--border-strong);
+    background:#fff;
+    color:var(--text);
+    min-width:180px;
+  }
+  nav.tabs{
+    display:flex;
+    gap:0;
+    background:var(--card-bg);
+    border-bottom:1px solid var(--border);
+    padding:0 16px;
+    overflow-x:auto;
+  }
+  nav.tabs button{
+    font-family:'Inter', sans-serif;
+    background:none;
+    border:none;
+    padding:14px 18px;
+    cursor:pointer;
+    color:var(--text-dim);
+    font-size:0.92rem;
+    font-weight:600;
+    border-bottom:3px solid transparent;
+    white-space:nowrap;
+    letter-spacing:0.1px;
+  }
+  nav.tabs button.active{
+    color:var(--primary);
+    border-bottom:3px solid var(--primary);
+    font-weight:700;
+  }
+  main{
+    max-width:980px;
+    margin:0 auto;
+    padding:22px 18px 60px;
+  }
+  .card{
+    background:var(--card-bg);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:20px;
+    margin-bottom:18px;
+    box-shadow: var(--shadow);
+  }
+  .card h2{
+    margin-top:0;
+    font-size:1.08rem;
+    font-weight:700;
+    color:var(--text);
+    letter-spacing:0.1px;
+    padding-bottom:12px;
+    margin-bottom:14px;
+    border-bottom:2px solid var(--primary-light);
+  }
+  .row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+  }
+  label{
+    font-family:'Inter', sans-serif;
+    font-size:0.82rem;
+    color:var(--text-dim);
+    display:block;
+    margin-bottom:4px;
+    font-weight:500;
+  }
+  input[type=text], input[type=date], input[type=time], input[type=number], textarea, select{
+    padding:9px 10px;
+    border:1px solid var(--border-strong);
+    border-radius:8px;
+    background:#fff;
+    color:var(--text);
+    width:100%;
+  }
+  input:focus, textarea:focus, select:focus{
+    outline:none;
+    border-color:var(--primary);
+    box-shadow:0 0 0 3px var(--primary-light);
+  }
+  input::placeholder, textarea::placeholder{ color:#B4B0C9; }
+  textarea{ min-height:60px; resize:vertical; font-family:'Inter', sans-serif; }
+  .btn{
+    font-family:'Inter', sans-serif;
+    border:none;
+    border-radius:8px;
+    padding:9px 16px;
+    cursor:pointer;
+    font-weight:700;
+    font-size:0.88rem;
+    transition:transform .05s ease, filter .1s ease, background .15s ease;
+  }
+  .btn:active{ transform:scale(0.97); }
+  .btn-accent{ background:var(--primary); color:#fff; }
+  .btn-accent:hover{ background:var(--primary-dark); }
+  .btn-ink{ background:#2B2A3D; color:#fff; }
+  .btn-ink:hover{ filter:brightness(1.2); }
+  .btn-outline{ background:transparent; color:var(--primary); border:1px solid var(--border-strong); }
+  .btn-outline:hover{ background:var(--primary-light); border-color:var(--primary-border); }
+  .btn-danger{ background:transparent; color:var(--danger); border:1px solid var(--danger-border); }
+  .btn-danger:hover{ background:var(--danger-light); }
+  .btn-sm{ padding:5px 10px; font-size:0.78rem; }
+  table{ width:100%; border-collapse:collapse; font-family:'Inter', sans-serif; font-size:0.88rem; }
+  th, td{ text-align:left; padding:9px 8px; border-bottom:1px solid var(--border); vertical-align:top; color:var(--text); }
+  th{ color:var(--text-dim); font-weight:700; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; }
+  tr:last-child td{ border-bottom:none; }
+  .pill{
+    display:inline-block;
+    background:var(--primary-light);
+    color:var(--primary-dark);
+    padding:2px 10px;
+    border-radius:20px;
+    font-size:0.75rem;
+    font-family:'Inter', sans-serif;
+    font-weight:700;
+    border:1px solid var(--primary-border);
+  }
+  .pill-success{ background:var(--success-light); color:var(--success); border-color:var(--success-border); }
+  .pill-danger{ background:var(--danger-light); color:var(--danger); border-color:var(--danger-border); }
+  .empty-state{
+    text-align:center;
+    padding:30px 10px;
+    color:var(--text-dim);
+    font-family:'Inter', sans-serif;
+    font-size:0.9rem;
+  }
+  .score-select{
+    width:64px;
+    padding:6px;
+    text-align:center;
+  }
+  .indicator-header-name{ max-width:110px; color:var(--text-dim); }
+  .flex-between{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .muted{ color:var(--text-dim); font-family:'Inter', sans-serif; font-size:0.82rem; }
+  .divider{ border:none; border-top:1px solid var(--border); margin:16px 0; }
+  .grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px){ .grid-2{ grid-template-columns:1fr; } }
+  .toast{
+    position:fixed;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    background:var(--primary);
+    color:#fff;
+    padding:10px 20px;
+    border-radius:8px;
+    font-family:'Inter', sans-serif;
+    font-size:0.85rem;
+    font-weight:700;
+    box-shadow:0 4px 16px rgba(76,60,150,0.3);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .25s ease;
+    z-index:999;
+  }
+  .toast.show{ opacity:1; }
+  .indicator-tag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    background:var(--primary-light);
+    color:var(--text);
+    padding:6px 10px;
+    border-radius:8px;
+    border:1px solid var(--primary-border);
+    font-family:'Inter', sans-serif;
+    font-size:0.85rem;
+    margin:4px 6px 4px 0;
+  }
+  .indicator-tag button{
+    background:none; border:none; color:var(--danger); cursor:pointer; font-weight:700; padding:0;
+  }
+  .file-drop{
+    border:2px dashed var(--border-strong);
+    border-radius:8px;
+    padding:16px;
+    text-align:center;
+    font-family:'Inter', sans-serif;
+    color:var(--text-dim);
+    font-size:0.85rem;
+    cursor:pointer;
+  }
+  .file-drop:hover{ background:var(--primary-light); border-color:var(--primary); }
+  .student-list-item{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 0; border-bottom:1px solid var(--border); font-family:'Inter', sans-serif;
+  }
+  .student-name-link{
+    background:none; border:none; padding:0; cursor:pointer;
+    color:var(--primary-dark); font-weight:600; font-size:0.92rem; text-align:left;
+    font-family:'Inter', sans-serif;
+  }
+  .student-name-link:hover{ text-decoration:underline; }
+  .avg-badge{
+    font-weight:700;
+    color:var(--primary);
+  }
+  .calendar-grid{
+    display:flex;
+    gap:10px;
+    overflow-x:auto;
+    padding-bottom:6px;
+    font-family:'Inter', sans-serif;
+  }
+  .calendar-day{
+    min-width:130px;
+    flex:1;
+    background:var(--bg);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:8px;
+  }
+  .calendar-day-header{
+    font-size:0.76rem;
+    font-weight:700;
+    color:var(--text);
+    text-align:center;
+    margin-bottom:8px;
+    padding-bottom:6px;
+    border-bottom:1px dashed var(--border-strong);
+    text-transform:uppercase;
+    letter-spacing:0.4px;
+  }
+  .calendar-empty{
+    text-align:center;
+    color:var(--text-dim);
+    font-size:0.8rem;
+    padding:10px 0;
+  }
+  .calendar-block{
+    border:1px solid;
+    border-radius:7px;
+    padding:7px 8px;
+    margin-bottom:8px;
+    cursor:pointer;
+    transition:transform .08s ease, filter .1s ease;
+  }
+  .calendar-block:hover{ transform:translateY(-2px); filter:brightness(0.97); }
+  .calendar-block-time{ font-size:0.72rem; font-weight:700; opacity:0.85; }
+  .calendar-block-group{ font-size:0.85rem; font-weight:700; margin-top:2px; }
+  .calendar-block-note{ font-size:0.72rem; opacity:0.75; margin-top:2px; }
+
+  /* Calendario mensual */
+  .month-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .month-nav h3{ margin:0; font-family:'Poppins', sans-serif; font-size:1rem; color:var(--text); text-transform:capitalize; }
+  .month-grid{
+    display:grid;
+    grid-template-columns:repeat(7, 1fr);
+    gap:6px;
+    font-family:'Inter', sans-serif;
+  }
+  .month-grid-header{
+    text-align:center;
+    font-size:0.68rem;
+    font-weight:700;
+    color:var(--text-dim);
+    text-transform:uppercase;
+    padding-bottom:4px;
+  }
+  .month-cell{
+    min-height:64px;
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:5px;
+    cursor:pointer;
+    background:#fff;
+    transition:background .12s ease;
+    position:relative;
+  }
+  .month-cell:hover{ background:var(--primary-light); }
+  .month-cell.other-month{ opacity:0.35; }
+  .month-cell.is-today{ border-color:var(--primary); border-width:2px; }
+  .month-cell.is-selected{ background:var(--primary-light); }
+  .month-cell-num{ font-size:0.78rem; font-weight:700; color:var(--text); }
+  .month-cell-dots{ display:flex; flex-wrap:wrap; gap:3px; margin-top:4px; }
+  .month-dot{ width:7px; height:7px; border-radius:50%; }
+  .month-dot.pending{ background:transparent; border:1.5px solid currentColor; }
+  .month-dot.done{ background:currentColor; border:1.5px solid currentColor; }
+  .day-detail-list{ margin-top:6px; }
+  .day-detail-item{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 10px; border-radius:8px; margin-bottom:6px; cursor:pointer;
+    border:1px solid;
+  }
+
+  /* Modal de detalle de estudiante */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(43,42,61,0.5);
+    display:flex; align-items:center; justify-content:center;
+    z-index:1000; padding:16px;
+  }
+  .modal-box{
+    background:#fff; border-radius:14px; padding:24px;
+    max-width:420px; width:100%; max-height:85vh; overflow-y:auto;
+    box-shadow:0 20px 50px rgba(43,42,61,0.3);
+    font-family:'Inter', sans-serif;
+  }
+  .modal-close{
+    float:right; background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--text-dim);
+  }
+  .pie-chart{
+    width:140px; height:140px; border-radius:50%; margin:14px auto;
+  }
+  .stat-row{ display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px solid var(--border); font-size:0.9rem; }
+  .stat-row:last-child{ border-bottom:none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>📋 Registro de Clases</h1>
+    <div class="subtitle">Asistencia, observaciones y cotejo por indicadores — funciona sin conexión</div>
+  </div>
+  <div id="group-select-wrap">
+    <select id="groupSelect"></select>
+    <button class="btn btn-accent btn-sm" id="newGroupBtn">+ Grupo</button>
+    <button class="btn btn-outline btn-sm" id="driveSettingsBtn" onclick="openDriveSettings()" title="Google Drive">☁️ Drive</button>
+  </div>
+</header>
+
+<nav class="tabs app-font" id="tabs">
+  <button data-tab="estudiantes" class="active">Estudiantes</button>
+  <button data-tab="indicadores">Indicadores</button>
+  <button data-tab="horario">Horario</button>
+  <button data-tab="registrar">Registrar clase</button>
+  <button data-tab="historial">Historial</button>
+</nav>
+
+<main id="main"></main>
+
+<div class="toast app-font" id="toast"></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script>
+/* ============ ESTADO Y PERSISTENCIA (100% local, sin conexión) ============ */
+const STORAGE_KEY = 'registroClasesApp_v1';
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw) return JSON.parse(raw);
+  }catch(e){ console.error('Error leyendo almacenamiento', e); }
+  return { groups: [], activeGroupId: null, schedule: [] };
+}
+
+let state = loadState();
+
+function saveState(){
+  state.updatedAt = Date.now();
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }catch(e){
+    console.error('Error guardando', e);
+    showToast('No se pudo guardar (almacenamiento lleno o bloqueado por el navegador)');
+  }
+  pushToDrive();
+}
+
+function uid(){ return 'id_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+
+/* ============ SINCRONIZACIÓN CON GOOGLE DRIVE ============ */
+const DRIVE_FILE_NAME = 'registro-clases-data.json';
+let driveFileId = null;
+let driveTokenClient = null;
+
+function loadDriveClientId(){ return localStorage.getItem('gdrive_client_id') || ''; }
+function saveDriveClientId(id){ localStorage.setItem('gdrive_client_id', id); }
+
+function loadStoredDriveToken(){
+  try{
+    const raw = localStorage.getItem('gdrive_token');
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return null;
+}
+function storeDriveToken(tok){ localStorage.setItem('gdrive_token', JSON.stringify(tok)); }
+function clearDriveToken(){ localStorage.removeItem('gdrive_token'); }
+function isDriveTokenValid(tok){ return !!(tok && tok.access_token && tok.expires_at && Date.now() < tok.expires_at - 60000); }
+
+function setDriveStatus(status){
+  const map = {
+    connected: '☁️ Conectado',
+    syncing: '☁️ Sincronizando…',
+    error: '⚠️ Error de sincronización',
+    disconnected: 'No conectado'
+  };
+  const text = map[status] || map.disconnected;
+  const modalEl = document.getElementById('driveStatusText');
+  if(modalEl) modalEl.textContent = text;
+}
+
+function connectDrive(){
+  const clientId = loadDriveClientId();
+  if(!clientId){ showToast('Primero ingresa y guarda tu Client ID de Google'); return; }
+  if(typeof google === 'undefined' || !google.accounts){
+    showToast('No se pudo cargar Google (revisa tu conexión o que el archivo esté alojado en https)');
+    return;
+  }
+  const stored = loadStoredDriveToken();
+  driveTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: 'https://www.googleapis.com/auth/drive.appdata',
+    callback: (resp)=>{
+      if(resp.error){
+        showToast('No se pudo conectar con Google Drive');
+        setDriveStatus('error');
+        return;
+      }
+      const tok = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000) };
+      storeDriveToken(tok);
+      setDriveStatus('connected');
+      showToast('Conectado a Google Drive');
+      syncFromDrive();
+    }
+  });
+  driveTokenClient.requestAccessToken({ prompt: stored ? '' : 'consent' });
+}
+
+function disconnectDrive(){
+  clearDriveToken();
+  driveFileId = null;
+  setDriveStatus('disconnected');
+  showToast('Se desconectó Google Drive (tus datos siguen guardados en este navegador)');
+}
+
+async function driveFetch(url, options={}){
+  const stored = loadStoredDriveToken();
+  if(!isDriveTokenValid(stored)) throw new Error('token-expired');
+  const res = await fetch(url, {
+    ...options,
+    headers: { ...(options.headers||{}), Authorization: `Bearer ${stored.access_token}` }
+  });
+  if(res.status === 401) throw new Error('token-expired');
+  if(!res.ok) throw new Error('drive-error-' + res.status);
+  return res;
+}
+
+async function findDriveFile(){
+  const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27${DRIVE_FILE_NAME}%27&fields=files(id)`);
+  const data = await res.json();
+  return (data.files && data.files.length > 0) ? data.files[0] : null;
+}
+
+async function downloadDriveFile(fileId){
+  const res = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  return JSON.parse(await res.text());
+}
+
+async function uploadDriveFile(fileId, data){
+  const body = JSON.stringify(data);
+  if(fileId){
+    await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body
+    });
+    return fileId;
+  }
+  const metadata = { name: DRIVE_FILE_NAME, parents:['appDataFolder'] };
+  const boundary = 'registroClasesBoundary';
+  const multipartBody =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+  const res = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`, {
+    method:'POST',
+    headers:{'Content-Type': `multipart/related; boundary=${boundary}`},
+    body: multipartBody
+  });
+  const created = await res.json();
+  return created.id;
+}
+
+async function syncFromDrive(){
+  try{
+    setDriveStatus('syncing');
+    const file = await findDriveFile();
+    if(file){
+      driveFileId = file.id;
+      const remote = await downloadDriveFile(file.id);
+      const localUpdated = state.updatedAt || 0;
+      const remoteUpdated = remote.updatedAt || 0;
+      if(remoteUpdated > localUpdated){
+        state = remote;
+        if(!state.schedule) state.schedule = [];
+        ensureDefaultGroup();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        renderAll();
+        showToast('Datos actualizados desde Google Drive');
+      } else if(localUpdated > remoteUpdated){
+        await uploadDriveFile(driveFileId, state);
+      }
+    } else {
+      driveFileId = await uploadDriveFile(null, state);
+    }
+    setDriveStatus('connected');
+  }catch(e){
+    console.error('Error de sincronización con Drive', e);
+    setDriveStatus(String(e.message).includes('token-expired') ? 'disconnected' : 'error');
+  }
+}
+
+async function pushToDrive(){
+  const stored = loadStoredDriveToken();
+  if(!isDriveTokenValid(stored)) return;
+  try{
+    setDriveStatus('syncing');
+    if(!driveFileId){
+      const file = await findDriveFile();
+      if(file) driveFileId = file.id;
+    }
+    driveFileId = await uploadDriveFile(driveFileId, state);
+    setDriveStatus('connected');
+  }catch(e){
+    console.error('Error subiendo a Drive', e);
+    setDriveStatus(String(e.message).includes('token-expired') ? 'disconnected' : 'error');
+  }
+}
+
+/* ============ MODAL: CONFIGURACIÓN DE GOOGLE DRIVE ============ */
+function openDriveSettings(){
+  const clientId = loadDriveClientId();
+  const stored = loadStoredDriveToken();
+  const connected = isDriveTokenValid(stored);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'driveModalOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeDriveSettings()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">☁️ Google Drive</h2>
+      <p class="muted">Respalda y sincroniza tus datos entre dispositivos con tu propia cuenta de Google. Solo funciona si este archivo está alojado en una URL con https (no abierto como archivo local).</p>
+      <label>Client ID de Google (OAuth)</label>
+      <input type="text" id="driveClientIdInput" placeholder="xxxxx.apps.googleusercontent.com" value="${escapeHtml(clientId)}">
+      <div class="row" style="margin-top:8px;">
+        <button class="btn btn-outline btn-sm" onclick="saveDriveClientIdFromInput()">Guardar Client ID</button>
+      </div>
+      <hr class="divider">
+      <div class="stat-row"><span>Estado</span><strong id="driveStatusText">${connected ? '☁️ Conectado' : 'No conectado'}</strong></div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn btn-accent btn-sm" onclick="connectDrive()">Conectar</button>
+        <button class="btn btn-danger btn-sm" onclick="disconnectDrive()">Desconectar</button>
+      </div>
+      <hr class="divider">
+      <p class="muted" style="font-size:0.76rem;">Para obtener tu Client ID: crea un proyecto gratuito en Google Cloud Console → habilita la "Google Drive API" → crea credenciales OAuth 2.0 de tipo "Aplicación web" → agrega la URL donde alojarás este archivo en "Orígenes de JavaScript autorizados" → copia el Client ID aquí.</p>
+    </div>
+  `;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) closeDriveSettings(); });
+  document.body.appendChild(overlay);
+}
+function closeDriveSettings(){
+  const overlay = document.getElementById('driveModalOverlay');
+  if(overlay) overlay.remove();
+}
+function saveDriveClientIdFromInput(){
+  const val = document.getElementById('driveClientIdInput').value.trim();
+  saveDriveClientId(val);
+  showToast('Client ID guardado');
+}
+
+function getActiveGroup(){
+  return state.groups.find(g => g.id === state.activeGroupId) || null;
+}
+
+function isEntryPresent(entry){
+  if(!entry || !entry.cotejo) return false;
+  return Object.values(entry.cotejo).some(v => v !== null && v !== undefined);
+}
+
+function computeStudentStats(group, studentId){
+  let presentCount = 0, absentCount = 0, obtained = 0, maxPossible = 0;
+  group.sessions.forEach(session=>{
+    const entry = session.entries.find(e=> e.studentId === studentId);
+    if(!entry) return;
+    const inds = session.indicatorSnapshot || group.indicators;
+    if(isEntryPresent(entry)){
+      presentCount++;
+      inds.forEach(ind=>{
+        const v = entry.cotejo[ind.id];
+        if(v !== null && v !== undefined){
+          obtained += v;
+          maxPossible += (ind.levels || 5);
+        }
+      });
+    } else {
+      absentCount++;
+    }
+  });
+  const total = presentCount + absentCount;
+  const percent = maxPossible > 0 ? Math.round((obtained / maxPossible) * 100) : null;
+  return { presentCount, absentCount, total, obtained, maxPossible, percent };
+}
+
+function ensureDefaultGroup(){
+  if(state.groups.length === 0){
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [] };
+    state.groups.push(g);
+    state.activeGroupId = g.id;
+    saveState();
+  } else if(!getActiveGroup()){
+    state.activeGroupId = state.groups[0].id;
+    saveState();
+  }
+}
+
+/* ============ TOAST ============ */
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), 2200);
+}
+
+/* ============ NAV: SELECTOR DE GRUPO ============ */
+function renderGroupSelect(){
+  const sel = document.getElementById('groupSelect');
+  sel.innerHTML = '';
+  state.groups.forEach(g=>{
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = g.name;
+    if(g.id === state.activeGroupId) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+document.getElementById('groupSelect').addEventListener('change', e=>{
+  state.activeGroupId = e.target.value;
+  saveState();
+  renderAll();
+});
+document.getElementById('newGroupBtn').addEventListener('click', ()=>{
+  const name = prompt('Nombre del nuevo grupo/curso:');
+  if(!name) return;
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [] };
+  state.groups.push(g);
+  state.activeGroupId = g.id;
+  saveState();
+  renderAll();
+  showToast('Grupo creado: ' + g.name);
+});
+
+/* ============ TABS ============ */
+let currentTab = 'estudiantes';
+document.getElementById('tabs').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-tab]');
+  if(!btn) return;
+  currentTab = btn.dataset.tab;
+  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b===btn));
+  renderMain();
+});
+
+/* ============ RENDER PRINCIPAL ============ */
+function renderAll(){
+  renderGroupSelect();
+  renderMain();
+}
+
+function renderMain(){
+  const main = document.getElementById('main');
+  const group = getActiveGroup();
+  if(!group){ main.innerHTML = '<div class="empty-state">Crea un grupo para comenzar.</div>'; return; }
+
+  if(currentTab === 'estudiantes') return renderEstudiantes(group);
+  if(currentTab === 'indicadores') return renderIndicadores(group);
+  if(currentTab === 'horario') return renderHorario();
+  if(currentTab === 'registrar') return renderRegistrar(group);
+  if(currentTab === 'historial') return renderHistorial(group);
+}
+
+/* ============ TAB: EDITAR NOMBRE / ELIMINAR GRUPO ============ */
+function groupHeaderCard(group){
+  return `
+  <div class="card app-font">
+    <div class="flex-between">
+      <div>
+        <div class="muted">Grupo actual</div>
+        <div style="font-size:1.2rem; font-weight:700; color:var(--text);">${escapeHtml(group.name)}</div>
+      </div>
+      <div class="row">
+        <button class="btn btn-outline btn-sm" onclick="renameGroup()">Renombrar</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteGroup()">Eliminar grupo</button>
+      </div>
+    </div>
+  </div>`;
+}
+function renameGroup(){
+  const group = getActiveGroup();
+  const name = prompt('Nuevo nombre del grupo:', group.name);
+  if(!name) return;
+  group.name = name.trim();
+  saveState();
+  renderAll();
+}
+function deleteGroup(){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar el grupo "'+group.name+'" y todos sus datos? Esta acción no se puede deshacer.')) return;
+  state.groups = state.groups.filter(g=>g.id!==group.id);
+  state.activeGroupId = state.groups.length ? state.groups[0].id : null;
+  ensureDefaultGroup();
+  saveState();
+  renderAll();
+}
+
+/* ============ TAB: ESTUDIANTES ============ */
+function renderEstudiantes(group){
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Agregar estudiante</h2>
+      <div class="row">
+        <div style="flex:1; min-width:200px;">
+          <label>Nombre completo</label>
+          <input type="text" id="newStudentName" placeholder="Ej. Ana Martínez López">
+        </div>
+        <div style="align-self:flex-end;">
+          <button class="btn btn-accent" id="addStudentBtn">+ Agregar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Importar lista (CSV / texto)</h2>
+      <p class="muted">Pega una lista con un nombre por línea, o abre un archivo .csv exportado desde Excel (una columna con los nombres, o el nombre en la primera columna).</p>
+      <textarea id="importText" placeholder="Ana Martínez López&#10;Carlos Pérez&#10;..."></textarea>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('csvFileInput').click()">📁 Abrir archivo CSV</button>
+        <input type="file" id="csvFileInput" accept=".csv,.txt" style="display:none;">
+        <button class="btn btn-ink btn-sm" id="importBtn">Importar lista de texto</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Estudiantes (${group.students.length})</h2>
+      </div>
+      ${group.students.length === 0 ? '<div class="empty-state">Aún no hay estudiantes en este grupo.</div>' :
+        group.students.map(s=>`
+          <div class="student-list-item">
+            <button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')">Eliminar</button>
+          </div>
+        `).join('')
+      }
+    </div>
+  `;
+
+  document.getElementById('addStudentBtn').addEventListener('click', ()=>{
+    const input = document.getElementById('newStudentName');
+    const name = input.value.trim();
+    if(!name) return;
+    group.students.push({id: uid(), name});
+    saveState();
+    renderEstudiantes(group);
+    showToast('Estudiante agregado');
+  });
+  document.getElementById('newStudentName').addEventListener('keydown', e=>{
+    if(e.key === 'Enter') document.getElementById('addStudentBtn').click();
+  });
+  document.getElementById('importBtn').addEventListener('click', ()=>{
+    const text = document.getElementById('importText').value;
+    importStudentsFromText(group, text);
+  });
+  document.getElementById('csvFileInput').addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => importStudentsFromText(group, ev.target.result);
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+function importStudentsFromText(group, text){
+  if(!text || !text.trim()){ showToast('No hay texto para importar'); return; }
+  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  let count = 0;
+  lines.forEach(line=>{
+    const firstField = line.split(',')[0].trim();
+    const name = firstField.replace(/^"|"$/g,'').trim();
+    if(!name) return;
+    const exists = group.students.some(s=> s.name.toLowerCase() === name.toLowerCase());
+    if(!exists){
+      group.students.push({id: uid(), name});
+      count++;
+    }
+  });
+  saveState();
+  renderEstudiantes(group);
+  showToast(count + ' estudiante(s) importado(s)');
+}
+
+function deleteStudent(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar a este estudiante del grupo?')) return;
+  group.students = group.students.filter(s=>s.id!==id);
+  saveState();
+  renderEstudiantes(group);
+}
+
+/* ============ MODAL: RESUMEN DE ESTUDIANTE ============ */
+function openStudentDetail(studentId){
+  const group = getActiveGroup();
+  const student = group.students.find(s=>s.id===studentId);
+  if(!student) return;
+  const stats = computeStudentStats(group, studentId);
+  const percent = stats.percent;
+  const pieBg = percent === null
+    ? 'conic-gradient(var(--border-strong) 0deg 360deg)'
+    : `conic-gradient(var(--primary) 0deg ${percent*3.6}deg, var(--border) ${percent*3.6}deg 360deg)`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'studentModalOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeStudentDetail()">✕</button>
+      <h2 style="border:none; padding-bottom:0; margin-bottom:2px;">${escapeHtml(student.name)}</h2>
+      <div class="muted" style="margin-bottom:6px;">${escapeHtml(group.name)}</div>
+      <div class="pie-chart" style="background:${pieBg};"></div>
+      <div style="text-align:center; font-size:1.4rem; font-weight:800; color:var(--primary); font-family:'Poppins',sans-serif;">
+        ${percent === null ? 'Sin datos aún' : percent + '% de logro'}
+      </div>
+      <hr class="divider">
+      <div class="stat-row"><span>Clases registradas</span><strong>${stats.total}</strong></div>
+      <div class="stat-row"><span>Presente</span><strong style="color:var(--success);">${stats.presentCount}</strong></div>
+      <div class="stat-row"><span>Ausente</span><strong style="color:var(--danger);">${stats.absentCount}</strong></div>
+      <div class="stat-row"><span>Puntaje obtenido</span><strong>${stats.obtained} / ${stats.maxPossible}</strong></div>
+    </div>
+  `;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) closeStudentDetail(); });
+  document.body.appendChild(overlay);
+}
+function closeStudentDetail(){
+  const overlay = document.getElementById('studentModalOverlay');
+  if(overlay) overlay.remove();
+}
+
+/* ============ TAB: INDICADORES ============ */
+function renderIndicadores(group){
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Agregar indicador de evaluación</h2>
+      <p class="muted">Define cuántos niveles de logro tendrá cada indicador (por ejemplo, 3, 4 o 5 niveles).</p>
+      <div class="row">
+        <div style="flex:1; min-width:200px;">
+          <label>Nombre del indicador</label>
+          <input type="text" id="newIndicatorName" placeholder="Ej. Participación en clase">
+        </div>
+        <div style="width:140px;">
+          <label>Niveles de logro</label>
+          <input type="number" id="newIndicatorLevels" min="2" max="10" value="5">
+        </div>
+        <div style="align-self:flex-end;">
+          <button class="btn btn-accent" id="addIndicatorBtn">+ Agregar</button>
+        </div>
+      </div>
+    </div>
+    <div class="card app-font">
+      <h2>Indicadores actuales (${group.indicators.length})</h2>
+      ${group.indicators.length === 0 ? '<div class="empty-state">Aún no hay indicadores definidos.</div>' :
+        `<div>${group.indicators.map(ind=>`
+          <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.levels || 5} niveles
+            <button onclick="editIndicator('${ind.id}')" style="color:var(--primary);">✎</button>
+            <button onclick="deleteIndicator('${ind.id}')">✕</button>
+          </span>
+        `).join('')}</div>`
+      }
+    </div>
+  `;
+  document.getElementById('addIndicatorBtn').addEventListener('click', ()=>{
+    const input = document.getElementById('newIndicatorName');
+    const levelsInput = document.getElementById('newIndicatorLevels');
+    const name = input.value.trim();
+    if(!name) return;
+    let levels = parseInt(levelsInput.value, 10);
+    if(!levels || levels < 2) levels = 2;
+    if(levels > 10) levels = 10;
+    group.indicators.push({id: uid(), name, levels});
+    saveState();
+    renderIndicadores(group);
+    showToast('Indicador agregado');
+  });
+  document.getElementById('newIndicatorName').addEventListener('keydown', e=>{
+    if(e.key === 'Enter') document.getElementById('addIndicatorBtn').click();
+  });
+}
+function editIndicator(id){
+  const group = getActiveGroup();
+  const ind = group.indicators.find(i=>i.id===id);
+  if(!ind) return;
+  const newName = prompt('Nombre del indicador:', ind.name);
+  if(newName === null) return;
+  if(newName.trim()) ind.name = newName.trim();
+  const newLevelsRaw = prompt('¿Cuántos niveles de logro tendrá este indicador? (2 a 10)', ind.levels || 5);
+  if(newLevelsRaw !== null){
+    let levels = parseInt(newLevelsRaw, 10);
+    if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
+  }
+  saveState();
+  renderIndicadores(group);
+  showToast('Indicador actualizado');
+}
+function deleteIndicator(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar este indicador? Se quitará de todas las clases registradas.')) return;
+  group.indicators = group.indicators.filter(i=>i.id!==id);
+  group.sessions.forEach(s=> s.entries.forEach(e=>{ delete e.cotejo[id]; }));
+  saveState();
+  renderIndicadores(group);
+}
+
+/* ============ TAB: HORARIO ============ */
+const DAY_NAMES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const MONTH_NAMES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+let calendarMonthCursor = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let selectedCalendarDate = toISODate(new Date());
+
+function toISODate(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function jsWeekdayToOurDay(jsDay){ return jsDay === 0 ? 7 : jsDay; }
+function buildMonthCells(cursor){
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const firstWeekday = jsWeekdayToOurDay(firstOfMonth.getDay());
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const cells = [];
+  for(let i=1; i<firstWeekday; i++){
+    cells.push({ date: new Date(year, month, 1 - (firstWeekday - i)), otherMonth: true });
+  }
+  for(let day=1; day<=daysInMonth; day++){
+    cells.push({ date: new Date(year, month, day), otherMonth: false });
+  }
+  while(cells.length % 7 !== 0){
+    const last = cells[cells.length-1].date;
+    const next = new Date(last);
+    next.setDate(next.getDate()+1);
+    cells.push({ date: next, otherMonth: true });
+  }
+  return cells;
+}
+function changeCalendarMonth(delta){
+  calendarMonthCursor = new Date(calendarMonthCursor.getFullYear(), calendarMonthCursor.getMonth()+delta, 1);
+  renderHorario();
+}
+function selectCalendarDate(iso){
+  selectedCalendarDate = iso;
+  renderHorario();
+}
+function goToDateClass(entryId, iso){
+  const entry = state.schedule.find(e=>e.id===entryId);
+  if(!entry) return;
+  const group = state.groups.find(g=>g.id===entry.groupId);
+  if(!group){ showToast('El grupo de esta clase ya no existe'); return; }
+  state.activeGroupId = group.id;
+  saveState();
+  renderGroupSelect();
+  currentTab = 'registrar';
+  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='registrar'));
+  const existingSession = group.sessions.find(s=> s.date === iso);
+  if(existingSession){
+    renderRegistrar(group, existingSession);
+  } else {
+    renderRegistrar(group, null, { date: iso, time: entry.startTime });
+  }
+}
+
+const GROUP_PALETTE = [
+  {bg:'#F1ECFC', text:'#6C4EE3', border:'#D4C4F5'},
+  {bg:'#E6F8EF', text:'#1F9D64', border:'#B9EBD1'},
+  {bg:'#FDF3DE', text:'#C6871A', border:'#F5DFA8'},
+  {bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE'},
+  {bg:'#E7F1FC', text:'#2C72C7', border:'#BEDBF7'},
+  {bg:'#FCEAF3', text:'#C93E85', border:'#F5C1DC'},
+];
+function groupColor(groupId){
+  const idx = state.groups.findIndex(g=>g.id===groupId);
+  return GROUP_PALETTE[idx >= 0 ? idx % GROUP_PALETTE.length : 0];
+}
+
+function renderHorario(){
+  const main = document.getElementById('main');
+  if(state.groups.length === 0){
+    main.innerHTML = '<div class="empty-state">Crea al menos un grupo para poder armar tu horario.</div>';
+    return;
+  }
+  const schedule = [...state.schedule].sort((a,b)=> a.day - b.day || a.startTime.localeCompare(b.startTime));
+  const todayISO = toISODate(new Date());
+
+  main.innerHTML = `
+    <div class="card app-font">
+      <h2>Agregar clase al horario</h2>
+      <div class="grid-2">
+        <div>
+          <label>Grupo</label>
+          <select id="schGroup">
+            ${state.groups.map(g=>`<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Día</label>
+          <select id="schDay">
+            ${DAY_NAMES.map((d,i)=>`<option value="${i+1}">${d}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Hora de inicio</label>
+          <input type="time" id="schStart" value="08:00">
+        </div>
+        <div>
+          <label>Hora de término (opcional)</label>
+          <input type="time" id="schEnd">
+        </div>
+      </div>
+      <label style="margin-top:10px;">Nota (aula, tema, opcional)</label>
+      <input type="text" id="schNote" placeholder="Ej. Aula 3">
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addScheduleBtn">+ Agregar al horario</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Calendario semanal</h2>
+        <span class="muted">Toca una clase para ir directo a registrarla</span>
+      </div>
+      <div class="calendar-grid" id="calendarGrid">
+        ${DAY_NAMES.map((dayName, i)=>{
+          const day = i+1;
+          const entries = schedule.filter(e=>e.day===day);
+          return `
+            <div class="calendar-day">
+              <div class="calendar-day-header">${dayName}</div>
+              ${entries.length === 0 ? '<div class="calendar-empty">—</div>' :
+                entries.map(e=>{
+                  const g = state.groups.find(g=>g.id===e.groupId);
+                  const color = groupColor(e.groupId);
+                  return `
+                    <div class="calendar-block" style="background:${color.bg}; color:${color.text}; border-color:${color.border};" onclick="goToClass('${e.id}')">
+                      <div class="calendar-block-time">${e.startTime}${e.endTime ? ' – ' + e.endTime : ''}</div>
+                      <div class="calendar-block-group">${escapeHtml(g ? g.name : '(grupo eliminado)')}</div>
+                      ${e.note ? `<div class="calendar-block-note">${escapeHtml(e.note)}</div>` : ''}
+                    </div>
+                  `;
+                }).join('')
+              }
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <div class="month-nav">
+        <button class="btn btn-outline btn-sm" onclick="changeCalendarMonth(-1)">‹ Anterior</button>
+        <h3>${MONTH_NAMES[calendarMonthCursor.getMonth()]} ${calendarMonthCursor.getFullYear()}</h3>
+        <button class="btn btn-outline btn-sm" onclick="changeCalendarMonth(1)">Siguiente ›</button>
+      </div>
+      <div class="month-grid">
+        ${['L','M','X','J','V','S','D'].map(d=>`<div class="month-grid-header">${d}</div>`).join('')}
+        ${buildMonthCells(calendarMonthCursor).map(cell=>{
+          const iso = toISODate(cell.date);
+          const schedForDay = schedule.filter(e=> e.day === jsWeekdayToOurDay(cell.date.getDay()));
+          const dots = schedForDay.map(e=>{
+            const g = state.groups.find(g=>g.id===e.groupId);
+            const registered = g ? g.sessions.some(s=> s.date === iso) : false;
+            return { color: groupColor(e.groupId).text, registered };
+          });
+          return `
+            <div class="month-cell ${cell.otherMonth ? 'other-month' : ''} ${iso === todayISO ? 'is-today' : ''} ${iso === selectedCalendarDate ? 'is-selected' : ''}" onclick="selectCalendarDate('${iso}')">
+              <div class="month-cell-num">${cell.date.getDate()}</div>
+              <div class="month-cell-dots">
+                ${dots.map(d=>`<span class="month-dot ${d.registered ? 'done' : 'pending'}" style="color:${d.color};"></span>`).join('')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <hr class="divider">
+      <div class="flex-between">
+        <strong style="font-family:'Poppins',sans-serif;">${formatDate(selectedCalendarDate)}</strong>
+      </div>
+      <div class="day-detail-list">
+        ${(() => {
+          const [sy,sm,sd] = selectedCalendarDate.split('-').map(Number);
+          const selDate = new Date(sy, sm-1, sd);
+          const dayEntries = schedule.filter(e=> e.day === jsWeekdayToOurDay(selDate.getDay()));
+          if(dayEntries.length === 0) return '<div class="empty-state">No hay clases programadas este día.</div>';
+          return dayEntries.map(e=>{
+            const g = state.groups.find(g=>g.id===e.groupId);
+            const color = groupColor(e.groupId);
+            const registered = g ? g.sessions.some(s=> s.date === selectedCalendarDate) : false;
+            return `
+              <div class="day-detail-item" style="background:${color.bg}; border-color:${color.border};" onclick="goToDateClass('${e.id}','${selectedCalendarDate}')">
+                <div>
+                  <strong style="color:${color.text};">${escapeHtml(g ? g.name : '(grupo eliminado)')}</strong>
+                  <div class="muted">${e.startTime}${e.endTime ? ' – ' + e.endTime : ''}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
+                </div>
+                <span class="pill ${registered ? 'pill-success' : ''}">${registered ? 'Registrado' : 'Pendiente'}</span>
+              </div>
+            `;
+          }).join('');
+        })()}
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Clases en el horario (${schedule.length})</h2>
+      ${schedule.length === 0 ? '<div class="empty-state">Aún no has agregado clases a tu horario.</div>' :
+        `<table>
+          <thead><tr><th>Día</th><th>Hora</th><th>Grupo</th><th>Nota</th><th></th></tr></thead>
+          <tbody>
+            ${schedule.map(e=>{
+              const g = state.groups.find(g=>g.id===e.groupId);
+              return `
+                <tr>
+                  <td>${DAY_NAMES[e.day-1]}</td>
+                  <td>${e.startTime}${e.endTime ? ' – ' + e.endTime : ''}</td>
+                  <td>${escapeHtml(g ? g.name : '(grupo eliminado)')}</td>
+                  <td>${escapeHtml(e.note || '')}</td>
+                  <td class="row" style="gap:6px;">
+                    <button class="btn btn-outline btn-sm" onclick="editScheduleEntry('${e.id}')">Editar</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteScheduleEntry('${e.id}')">Eliminar</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>`
+      }
+    </div>
+  `;
+
+  document.getElementById('addScheduleBtn').addEventListener('click', ()=>{
+    const groupId = document.getElementById('schGroup').value;
+    const day = Number(document.getElementById('schDay').value);
+    const startTime = document.getElementById('schStart').value;
+    const endTime = document.getElementById('schEnd').value;
+    const note = document.getElementById('schNote').value.trim();
+    if(!groupId || !day || !startTime){ showToast('Completa grupo, día y hora de inicio'); return; }
+    state.schedule.push({ id: uid(), groupId, day, startTime, endTime, note });
+    saveState();
+    renderHorario();
+    showToast('Clase agregada al horario');
+  });
+}
+
+function editScheduleEntry(id){
+  const entry = state.schedule.find(e=>e.id===id);
+  if(!entry) return;
+  const dayRaw = prompt('Día de la semana (1=Lunes ... 7=Domingo):', entry.day);
+  if(dayRaw === null) return;
+  const day = parseInt(dayRaw, 10);
+  if(day >= 1 && day <= 7) entry.day = day;
+  const start = prompt('Hora de inicio (HH:MM):', entry.startTime);
+  if(start !== null && /^\d{2}:\d{2}$/.test(start.trim())) entry.startTime = start.trim();
+  const end = prompt('Hora de término (HH:MM, opcional):', entry.endTime || '');
+  if(end !== null) entry.endTime = end.trim();
+  const note = prompt('Nota (opcional):', entry.note || '');
+  if(note !== null) entry.note = note.trim();
+  saveState();
+  renderHorario();
+  showToast('Clase del horario actualizada');
+}
+
+function deleteScheduleEntry(id){
+  if(!confirm('¿Eliminar esta clase del horario?')) return;
+  state.schedule = state.schedule.filter(e=>e.id!==id);
+  saveState();
+  renderHorario();
+}
+
+function computeDateForWeekday(day){
+  // day: 1=Lunes ... 7=Domingo. Devuelve la fecha (YYYY-MM-DD) de ese día en la semana actual.
+  const today = new Date();
+  const jsDay = today.getDay(); // 0=Domingo ... 6=Sábado
+  const todayIso = jsDay === 0 ? 7 : jsDay; // convertir a 1=Lunes ... 7=Domingo
+  const diff = day - todayIso;
+  const target = new Date(today);
+  target.setDate(today.getDate() + diff);
+  return target.toISOString().slice(0,10);
+}
+
+function goToClass(entryId){
+  const entry = state.schedule.find(e=>e.id===entryId);
+  if(!entry) return;
+  const group = state.groups.find(g=>g.id===entry.groupId);
+  if(!group){ showToast('El grupo de esta clase ya no existe'); return; }
+  state.activeGroupId = group.id;
+  saveState();
+  renderGroupSelect();
+  currentTab = 'registrar';
+  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='registrar'));
+  renderRegistrar(group, null, { date: computeDateForWeekday(entry.day), time: entry.startTime });
+}
+
+/* ============ TAB: REGISTRAR CLASE ============ */
+function renderRegistrar(group, sessionToEdit, prefill){
+  const main = document.getElementById('main');
+  const today = new Date().toISOString().slice(0,10);
+  const nowTime = new Date().toTimeString().slice(0,5);
+  const isEdit = !!sessionToEdit;
+
+  if(group.students.length === 0){
+    main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega estudiantes en la pestaña "Estudiantes" antes de registrar una clase.</div></div>';
+    return;
+  }
+  if(group.indicators.length === 0){
+    main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega al menos un indicador en la pestaña "Indicadores" antes de registrar una clase.</div></div>';
+    return;
+  }
+
+  // Mapa rápido de valores previos si estamos editando
+  const prevByStudent = {};
+  if(isEdit){
+    sessionToEdit.entries.forEach(e=> prevByStudent[e.studentId] = e);
+  }
+
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    ${isEdit ? '<div class="card app-font" style="border-left:4px solid var(--primary);"><strong>Editando clase existente</strong> <span class="muted">— los cambios reemplazarán el registro original.</span></div>' : ''}
+    <div class="card app-font">
+      <h2>Datos de la clase</h2>
+      <div class="grid-2">
+        <div>
+          <label>Fecha</label>
+          <input type="date" id="sessionDate" value="${isEdit ? sessionToEdit.date : (prefill && prefill.date ? prefill.date : today)}">
+        </div>
+        <div>
+          <label>Horario</label>
+          <input type="time" id="sessionTime" value="${isEdit ? sessionToEdit.time : (prefill && prefill.time ? prefill.time : nowTime)}">
+        </div>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Cotejo y observaciones por estudiante</h2>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Estudiante</th>
+            ${group.indicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(1-${ind.levels || 5})</span></th>`).join('')}
+            <th style="min-width:180px;">Observaciones</th>
+          </tr>
+        </thead>
+        <tbody id="registrarBody">
+          ${group.students.map(s=>{
+            const prevEntry = prevByStudent[s.id];
+            return `
+            <tr>
+              <td>${escapeHtml(s.name)}</td>
+              ${group.indicators.map(ind=>{
+                const levels = ind.levels || 5;
+                const prevVal = prevEntry ? prevEntry.cotejo[ind.id] : null;
+                let options = '<option value="">-</option>';
+                for(let n=1; n<=levels; n++){
+                  options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
+                }
+                return `
+                <td>
+                  <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}">
+                    ${options}
+                  </select>
+                </td>
+                `;
+              }).join('')}
+              <td>
+                <textarea data-student="${s.id}" data-obs="1" placeholder="Observaciones...">${prevEntry ? escapeHtml(prevEntry.observaciones || '') : ''}</textarea>
+              </td>
+            </tr>
+          `;}).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="btn btn-accent" id="saveSessionBtn">💾 ${isEdit ? 'Actualizar registro' : 'Guardar registro de esta clase'}</button>
+      ${isEdit ? '<button class="btn btn-outline" id="cancelEditBtn">Cancelar</button>' : ''}
+    </div>
+  `;
+
+  if(isEdit){
+    document.getElementById('cancelEditBtn').addEventListener('click', ()=>{
+      currentTab = 'historial';
+      document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='historial'));
+      renderHistorial(group);
+    });
+  }
+
+  document.getElementById('saveSessionBtn').addEventListener('click', ()=>{
+    const date = document.getElementById('sessionDate').value;
+    const time = document.getElementById('sessionTime').value;
+    if(!date || !time){ showToast('Indica fecha y horario'); return; }
+
+    const currentStudentIds = new Set(group.students.map(s=>s.id));
+    const newEntries = group.students.map(s=>{
+      const cotejo = {};
+      group.indicators.forEach(ind=>{
+        const sel = document.querySelector(`select[data-student="${s.id}"][data-indicator="${ind.id}"]`);
+        cotejo[ind.id] = sel && sel.value ? Number(sel.value) : null;
+      });
+      const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
+      return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
+    });
+    // Conservar datos de estudiantes que ya no están en el grupo pero tenían registro previo
+    const preservedEntries = isEdit ? sessionToEdit.entries.filter(e=> !currentStudentIds.has(e.studentId)) : [];
+    const entries = [...newEntries, ...preservedEntries];
+    const indicatorSnapshot = group.indicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
+
+    if(isEdit){
+      const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
+      if(idx !== -1){
+        group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot };
+      }
+      showToast('Registro actualizado correctamente');
+    } else {
+      group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot });
+      showToast('Clase registrada correctamente');
+    }
+    saveState();
+    renderHistorial(group);
+    currentTab = 'historial';
+    document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='historial'));
+  });
+}
+
+function editSession(sessionId){
+  const group = getActiveGroup();
+  const session = group.sessions.find(s=>s.id===sessionId);
+  if(!session) return;
+  currentTab = 'registrar';
+  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='registrar'));
+  renderRegistrar(group, session);
+}
+
+/* ============ TAB: HISTORIAL ============ */
+function renderHistorial(group){
+  const main = document.getElementById('main');
+  const sessions = [...group.sessions].sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Historial de clases (${sessions.length})</h2>
+        <button class="btn btn-ink btn-sm" id="exportBtn" title="Con internet: .xlsx con colores. Sin internet: .csv simple">⬇️ Exportar a Excel</button>
+      </div>
+    </div>
+    ${sessions.length === 0 ? '<div class="card app-font"><div class="empty-state">Aún no se han registrado clases para este grupo.</div></div>' : ''}
+    ${sessions.map(session=>{
+      const inds = session.indicatorSnapshot || group.indicators;
+      return `
+      <div class="card app-font">
+        <div class="flex-between">
+          <div>
+            <span class="pill">${formatDate(session.date)}</span>
+            <span class="muted"> · ${session.time} hrs</span>
+          </div>
+          <div class="row">
+            <button class="btn btn-outline btn-sm" onclick="editSession('${session.id}')">Editar</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSession('${session.id}')">Eliminar</button>
+          </div>
+        </div>
+        <hr class="divider">
+        <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Estudiante</th>
+              ${inds.map(i=>`<th>${escapeHtml(i.name)}</th>`).join('')}
+              <th>Promedio</th>
+              <th>Observaciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${session.entries.map(e=>{
+              const student = group.students.find(s=>s.id===e.studentId);
+              const present = isEntryPresent(e);
+              const scores = inds.map(i=> e.cotejo[i.id]).filter(v=> v!==null && v!==undefined);
+              const avg = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) : '-';
+              const nameCell = student
+                ? `<button class="student-name-link" onclick="openStudentDetail('${student.id}')">${escapeHtml(student.name)}</button>`
+                : escapeHtml('(eliminado)');
+              return `
+                <tr>
+                  <td>${nameCell}</td>
+                  ${present
+                    ? inds.map(i=>`<td>${e.cotejo[i.id] ?? '-'}</td>`).join('') + `<td class="avg-badge">${avg}</td>`
+                    : `<td colspan="${inds.length + 1}"><span class="pill pill-danger">Ausente</span></td>`
+                  }
+                  <td>${escapeHtml(e.observaciones || '')}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+        </div>
+      </div>
+    `;}).join('')}
+  `;
+
+  document.getElementById('exportBtn').addEventListener('click', ()=> exportGroupToExcel(group));
+}
+
+function deleteSession(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar este registro de clase?')) return;
+  group.sessions = group.sessions.filter(s=>s.id!==id);
+  saveState();
+  renderHistorial(group);
+}
+
+/* ============ EXPORTAR A EXCEL (.xlsx con formato, con respaldo CSV sin conexión) ============ */
+function csvEscape(val){
+  const s = String(val ?? '');
+  if(/[",\n;]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+
+function exportGroupToCSVFallback(group){
+  const sessions = [...group.sessions].sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
+  if(sessions.length === 0){ showToast('No hay registros para exportar'); return; }
+
+  const header = ['Estudiante'];
+  sessions.forEach(session=>{
+    const inds = session.indicatorSnapshot || group.indicators;
+    inds.forEach(ind=> header.push(`${formatDate(session.date)} ${session.time} - ${ind.name}`));
+  });
+  header.push('Presentes','Ausentes','Obtenido','Posible','% Logro');
+  const rows = [header];
+
+  group.students.forEach(student=>{
+    const row = [student.name];
+    sessions.forEach(session=>{
+      const inds = session.indicatorSnapshot || group.indicators;
+      const entry = session.entries.find(e=> e.studentId === student.id);
+      if(!entry){
+        inds.forEach(()=> row.push(''));
+      } else if(!isEntryPresent(entry)){
+        row.push('AUSENTE');
+        for(let i=1;i<inds.length;i++) row.push('');
+      } else {
+        inds.forEach(ind=> row.push(entry.cotejo[ind.id] ?? ''));
+      }
+    });
+    const stats = computeStudentStats(group, student.id);
+    row.push(stats.presentCount, stats.absentCount, stats.obtained, stats.maxPossible, stats.percent === null ? '' : stats.percent + '%');
+    rows.push(row);
+  });
+
+  const csvContent = rows.map(r=> r.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeGroupName = group.name.replace(/[^a-zA-Z0-9_\-]+/g,'_');
+  a.href = url;
+  a.download = `registro_${safeGroupName}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Sin conexión: se exportó un .csv simple (sin colores). Ábrelo con Excel.');
+}
+
+async function exportGroupToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    exportGroupToCSVFallback(group);
+    return;
+  }
+  const sessions = [...group.sessions].sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
+  if(sessions.length === 0){ showToast('No hay registros para exportar'); return; }
+
+  showToast('Generando Excel…');
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Registro');
+
+  const blockColors = ['F1ECFC','E6F8EF','FDF3DE','E7F1FC','FCEAF3'];
+  let col = 2; // columna B
+  const blocks = sessions.map((session, idx)=>{
+    const inds = session.indicatorSnapshot || group.indicators;
+    const startCol = col;
+    const endCol = col + inds.length - 1;
+    col = endCol + 1;
+    return { session, inds, startCol, endCol, color: blockColors[idx % blockColors.length] };
+  });
+  const summaryStart = col;
+  const summaryLabels = ['Presentes','Ausentes','Obtenido','Posible','% Logro'];
+  const summaryEnd = summaryStart + summaryLabels.length - 1;
+
+  // Encabezado columna Estudiante (filas 1-2 combinadas)
+  ws.mergeCells(1,1,2,1);
+  const studentHeader = ws.getCell(1,1);
+  studentHeader.value = 'Estudiante';
+  studentHeader.font = { bold:true, color:{argb:'FF2B2A3D'} };
+  studentHeader.alignment = { vertical:'middle', horizontal:'center' };
+  studentHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE9E6F5'} };
+
+  // Encabezados por bloque de clase
+  blocks.forEach(block=>{
+    ws.mergeCells(1, block.startCol, 1, block.endCol);
+    const headerCell = ws.getCell(1, block.startCol);
+    headerCell.value = `${formatDate(block.session.date)} · ${block.session.time}`;
+    headerCell.font = { bold:true, color:{argb:'FF2B2A3D'} };
+    headerCell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+    for(let c=block.startCol; c<=block.endCol; c++){
+      ws.getCell(1,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+block.color} };
+      ws.getCell(2,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+block.color} };
+    }
+    block.inds.forEach((ind, i)=>{
+      const cell = ws.getCell(2, block.startCol + i);
+      cell.value = ind.name;
+      cell.font = { bold:true, size:10, color:{argb:'FF2B2A3D'} };
+      cell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+    });
+  });
+
+  // Encabezado del resumen
+  ws.mergeCells(1, summaryStart, 1, summaryEnd);
+  const summaryHeader = ws.getCell(1, summaryStart);
+  summaryHeader.value = 'Resumen';
+  summaryHeader.font = { bold:true, color:{argb:'FFFFFFFF'} };
+  summaryHeader.alignment = { vertical:'middle', horizontal:'center' };
+  summaryLabels.forEach((label, i)=>{
+    const cell = ws.getCell(2, summaryStart + i);
+    cell.value = label;
+    cell.font = { bold:true, size:10, color:{argb:'FFFFFFFF'} };
+    cell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+  });
+  for(let c=summaryStart; c<=summaryEnd; c++){
+    ws.getCell(1,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF2B2A3D'} };
+    ws.getCell(2,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF554C77'} };
+  }
+
+  // Filas de datos: una por estudiante
+  group.students.forEach((student, si)=>{
+    const rowNum = 3 + si;
+    const nameCell = ws.getCell(rowNum, 1);
+    nameCell.value = student.name;
+    nameCell.font = { bold:true };
+    nameCell.alignment = { vertical:'middle' };
+
+    blocks.forEach(block=>{
+      const entry = block.session.entries.find(e=> e.studentId === student.id);
+      if(!entry){
+        ws.mergeCells(rowNum, block.startCol, rowNum, block.endCol);
+        const cell = ws.getCell(rowNum, block.startCol);
+        cell.value = '—';
+        cell.alignment = { horizontal:'center', vertical:'middle' };
+        cell.font = { color:{argb:'FFB4B0C9'}, italic:true };
+      } else if(!isEntryPresent(entry)){
+        ws.mergeCells(rowNum, block.startCol, rowNum, block.endCol);
+        const cell = ws.getCell(rowNum, block.startCol);
+        cell.value = 'AUSENTE';
+        cell.font = { bold:true, color:{argb:'FFD8493E'} };
+        cell.alignment = { horizontal:'center', vertical:'middle' };
+        cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDECEA'} };
+      } else {
+        block.inds.forEach((ind, i)=>{
+          const cell = ws.getCell(rowNum, block.startCol + i);
+          const v = entry.cotejo[ind.id];
+          cell.value = (v !== null && v !== undefined) ? v : '';
+          cell.alignment = { horizontal:'center', vertical:'middle' };
+        });
+      }
+    });
+
+    const stats = computeStudentStats(group, student.id);
+    const summaryValues = [
+      stats.presentCount,
+      stats.absentCount,
+      stats.obtained,
+      stats.maxPossible,
+      stats.percent === null ? '' : stats.percent + '%'
+    ];
+    summaryValues.forEach((val, i)=>{
+      const cell = ws.getCell(rowNum, summaryStart + i);
+      cell.value = val;
+      cell.alignment = { horizontal:'center', vertical:'middle' };
+      if(i === 4) cell.font = { bold:true, color:{argb:'FF6C4EE3'} };
+    });
+  });
+
+  ws.getColumn(1).width = 24;
+  for(let c=2; c<=summaryEnd; c++){ ws.getColumn(c).width = 13; }
+  ws.getRow(1).height = 30;
+  ws.getRow(2).height = 34;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeGroupName = group.name.replace(/[^a-zA-Z0-9_\-]+/g,'_');
+  a.href = url;
+  a.download = `registro_${safeGroupName}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Archivo Excel exportado');
+}
+
+/* ============ UTILIDADES ============ */
+function escapeHtml(str){
+  return String(str ?? '').replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
+}
+function formatDate(dateStr){
+  if(!dateStr) return '';
+  const [y,m,d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+/* ============ INICIO ============ */
+if(!state.schedule) state.schedule = [];
+ensureDefaultGroup();
+renderAll();
+if(isDriveTokenValid(loadStoredDriveToken())){
+  syncFromDrive();
+}
+</script>
+</body>
+</html>
