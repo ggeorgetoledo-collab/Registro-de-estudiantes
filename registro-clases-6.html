@@ -408,6 +408,7 @@
   <button data-tab="horario">Horario</button>
   <button data-tab="registrar">Registrar clase</button>
   <button data-tab="historial">Historial</button>
+  <button data-tab="calificaciones">Calificaciones</button>
 </nav>
 
 <main id="main"></main>
@@ -679,9 +680,82 @@ function computeStudentStats(group, studentId){
   return { presentCount, absentCount, total, obtained, maxPossible, percent };
 }
 
+/* ============ CALIFICACIONES: ESCALA CHILENA 1.0 - 7.0 (aprobación 4.0) ============ */
+function computeChileGrade(scoreObtained, totalScore, exigenciaPercent){
+  if(scoreObtained === null || scoreObtained === undefined || !totalScore || totalScore <= 0) return null;
+  let exigencia = (exigenciaPercent || 60) / 100;
+  if(exigencia <= 0.01) exigencia = 0.01;
+  if(exigencia >= 0.99) exigencia = 0.99;
+  let p = scoreObtained / totalScore;
+  if(p < 0) p = 0;
+  if(p > 1) p = 1;
+  let nota;
+  if(p <= exigencia){
+    nota = 1 + 3 * (p / exigencia);
+  } else {
+    nota = 4 + 3 * (p - exigencia) / (1 - exigencia);
+  }
+  nota = Math.min(7, Math.max(1, nota));
+  return Math.round(nota * 10) / 10;
+}
+
+function getEvalParamsForStudent(evaluation, studentId){
+  const override = evaluation.overrides && evaluation.overrides[studentId];
+  return {
+    totalScore: (override && override.totalScore !== undefined && override.totalScore !== null) ? override.totalScore : evaluation.totalScore,
+    exigencia: (override && override.exigencia !== undefined && override.exigencia !== null) ? override.exigencia : evaluation.exigencia,
+  };
+}
+
+function computeStudentEvalGrade(evaluation, studentId){
+  const score = evaluation.scores ? evaluation.scores[studentId] : null;
+  if(score === null || score === undefined) return null;
+  const params = getEvalParamsForStudent(evaluation, studentId);
+  return computeChileGrade(score, params.totalScore, params.exigencia);
+}
+
+function computeStudentFinalGrade(group, studentId){
+  const evals = group.evaluations || [];
+  const weighted = evals.filter(e=> e.weightType === 'weighted');
+  const simple = evals.filter(e=> e.weightType !== 'weighted');
+
+  let weightedSum = 0, weightTotal = 0;
+  weighted.forEach(e=>{
+    const nota = computeStudentEvalGrade(e, studentId);
+    if(nota !== null){
+      weightedSum += nota * ((e.weightPercent || 0) / 100);
+      weightTotal += (e.weightPercent || 0) / 100;
+    }
+  });
+
+  const simpleNotas = simple.map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
+  const simpleAvg = simpleNotas.length ? simpleNotas.reduce((a,b)=>a+b,0)/simpleNotas.length : null;
+  const remainingWeight = Math.max(0, 1 - weightTotal);
+
+  let finalGrade = null;
+  if(weightTotal > 0 && simpleAvg !== null && remainingWeight > 0){
+    finalGrade = weightedSum + simpleAvg * remainingWeight;
+  } else if(weightTotal > 0){
+    finalGrade = weightTotal >= 1 ? weightedSum : (simpleAvg !== null ? weightedSum + simpleAvg * remainingWeight : weightedSum / weightTotal);
+  } else if(simpleAvg !== null){
+    finalGrade = simpleAvg;
+  }
+  if(finalGrade !== null) finalGrade = Math.round(Math.min(7, Math.max(1, finalGrade)) * 10) / 10;
+
+  const allNotas = evals.map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
+  const promedioSimple = allNotas.length ? Math.round((allNotas.reduce((a,b)=>a+b,0)/allNotas.length) * 10) / 10 : null;
+
+  return { finalGrade, promedioSimple, count: allNotas.length };
+}
+
+function totalWeightAssigned(group){
+  return (group.evaluations || []).filter(e=> e.weightType === 'weighted')
+    .reduce((sum,e)=> sum + (e.weightPercent || 0), 0);
+}
+
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [] };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [] };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -721,7 +795,7 @@ document.getElementById('groupSelect').addEventListener('change', e=>{
 document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   const name = prompt('Nombre del nuevo grupo/curso:');
   if(!name) return;
-  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [] };
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [] };
   state.groups.push(g);
   state.activeGroupId = g.id;
   saveState();
@@ -755,6 +829,7 @@ function renderMain(){
   if(currentTab === 'horario') return renderHorario();
   if(currentTab === 'registrar') return renderRegistrar(group);
   if(currentTab === 'historial') return renderHistorial(group);
+  if(currentTab === 'calificaciones') return renderCalificaciones(group);
 }
 
 /* ============ TAB: EDITAR NOMBRE / ELIMINAR GRUPO ============ */
@@ -1506,6 +1581,253 @@ function deleteSession(id){
   group.sessions = group.sessions.filter(s=>s.id!==id);
   saveState();
   renderHistorial(group);
+}
+
+/* ============ TAB: CALIFICACIONES ============ */
+let calActiveEvalId = null;
+
+function renderCalificaciones(group){
+  if(!group.evaluations) group.evaluations = [];
+  if(calActiveEvalId){
+    const evaluation = group.evaluations.find(e=>e.id === calActiveEvalId);
+    if(evaluation) return renderEvalScores(group, evaluation);
+    calActiveEvalId = null;
+  }
+
+  const main = document.getElementById('main');
+  const weightSum = totalWeightAssigned(group);
+
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Agregar evaluación</h2>
+      <div class="grid-2">
+        <div>
+          <label>Nombre</label>
+          <input type="text" id="evalName" placeholder="Ej. Prueba 1">
+        </div>
+        <div>
+          <label>Puntaje total</label>
+          <input type="number" id="evalTotalScore" min="1" value="100">
+        </div>
+        <div>
+          <label>% de exigencia (aprobación = 4.0)</label>
+          <input type="number" id="evalExigencia" min="1" max="99" value="60">
+        </div>
+        <div>
+          <label>Tipo</label>
+          <select id="evalWeightType">
+            <option value="simple">Promedio simple</option>
+            <option value="weighted">Ponderada (%)</option>
+          </select>
+        </div>
+      </div>
+      <div id="evalWeightPercentWrap" style="display:none; margin-top:10px;">
+        <label>% que pondera en la nota final</label>
+        <input type="number" id="evalWeightPercent" min="1" max="100" value="20">
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addEvalBtn">+ Agregar evaluación</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Evaluaciones (${group.evaluations.length})</h2>
+        <span class="muted">Ponderación asignada: ${weightSum}% ${weightSum > 100 ? '⚠️ supera el 100%' : ''}</span>
+      </div>
+      ${group.evaluations.length === 0 ? '<div class="empty-state">Aún no has agregado evaluaciones.</div>' :
+        group.evaluations.map(e=>`
+          <div class="student-list-item" style="align-items:flex-start;">
+            <div>
+              <strong>${escapeHtml(e.name)}</strong>
+              <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
+                ${e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple'}
+              </div>
+            </div>
+            <div class="row" style="gap:6px;">
+              <button class="btn btn-accent btn-sm" onclick="openEvalScores('${e.id}')">Completar puntajes</button>
+              <button class="btn btn-outline btn-sm" onclick="editEvaluation('${e.id}')">Editar</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteEvaluation('${e.id}')">Eliminar</button>
+            </div>
+          </div>
+        `).join('')
+      }
+    </div>
+
+    ${group.students.length > 0 && group.evaluations.length > 0 ? `
+    <div class="card app-font">
+      <h2>Resumen de notas</h2>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Estudiante</th>
+            ${group.evaluations.map(e=>`<th>${escapeHtml(e.name)}</th>`).join('')}
+            <th>Promedio simple</th>
+            <th>Nota final</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${group.students.map(s=>{
+            const notas = group.evaluations.map(e=> computeStudentEvalGrade(e, s.id));
+            const result = computeStudentFinalGrade(group, s.id);
+            return `
+              <tr>
+                <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
+                ${notas.map(n=> `<td>${n !== null ? n.toFixed(1) : '-'}</td>`).join('')}
+                <td>${result.promedioSimple !== null ? result.promedioSimple.toFixed(1) : '-'}</td>
+                <td class="avg-badge">${result.finalGrade !== null ? result.finalGrade.toFixed(1) : '-'}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    ` : ''}
+  `;
+
+  const weightTypeSelect = document.getElementById('evalWeightType');
+  weightTypeSelect.addEventListener('change', ()=>{
+    document.getElementById('evalWeightPercentWrap').style.display = weightTypeSelect.value === 'weighted' ? 'block' : 'none';
+  });
+
+  document.getElementById('addEvalBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('evalName').value.trim();
+    const totalScore = Number(document.getElementById('evalTotalScore').value);
+    const exigencia = Number(document.getElementById('evalExigencia').value);
+    const weightType = document.getElementById('evalWeightType').value;
+    const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
+    if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
+    group.evaluations.push({
+      id: uid(), name, totalScore, exigencia: exigencia || 60,
+      weightType, weightPercent: weightPercent || 0,
+      scores: {}, overrides: {}
+    });
+    saveState();
+    renderCalificaciones(group);
+    showToast('Evaluación agregada');
+  });
+}
+
+function editEvaluation(id){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===id);
+  if(!ev) return;
+  const newName = prompt('Nombre de la evaluación:', ev.name);
+  if(newName === null) return;
+  if(newName.trim()) ev.name = newName.trim();
+  const newTotal = prompt('Puntaje total:', ev.totalScore);
+  if(newTotal !== null && Number(newTotal) > 0) ev.totalScore = Number(newTotal);
+  const newExigencia = prompt('% de exigencia (aprobación = 4.0):', ev.exigencia);
+  if(newExigencia !== null && Number(newExigencia) > 0) ev.exigencia = Number(newExigencia);
+  const newType = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', ev.weightType === 'weighted' ? 'ponderada' : 'simple');
+  if(newType !== null){
+    ev.weightType = newType.trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
+    if(ev.weightType === 'weighted'){
+      const newWeight = prompt('% que pondera en la nota final:', ev.weightPercent || 20);
+      if(newWeight !== null) ev.weightPercent = Number(newWeight) || 0;
+    }
+  }
+  saveState();
+  renderCalificaciones(group);
+  showToast('Evaluación actualizada');
+}
+
+function deleteEvaluation(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar esta evaluación y todos los puntajes registrados?')) return;
+  group.evaluations = group.evaluations.filter(e=>e.id!==id);
+  saveState();
+  renderCalificaciones(group);
+}
+
+function openEvalScores(evalId){
+  calActiveEvalId = evalId;
+  renderCalificaciones(getActiveGroup());
+}
+
+function renderEvalScores(group, evaluation){
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(evaluation.name)}</h2>
+        <button class="btn btn-outline btn-sm" onclick="closeEvalScores()">← Volver</button>
+      </div>
+      <p class="muted">Puntaje total: ${evaluation.totalScore} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)</p>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>Estudiante</th><th>Puntaje obtenido</th><th>Nota</th><th>Adecuación</th></tr>
+        </thead>
+        <tbody>
+          ${group.students.map(s=>{
+            const score = evaluation.scores ? evaluation.scores[s.id] : null;
+            const nota = computeStudentEvalGrade(evaluation, s.id);
+            const hasOverride = evaluation.overrides && evaluation.overrides[s.id];
+            return `
+              <tr>
+                <td>${escapeHtml(s.name)}</td>
+                <td><input type="number" class="score-select" style="width:80px;" min="0" max="${(hasOverride && hasOverride.totalScore) || evaluation.totalScore}"
+                    value="${score !== null && score !== undefined ? score : ''}"
+                    onchange="saveEvalScore('${evaluation.id}','${s.id}', this.value)"></td>
+                <td class="avg-badge">${nota !== null ? nota.toFixed(1) : '-'}</td>
+                <td>
+                  <button class="btn btn-outline btn-sm" onclick="openEvalOverride('${evaluation.id}','${s.id}')">
+                    ${hasOverride ? '✎ Editado' : 'Ajustar'}
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+}
+
+function closeEvalScores(){
+  calActiveEvalId = null;
+  renderCalificaciones(getActiveGroup());
+}
+
+function saveEvalScore(evalId, studentId, value){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  if(!ev.scores) ev.scores = {};
+  const num = value === '' ? null : Number(value);
+  ev.scores[studentId] = (num === null || isNaN(num)) ? null : num;
+  saveState();
+  renderEvalScores(group, ev);
+}
+
+function openEvalOverride(evalId, studentId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  const student = group.students.find(s=>s.id===studentId);
+  if(!ev.overrides) ev.overrides = {};
+  const current = ev.overrides[studentId] || {};
+  const newTotal = prompt(`Puntaje total para ${student ? student.name : 'este estudiante'} (adecuación curricular). Deja vacío para usar el valor por defecto (${ev.totalScore}):`, current.totalScore !== undefined ? current.totalScore : '');
+  if(newTotal === null) return;
+  const newExigencia = prompt(`% de exigencia para ${student ? student.name : 'este estudiante'}. Deja vacío para usar el valor por defecto (${ev.exigencia}%):`, current.exigencia !== undefined ? current.exigencia : '');
+  if(newExigencia === null) return;
+  const override = {};
+  if(newTotal.trim() !== '' && Number(newTotal) > 0) override.totalScore = Number(newTotal);
+  if(newExigencia.trim() !== '' && Number(newExigencia) > 0) override.exigencia = Number(newExigencia);
+  if(Object.keys(override).length === 0){
+    delete ev.overrides[studentId];
+  } else {
+    ev.overrides[studentId] = override;
+  }
+  saveState();
+  renderEvalScores(group, ev);
+  showToast('Adecuación curricular guardada');
 }
 
 /* ============ EXPORTAR A EXCEL (.xlsx con formato, con respaldo CSV sin conexión) ============ */
