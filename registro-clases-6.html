@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Registro de Clases</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#6C4EE3">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
 <style>
@@ -619,6 +623,7 @@ function openDriveSettings(){
       <div class="stat-row"><span>Estado</span><strong id="driveStatusText">${connected ? '☁️ Conectado' : 'No conectado'}</strong></div>
       <div class="row" style="margin-top:10px;">
         <button class="btn btn-accent btn-sm" onclick="connectDrive()">Conectar</button>
+        <button class="btn btn-outline btn-sm" onclick="syncFromDrive()">🔄 Sincronizar ahora</button>
         <button class="btn btn-danger btn-sm" onclick="disconnectDrive()">Desconectar</button>
       </div>
       <hr class="divider">
@@ -1707,6 +1712,29 @@ ensureDefaultGroup();
 renderAll();
 if(isDriveTokenValid(loadStoredDriveToken())){
   syncFromDrive();
+}
+
+// Revisa cambios nuevos en Drive cada 30 segundos (evita interrumpir mientras se registra una clase)
+setInterval(()=>{
+  if(currentTab === 'registrar') return;
+  if(document.hidden) return;
+  if(isDriveTokenValid(loadStoredDriveToken())){
+    syncFromDrive();
+  }
+}, 30000);
+
+// Revisa apenas vuelves a esta pestaña/app
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden && currentTab !== 'registrar' && isDriveTokenValid(loadStoredDriveToken())){
+    syncFromDrive();
+  }
+});
+
+// Registro del Service Worker (permite instalar la app y funcionar offline)
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./sw.js').catch(err=> console.log('No se pudo registrar el service worker', err));
+  });
 }
 </script>
 </body>
