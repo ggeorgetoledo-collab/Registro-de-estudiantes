@@ -111,6 +111,14 @@
     border-bottom:3px solid var(--primary);
     font-weight:700;
   }
+  nav.subtabs{
+    background:var(--bg);
+    padding:0 16px;
+  }
+  nav.subtabs button{
+    font-size:0.84rem;
+    padding:10px 14px;
+  }
   main{
     max-width:980px;
     margin:0 auto;
@@ -402,14 +410,13 @@
   </div>
 </header>
 
-<nav class="tabs app-font" id="tabs">
-  <button data-tab="estudiantes" class="active">Estudiantes</button>
-  <button data-tab="indicadores">Indicadores</button>
-  <button data-tab="horario">Horario</button>
-  <button data-tab="registrar">Registrar clase</button>
-  <button data-tab="historial">Historial</button>
-  <button data-tab="calificaciones">Calificaciones</button>
+<nav class="tabs app-font" id="modulesNav">
+  <button data-module="horario" class="active">📅 Horario</button>
+  <button data-module="cursos">👥 Cursos</button>
+  <button data-module="trabajo">📝 Trabajo en clases</button>
+  <button data-module="calificaciones">🎯 Calificaciones</button>
 </nav>
+<nav class="tabs subtabs app-font" id="subTabsNav" style="display:none;"></nav>
 
 <main id="main"></main>
 
@@ -699,12 +706,43 @@ function computeChileGrade(scoreObtained, totalScore, exigenciaPercent){
   return Math.round(nota * 10) / 10;
 }
 
-function getEvalParamsForStudent(evaluation, studentId){
-  const override = evaluation.overrides && evaluation.overrides[studentId];
-  return {
-    totalScore: (override && override.totalScore !== undefined && override.totalScore !== null) ? override.totalScore : evaluation.totalScore,
-    exigencia: (override && override.exigencia !== undefined && override.exigencia !== null) ? override.exigencia : evaluation.exigencia,
-  };
+const GRADE_GROUP_PALETTE = [
+  {bg:'#F1ECFC', text:'#6C4EE3', border:'#D4C4F5'},
+  {bg:'#E6F8EF', text:'#1F9D64', border:'#B9EBD1'},
+  {bg:'#FDF3DE', text:'#C6871A', border:'#F5DFA8'},
+  {bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE'},
+  {bg:'#E7F1FC', text:'#2C72C7', border:'#BEDBF7'},
+  {bg:'#FCEAF3', text:'#C93E85', border:'#F5C1DC'},
+];
+function gradeGroupColor(groupId){
+  const group = getActiveGroup();
+  const idx = group ? (group.gradeGroups || []).findIndex(g=>g.id===groupId) : -1;
+  return GRADE_GROUP_PALETTE[idx >= 0 ? idx % GRADE_GROUP_PALETTE.length : 0];
+}
+
+// "Unidades de calificación": cada evaluación suelta cuenta como una unidad;
+// las evaluaciones que pertenecen a un grupo de notas se promedian y forman UNA sola
+// unidad ("nota sumativa"), que usa el tipo/ponderación del grupo (no de cada evaluación).
+function getGradingUnits(group){
+  const evals = group.evaluations || [];
+  const gradeGroups = group.gradeGroups || [];
+  const units = [];
+  evals.filter(e=> !e.gradeGroupId).forEach(e=>{
+    units.push({ type:'eval', evals:[e], weightType: e.weightType, weightPercent: e.weightPercent });
+  });
+  gradeGroups.forEach(gg=>{
+    const members = evals.filter(e=> e.gradeGroupId === gg.id);
+    if(members.length > 0){
+      units.push({ type:'group', gradeGroup: gg, evals: members, weightType: gg.weightType, weightPercent: gg.weightPercent });
+    }
+  });
+  return units;
+}
+
+function computeUnitGrade(unit, studentId){
+  const notas = unit.evals.map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
+  if(notas.length === 0) return null;
+  return Math.round((notas.reduce((a,b)=>a+b,0)/notas.length) * 10) / 10;
 }
 
 function computeStudentEvalGrade(evaluation, studentId){
@@ -714,21 +752,29 @@ function computeStudentEvalGrade(evaluation, studentId){
   return computeChileGrade(score, params.totalScore, params.exigencia);
 }
 
+function getEvalParamsForStudent(evaluation, studentId){
+  const override = evaluation.overrides && evaluation.overrides[studentId];
+  return {
+    totalScore: (override && override.totalScore !== undefined && override.totalScore !== null) ? override.totalScore : evaluation.totalScore,
+    exigencia: (override && override.exigencia !== undefined && override.exigencia !== null) ? override.exigencia : evaluation.exigencia,
+  };
+}
+
 function computeStudentFinalGrade(group, studentId){
-  const evals = group.evaluations || [];
-  const weighted = evals.filter(e=> e.weightType === 'weighted');
-  const simple = evals.filter(e=> e.weightType !== 'weighted');
+  const units = getGradingUnits(group);
+  const weighted = units.filter(u=> u.weightType === 'weighted');
+  const simple = units.filter(u=> u.weightType !== 'weighted');
 
   let weightedSum = 0, weightTotal = 0;
-  weighted.forEach(e=>{
-    const nota = computeStudentEvalGrade(e, studentId);
+  weighted.forEach(u=>{
+    const nota = computeUnitGrade(u, studentId);
     if(nota !== null){
-      weightedSum += nota * ((e.weightPercent || 0) / 100);
-      weightTotal += (e.weightPercent || 0) / 100;
+      weightedSum += nota * ((u.weightPercent || 0) / 100);
+      weightTotal += (u.weightPercent || 0) / 100;
     }
   });
 
-  const simpleNotas = simple.map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
+  const simpleNotas = simple.map(u=> computeUnitGrade(u, studentId)).filter(n=> n !== null);
   const simpleAvg = simpleNotas.length ? simpleNotas.reduce((a,b)=>a+b,0)/simpleNotas.length : null;
   const remainingWeight = Math.max(0, 1 - weightTotal);
 
@@ -742,20 +788,20 @@ function computeStudentFinalGrade(group, studentId){
   }
   if(finalGrade !== null) finalGrade = Math.round(Math.min(7, Math.max(1, finalGrade)) * 10) / 10;
 
-  const allNotas = evals.map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
+  const allNotas = (group.evaluations || []).map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
   const promedioSimple = allNotas.length ? Math.round((allNotas.reduce((a,b)=>a+b,0)/allNotas.length) * 10) / 10 : null;
 
   return { finalGrade, promedioSimple, count: allNotas.length };
 }
 
 function totalWeightAssigned(group){
-  return (group.evaluations || []).filter(e=> e.weightType === 'weighted')
-    .reduce((sum,e)=> sum + (e.weightPercent || 0), 0);
+  return getGradingUnits(group).filter(u=> u.weightType === 'weighted')
+    .reduce((sum,u)=> sum + (u.weightPercent || 0), 0);
 }
 
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [] };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [] };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -763,6 +809,14 @@ function ensureDefaultGroup(){
     state.activeGroupId = state.groups[0].id;
     saveState();
   }
+  state.groups.forEach(g=>{
+    if(!g.evaluations) g.evaluations = [];
+    if(!g.decimas) g.decimas = [];
+    if(!g.gradeGroups) g.gradeGroups = [];
+    if(!g.indicators) g.indicators = [];
+    if(!g.sessions) g.sessions = [];
+    if(!g.students) g.students = [];
+  });
 }
 
 /* ============ TOAST ============ */
@@ -795,7 +849,7 @@ document.getElementById('groupSelect').addEventListener('change', e=>{
 document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   const name = prompt('Nombre del nuevo grupo/curso:');
   if(!name) return;
-  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [] };
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [] };
   state.groups.push(g);
   state.activeGroupId = g.id;
   saveState();
@@ -803,19 +857,65 @@ document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   showToast('Grupo creado: ' + g.name);
 });
 
-/* ============ TABS ============ */
-let currentTab = 'estudiantes';
-document.getElementById('tabs').addEventListener('click', e=>{
+/* ============ MÓDULOS Y PESTAÑAS ============ */
+const MODULE_TABS = {
+  horario: ['horario'],
+  cursos: ['estudiantes'],
+  trabajo: ['indicadores','registrar','historial','decimas'],
+  calificaciones: ['calificaciones'],
+};
+const SUBTAB_LABELS = {
+  indicadores: 'Indicadores',
+  registrar: 'Registrar clase',
+  historial: 'Historial',
+  decimas: 'Décimas',
+};
+function moduleForTab(tab){
+  for(const m in MODULE_TABS){ if(MODULE_TABS[m].includes(tab)) return m; }
+  return 'horario';
+}
+let currentModule = 'horario';
+let currentTab = 'horario';
+
+function renderNav(){
+  document.querySelectorAll('#modulesNav button').forEach(b=> b.classList.toggle('active', b.dataset.module === currentModule));
+  const subNav = document.getElementById('subTabsNav');
+  const tabs = MODULE_TABS[currentModule] || [];
+  if(tabs.length > 1){
+    subNav.style.display = 'flex';
+    subNav.innerHTML = tabs.map(t=> `<button data-tab="${t}" class="${t===currentTab?'active':''}">${SUBTAB_LABELS[t] || t}</button>`).join('');
+  } else {
+    subNav.style.display = 'none';
+    subNav.innerHTML = '';
+  }
+}
+function goToTab(tab){
+  currentTab = tab;
+  currentModule = moduleForTab(tab);
+  renderNav();
+  renderMain();
+}
+function goToModule(mod){
+  currentModule = mod;
+  currentTab = (MODULE_TABS[mod] || ['horario'])[0];
+  renderNav();
+  renderMain();
+}
+document.getElementById('modulesNav').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-module]');
+  if(!btn) return;
+  goToModule(btn.dataset.module);
+});
+document.getElementById('subTabsNav').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-tab]');
   if(!btn) return;
-  currentTab = btn.dataset.tab;
-  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b===btn));
-  renderMain();
+  goToTab(btn.dataset.tab);
 });
 
 /* ============ RENDER PRINCIPAL ============ */
 function renderAll(){
   renderGroupSelect();
+  renderNav();
   renderMain();
 }
 
@@ -829,6 +929,7 @@ function renderMain(){
   if(currentTab === 'horario') return renderHorario();
   if(currentTab === 'registrar') return renderRegistrar(group);
   if(currentTab === 'historial') return renderHistorial(group);
+  if(currentTab === 'decimas') return renderDecimas(group);
   if(currentTab === 'calificaciones') return renderCalificaciones(group);
 }
 
@@ -973,6 +1074,9 @@ function openStudentDetail(studentId){
     ? 'conic-gradient(var(--border-strong) 0deg 360deg)'
     : `conic-gradient(var(--primary) 0deg ${percent*3.6}deg, var(--border) ${percent*3.6}deg 360deg)`;
 
+  const gradeResult = computeStudentFinalGrade(group, studentId);
+  const decimasTotal = computeStudentDecimasTotal(group, studentId);
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'studentModalOverlay';
@@ -983,13 +1087,19 @@ function openStudentDetail(studentId){
       <div class="muted" style="margin-bottom:6px;">${escapeHtml(group.name)}</div>
       <div class="pie-chart" style="background:${pieBg};"></div>
       <div style="text-align:center; font-size:1.4rem; font-weight:800; color:var(--primary); font-family:'Poppins',sans-serif;">
-        ${percent === null ? 'Sin datos aún' : percent + '% de logro'}
+        ${percent === null ? 'Sin datos aún' : percent + '% de logro en clases'}
       </div>
       <hr class="divider">
+      <p class="muted" style="margin-bottom:4px; font-weight:600;">Trabajo en clases</p>
       <div class="stat-row"><span>Clases registradas</span><strong>${stats.total}</strong></div>
       <div class="stat-row"><span>Presente</span><strong style="color:var(--success);">${stats.presentCount}</strong></div>
       <div class="stat-row"><span>Ausente</span><strong style="color:var(--danger);">${stats.absentCount}</strong></div>
       <div class="stat-row"><span>Puntaje obtenido</span><strong>${stats.obtained} / ${stats.maxPossible}</strong></div>
+      <div class="stat-row"><span>Décimas acumuladas</span><strong style="color:var(--primary);">+${decimasTotal.toFixed(1)}</strong></div>
+      <hr class="divider">
+      <p class="muted" style="margin-bottom:4px; font-weight:600;">Calificaciones</p>
+      <div class="stat-row"><span>Promedio simple</span><strong>${gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'}</strong></div>
+      <div class="stat-row"><span>Nota final</span><strong style="color:var(--primary); font-size:1.1rem;">${gradeResult.finalGrade !== null ? gradeResult.finalGrade.toFixed(1) : '-'}</strong></div>
     </div>
   `;
   overlay.addEventListener('click', e=>{ if(e.target === overlay) closeStudentDetail(); });
@@ -1127,7 +1237,8 @@ function goToDateClass(entryId, iso){
   saveState();
   renderGroupSelect();
   currentTab = 'registrar';
-  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='registrar'));
+  currentModule = moduleForTab('registrar');
+  renderNav();
   const existingSession = group.sessions.find(s=> s.date === iso);
   if(existingSession){
     renderRegistrar(group, existingSession);
@@ -1159,68 +1270,6 @@ function renderHorario(){
   const todayISO = toISODate(new Date());
 
   main.innerHTML = `
-    <div class="card app-font">
-      <h2>Agregar clase al horario</h2>
-      <div class="grid-2">
-        <div>
-          <label>Grupo</label>
-          <select id="schGroup">
-            ${state.groups.map(g=>`<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label>Día</label>
-          <select id="schDay">
-            ${DAY_NAMES.map((d,i)=>`<option value="${i+1}">${d}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label>Hora de inicio</label>
-          <input type="time" id="schStart" value="08:00">
-        </div>
-        <div>
-          <label>Hora de término (opcional)</label>
-          <input type="time" id="schEnd">
-        </div>
-      </div>
-      <label style="margin-top:10px;">Nota (aula, tema, opcional)</label>
-      <input type="text" id="schNote" placeholder="Ej. Aula 3">
-      <div class="row" style="margin-top:12px;">
-        <button class="btn btn-accent" id="addScheduleBtn">+ Agregar al horario</button>
-      </div>
-    </div>
-
-    <div class="card app-font">
-      <div class="flex-between">
-        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Calendario semanal</h2>
-        <span class="muted">Toca una clase para ir directo a registrarla</span>
-      </div>
-      <div class="calendar-grid" id="calendarGrid">
-        ${DAY_NAMES.map((dayName, i)=>{
-          const day = i+1;
-          const entries = schedule.filter(e=>e.day===day);
-          return `
-            <div class="calendar-day">
-              <div class="calendar-day-header">${dayName}</div>
-              ${entries.length === 0 ? '<div class="calendar-empty">—</div>' :
-                entries.map(e=>{
-                  const g = state.groups.find(g=>g.id===e.groupId);
-                  const color = groupColor(e.groupId);
-                  return `
-                    <div class="calendar-block" style="background:${color.bg}; color:${color.text}; border-color:${color.border};" onclick="goToClass('${e.id}')">
-                      <div class="calendar-block-time">${e.startTime}${e.endTime ? ' – ' + e.endTime : ''}</div>
-                      <div class="calendar-block-group">${escapeHtml(g ? g.name : '(grupo eliminado)')}</div>
-                      ${e.note ? `<div class="calendar-block-note">${escapeHtml(e.note)}</div>` : ''}
-                    </div>
-                  `;
-                }).join('')
-              }
-            </div>
-          `;
-        }).join('')}
-      </div>
-    </div>
-
     <div class="card app-font">
       <div class="month-nav">
         <button class="btn btn-outline btn-sm" onclick="changeCalendarMonth(-1)">‹ Anterior</button>
@@ -1272,6 +1321,68 @@ function renderHorario(){
             `;
           }).join('');
         })()}
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Agregar clase al horario</h2>
+      <div class="grid-2">
+        <div>
+          <label>Grupo</label>
+          <select id="schGroup">
+            ${state.groups.map(g=>`<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Día</label>
+          <select id="schDay">
+            ${DAY_NAMES.map((d,i)=>`<option value="${i+1}">${d}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Hora de inicio</label>
+          <input type="time" id="schStart" value="08:00">
+        </div>
+        <div>
+          <label>Hora de término (opcional)</label>
+          <input type="time" id="schEnd">
+        </div>
+      </div>
+      <label style="margin-top:10px;">Nota (aula, tema, opcional)</label>
+      <input type="text" id="schNote" placeholder="Ej. Aula 3">
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addScheduleBtn">+ Agregar al horario</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Horario semanal</h2>
+        <span class="muted">Toca una clase para ir directo a registrarla</span>
+      </div>
+      <div class="calendar-grid" id="calendarGrid">
+        ${DAY_NAMES.map((dayName, i)=>{
+          const day = i+1;
+          const entries = schedule.filter(e=>e.day===day);
+          return `
+            <div class="calendar-day">
+              <div class="calendar-day-header">${dayName}</div>
+              ${entries.length === 0 ? '<div class="calendar-empty">—</div>' :
+                entries.map(e=>{
+                  const g = state.groups.find(g=>g.id===e.groupId);
+                  const color = groupColor(e.groupId);
+                  return `
+                    <div class="calendar-block" style="background:${color.bg}; color:${color.text}; border-color:${color.border};" onclick="goToClass('${e.id}')">
+                      <div class="calendar-block-time">${e.startTime}${e.endTime ? ' – ' + e.endTime : ''}</div>
+                      <div class="calendar-block-group">${escapeHtml(g ? g.name : '(grupo eliminado)')}</div>
+                      ${e.note ? `<div class="calendar-block-note">${escapeHtml(e.note)}</div>` : ''}
+                    </div>
+                  `;
+                }).join('')
+              }
+            </div>
+          `;
+        }).join('')}
       </div>
     </div>
 
@@ -1361,7 +1472,8 @@ function goToClass(entryId){
   saveState();
   renderGroupSelect();
   currentTab = 'registrar';
-  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='registrar'));
+  currentModule = moduleForTab('registrar');
+  renderNav();
   renderRegistrar(group, null, { date: computeDateForWeekday(entry.day), time: entry.startTime });
 }
 
@@ -1411,7 +1523,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${group.indicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(1-${ind.levels || 5})</span></th>`).join('')}
+            ${group.indicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
         </thead>
@@ -1425,7 +1537,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 const levels = ind.levels || 5;
                 const prevVal = prevEntry ? prevEntry.cotejo[ind.id] : null;
                 let options = '<option value="">-</option>';
-                for(let n=1; n<=levels; n++){
+                for(let n=0; n<=levels; n++){
                   options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
                 }
                 return `
@@ -1454,9 +1566,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
 
   if(isEdit){
     document.getElementById('cancelEditBtn').addEventListener('click', ()=>{
-      currentTab = 'historial';
-      document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='historial'));
-      renderHistorial(group);
+      goToTab('historial');
     });
   }
 
@@ -1491,9 +1601,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
       showToast('Clase registrada correctamente');
     }
     saveState();
-    renderHistorial(group);
-    currentTab = 'historial';
-    document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='historial'));
+    goToTab('historial');
   });
 }
 
@@ -1502,7 +1610,8 @@ function editSession(sessionId){
   const session = group.sessions.find(s=>s.id===sessionId);
   if(!session) return;
   currentTab = 'registrar';
-  document.querySelectorAll('#tabs button').forEach(b=> b.classList.toggle('active', b.dataset.tab==='registrar'));
+  currentModule = moduleForTab('registrar');
+  renderNav();
   renderRegistrar(group, session);
 }
 
@@ -1583,11 +1692,120 @@ function deleteSession(id){
   renderHistorial(group);
 }
 
+/* ============ TAB: DÉCIMAS (puntos extra) ============ */
+function computeStudentDecimasTotal(group, studentId){
+  if(!group.decimas) return 0;
+  const total = group.decimas.filter(d=> d.studentId === studentId).reduce((sum,d)=> sum + (d.value || 0), 0);
+  return Math.round(total * 10) / 10;
+}
+
+function renderDecimas(group){
+  if(!group.decimas) group.decimas = [];
+  const main = document.getElementById('main');
+
+  if(group.students.length === 0){
+    main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega estudiantes antes de registrar décimas.</div></div>';
+    return;
+  }
+
+  const today = new Date().toISOString().slice(0,10);
+  const entries = [...group.decimas].sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Registrar décimas (puntos extra)</h2>
+      <div class="grid-2">
+        <div>
+          <label>Estudiante</label>
+          <select id="decStudent">
+            ${group.students.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Valor (décimas)</label>
+          <input type="number" id="decValue" step="0.1" value="0.1">
+        </div>
+        <div>
+          <label>Fecha</label>
+          <input type="date" id="decDate" value="${today}">
+        </div>
+        <div>
+          <label>Motivo (opcional)</label>
+          <input type="text" id="decNote" placeholder="Ej. Participación destacada">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addDecimaBtn">+ Agregar décimas</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Total de décimas por estudiante</h2>
+      <table>
+        <thead><tr><th>Estudiante</th><th>Total décimas</th></tr></thead>
+        <tbody>
+          ${group.students.map(s=>`
+            <tr>
+              <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
+              <td class="avg-badge">+${computeStudentDecimasTotal(group, s.id).toFixed(1)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card app-font">
+      <h2>Historial de décimas (${entries.length})</h2>
+      ${entries.length === 0 ? '<div class="empty-state">Aún no has registrado décimas.</div>' :
+        `<table>
+          <thead><tr><th>Fecha</th><th>Estudiante</th><th>Valor</th><th>Motivo</th><th></th></tr></thead>
+          <tbody>
+            ${entries.map(d=>{
+              const student = group.students.find(s=>s.id===d.studentId);
+              return `
+                <tr>
+                  <td>${formatDate(d.date)}</td>
+                  <td>${escapeHtml(student ? student.name : '(eliminado)')}</td>
+                  <td class="avg-badge">+${(d.value||0).toFixed(1)}</td>
+                  <td>${escapeHtml(d.note || '')}</td>
+                  <td><button class="btn btn-danger btn-sm" onclick="deleteDecima('${d.id}')">Eliminar</button></td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>`
+      }
+    </div>
+  `;
+
+  document.getElementById('addDecimaBtn').addEventListener('click', ()=>{
+    const studentId = document.getElementById('decStudent').value;
+    const value = Number(document.getElementById('decValue').value);
+    const date = document.getElementById('decDate').value;
+    const note = document.getElementById('decNote').value.trim();
+    if(!studentId || !value){ showToast('Selecciona un estudiante e ingresa un valor'); return; }
+    group.decimas.push({ id: uid(), studentId, value, date: date || today, note });
+    saveState();
+    renderDecimas(group);
+    showToast('Décimas agregadas');
+  });
+}
+
+function deleteDecima(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar este registro de décimas?')) return;
+  group.decimas = group.decimas.filter(d=>d.id!==id);
+  saveState();
+  renderDecimas(group);
+}
+
 /* ============ TAB: CALIFICACIONES ============ */
 let calActiveEvalId = null;
 
 function renderCalificaciones(group){
   if(!group.evaluations) group.evaluations = [];
+  if(!group.gradeGroups) group.gradeGroups = [];
   if(calActiveEvalId){
     const evaluation = group.evaluations.find(e=>e.id === calActiveEvalId);
     if(evaluation) return renderEvalScores(group, evaluation);
@@ -1596,9 +1814,55 @@ function renderCalificaciones(group){
 
   const main = document.getElementById('main');
   const weightSum = totalWeightAssigned(group);
+  const units = getGradingUnits(group);
 
   main.innerHTML = `
     ${groupHeaderCard(group)}
+
+    <div class="card app-font">
+      <h2>Grupos de notas (para notas sumativas)</h2>
+      <p class="muted">Agrupa varias evaluaciones para que su promedio forme una sola "nota sumativa" dentro de la nota final. Cada grupo tiene su propio color.</p>
+      <div class="grid-2">
+        <div>
+          <label>Nombre del grupo</label>
+          <input type="text" id="ggName" placeholder="Ej. Nota 1">
+        </div>
+        <div>
+          <label>Tipo</label>
+          <select id="ggWeightType">
+            <option value="simple">Promedio simple</option>
+            <option value="weighted">Ponderada (%)</option>
+          </select>
+        </div>
+      </div>
+      <div id="ggWeightPercentWrap" style="display:none; margin-top:10px;">
+        <label>% que pondera en la nota final</label>
+        <input type="number" id="ggWeightPercent" min="1" max="100" value="20">
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addGradeGroupBtn">+ Crear grupo de notas</button>
+      </div>
+      <hr class="divider">
+      ${group.gradeGroups.length === 0 ? '<div class="empty-state">No has creado grupos de notas.</div>' :
+        group.gradeGroups.map(gg=>{
+          const color = gradeGroupColor(gg.id);
+          const memberCount = group.evaluations.filter(e=>e.gradeGroupId===gg.id).length;
+          return `
+            <div class="student-list-item" style="align-items:flex-start; border-left:4px solid ${color.text}; padding-left:8px;">
+              <div>
+                <strong style="color:${color.text};">${escapeHtml(gg.name)}</strong>
+                <div class="muted">${memberCount} evaluación(es) · ${gg.weightType === 'weighted' ? 'Pondera ' + gg.weightPercent + '%' : 'Promedio simple'}</div>
+              </div>
+              <div class="row" style="gap:6px;">
+                <button class="btn btn-outline btn-sm" onclick="editGradeGroup('${gg.id}')">Editar</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteGradeGroup('${gg.id}')">Eliminar</button>
+              </div>
+            </div>
+          `;
+        }).join('')
+      }
+    </div>
+
     <div class="card app-font">
       <h2>Agregar evaluación</h2>
       <div class="grid-2">
@@ -1615,17 +1879,29 @@ function renderCalificaciones(group){
           <input type="number" id="evalExigencia" min="1" max="99" value="60">
         </div>
         <div>
-          <label>Tipo</label>
-          <select id="evalWeightType">
-            <option value="simple">Promedio simple</option>
-            <option value="weighted">Ponderada (%)</option>
+          <label>Grupo de notas (opcional)</label>
+          <select id="evalGradeGroup">
+            <option value="">Ninguno (evaluación suelta)</option>
+            ${group.gradeGroups.map(gg=>`<option value="${gg.id}">${escapeHtml(gg.name)}</option>`).join('')}
           </select>
         </div>
       </div>
-      <div id="evalWeightPercentWrap" style="display:none; margin-top:10px;">
-        <label>% que pondera en la nota final</label>
-        <input type="number" id="evalWeightPercent" min="1" max="100" value="20">
+      <div id="evalStandaloneWeight">
+        <div class="grid-2" style="margin-top:10px;">
+          <div>
+            <label>Tipo</label>
+            <select id="evalWeightType">
+              <option value="simple">Promedio simple</option>
+              <option value="weighted">Ponderada (%)</option>
+            </select>
+          </div>
+          <div id="evalWeightPercentWrap" style="display:none;">
+            <label>% que pondera en la nota final</label>
+            <input type="number" id="evalWeightPercent" min="1" max="100" value="20">
+          </div>
+        </div>
       </div>
+      <p class="muted" id="evalGroupedNotice" style="display:none; margin-top:8px;">Esta evaluación pasará a ponderarse según la configuración de su grupo de notas, no la suya propia.</p>
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addEvalBtn">+ Agregar evaluación</button>
       </div>
@@ -1637,12 +1913,16 @@ function renderCalificaciones(group){
         <span class="muted">Ponderación asignada: ${weightSum}% ${weightSum > 100 ? '⚠️ supera el 100%' : ''}</span>
       </div>
       ${group.evaluations.length === 0 ? '<div class="empty-state">Aún no has agregado evaluaciones.</div>' :
-        group.evaluations.map(e=>`
-          <div class="student-list-item" style="align-items:flex-start;">
+        group.evaluations.map(e=>{
+          const color = e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null;
+          const gg = e.gradeGroupId ? group.gradeGroups.find(g=>g.id===e.gradeGroupId) : null;
+          return `
+          <div class="student-list-item" style="align-items:flex-start; ${color ? `border-left:4px solid ${color.text}; padding-left:8px;` : ''}">
             <div>
               <strong>${escapeHtml(e.name)}</strong>
+              ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
-                ${e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple'}
+                ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
               </div>
             </div>
             <div class="row" style="gap:6px;">
@@ -1651,7 +1931,7 @@ function renderCalificaciones(group){
               <button class="btn btn-danger btn-sm" onclick="deleteEvaluation('${e.id}')">Eliminar</button>
             </div>
           </div>
-        `).join('')
+        `;}).join('')
       }
     </div>
 
@@ -1666,19 +1946,32 @@ function renderCalificaciones(group){
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${group.evaluations.map(e=>`<th>${escapeHtml(e.name)}</th>`).join('')}
+            ${group.evaluations.map(e=>{
+              const color = e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null;
+              return `<th ${color ? `style="background:${color.bg}; color:${color.text};"` : ''}>${escapeHtml(e.name)}</th>`;
+            }).join('')}
+            ${group.gradeGroups.map(gg=>{
+              const color = gradeGroupColor(gg.id);
+              return `<th style="background:${color.bg}; color:${color.text};">${escapeHtml(gg.name)} (sumativa)</th>`;
+            }).join('')}
             <th>Promedio simple</th>
             <th>Nota final</th>
           </tr>
         </thead>
         <tbody>
           ${group.students.map(s=>{
-            const notas = group.evaluations.map(e=> computeStudentEvalGrade(e, s.id));
+            const notas = group.evaluations.map(e=> ({ nota: computeStudentEvalGrade(e, s.id), color: e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null }));
+            const groupUnits = units.filter(u=>u.type==='group');
             const result = computeStudentFinalGrade(group, s.id);
             return `
               <tr>
                 <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
-                ${notas.map(n=> `<td>${n !== null ? n.toFixed(1) : '-'}</td>`).join('')}
+                ${notas.map(n=> `<td ${n.color ? `style="background:${n.color.bg};"` : ''}>${n.nota !== null ? n.nota.toFixed(1) : '-'}</td>`).join('')}
+                ${groupUnits.map(u=>{
+                  const color = gradeGroupColor(u.gradeGroup.id);
+                  const nota = computeUnitGrade(u, s.id);
+                  return `<td style="background:${color.bg}; color:${color.text}; font-weight:700;">${nota !== null ? nota.toFixed(1) : '-'}</td>`;
+                }).join('')}
                 <td>${result.promedioSimple !== null ? result.promedioSimple.toFixed(1) : '-'}</td>
                 <td class="avg-badge">${result.finalGrade !== null ? result.finalGrade.toFixed(1) : '-'}</td>
               </tr>
@@ -1696,15 +1989,40 @@ function renderCalificaciones(group){
     document.getElementById('evalWeightPercentWrap').style.display = weightTypeSelect.value === 'weighted' ? 'block' : 'none';
   });
 
+  const evalGradeGroupSelect = document.getElementById('evalGradeGroup');
+  evalGradeGroupSelect.addEventListener('change', ()=>{
+    const grouped = !!evalGradeGroupSelect.value;
+    document.getElementById('evalStandaloneWeight').style.display = grouped ? 'none' : 'block';
+    document.getElementById('evalGroupedNotice').style.display = grouped ? 'block' : 'none';
+  });
+
+  const ggWeightTypeSelect = document.getElementById('ggWeightType');
+  ggWeightTypeSelect.addEventListener('change', ()=>{
+    document.getElementById('ggWeightPercentWrap').style.display = ggWeightTypeSelect.value === 'weighted' ? 'block' : 'none';
+  });
+
+  document.getElementById('addGradeGroupBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('ggName').value.trim();
+    const weightType = document.getElementById('ggWeightType').value;
+    const weightPercent = weightType === 'weighted' ? Number(document.getElementById('ggWeightPercent').value) : null;
+    if(!name){ showToast('Ingresa un nombre para el grupo de notas'); return; }
+    group.gradeGroups.push({ id: uid(), name, weightType, weightPercent: weightPercent || 0 });
+    saveState();
+    renderCalificaciones(group);
+    showToast('Grupo de notas creado');
+  });
+
   document.getElementById('addEvalBtn').addEventListener('click', ()=>{
     const name = document.getElementById('evalName').value.trim();
     const totalScore = Number(document.getElementById('evalTotalScore').value);
     const exigencia = Number(document.getElementById('evalExigencia').value);
+    const gradeGroupId = document.getElementById('evalGradeGroup').value || null;
     const weightType = document.getElementById('evalWeightType').value;
     const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
     if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
     group.evaluations.push({
       id: uid(), name, totalScore, exigencia: exigencia || 60,
+      gradeGroupId,
       weightType, weightPercent: weightPercent || 0,
       scores: {}, overrides: {}
     });
@@ -1719,6 +2037,35 @@ function renderCalificaciones(group){
   }
 }
 
+function editGradeGroup(id){
+  const group = getActiveGroup();
+  const gg = group.gradeGroups.find(g=>g.id===id);
+  if(!gg) return;
+  const newName = prompt('Nombre del grupo de notas:', gg.name);
+  if(newName === null) return;
+  if(newName.trim()) gg.name = newName.trim();
+  const newType = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', gg.weightType === 'weighted' ? 'ponderada' : 'simple');
+  if(newType !== null){
+    gg.weightType = newType.trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
+    if(gg.weightType === 'weighted'){
+      const newWeight = prompt('% que pondera en la nota final:', gg.weightPercent || 20);
+      if(newWeight !== null) gg.weightPercent = Number(newWeight) || 0;
+    }
+  }
+  saveState();
+  renderCalificaciones(group);
+  showToast('Grupo de notas actualizado');
+}
+
+function deleteGradeGroup(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar este grupo de notas? Las evaluaciones que contiene pasarán a ser evaluaciones sueltas.')) return;
+  group.gradeGroups = group.gradeGroups.filter(g=>g.id!==id);
+  group.evaluations.forEach(e=>{ if(e.gradeGroupId === id) e.gradeGroupId = null; });
+  saveState();
+  renderCalificaciones(group);
+}
+
 function editEvaluation(id){
   const group = getActiveGroup();
   const ev = group.evaluations.find(e=>e.id===id);
@@ -1730,12 +2077,25 @@ function editEvaluation(id){
   if(newTotal !== null && Number(newTotal) > 0) ev.totalScore = Number(newTotal);
   const newExigencia = prompt('% de exigencia (aprobación = 4.0):', ev.exigencia);
   if(newExigencia !== null && Number(newExigencia) > 0) ev.exigencia = Number(newExigencia);
-  const newType = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', ev.weightType === 'weighted' ? 'ponderada' : 'simple');
-  if(newType !== null){
-    ev.weightType = newType.trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
-    if(ev.weightType === 'weighted'){
-      const newWeight = prompt('% que pondera en la nota final:', ev.weightPercent || 20);
-      if(newWeight !== null) ev.weightPercent = Number(newWeight) || 0;
+
+  if(group.gradeGroups.length > 0){
+    const currentGroup = group.gradeGroups.find(g=>g.id===ev.gradeGroupId);
+    const options = group.gradeGroups.map((g,i)=> `${i+1}=${g.name}`).join(', ');
+    const raw = prompt(`Grupo de notas (escribe el número, o 0 para ninguno): ${options}`, currentGroup ? String(group.gradeGroups.indexOf(currentGroup)+1) : '0');
+    if(raw !== null){
+      const idx = parseInt(raw, 10);
+      ev.gradeGroupId = (idx >= 1 && idx <= group.gradeGroups.length) ? group.gradeGroups[idx-1].id : null;
+    }
+  }
+
+  if(!ev.gradeGroupId){
+    const newType = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', ev.weightType === 'weighted' ? 'ponderada' : 'simple');
+    if(newType !== null){
+      ev.weightType = newType.trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
+      if(ev.weightType === 'weighted'){
+        const newWeight = prompt('% que pondera en la nota final:', ev.weightPercent || 20);
+        if(newWeight !== null) ev.weightPercent = Number(newWeight) || 0;
+      }
     }
   }
   saveState();
