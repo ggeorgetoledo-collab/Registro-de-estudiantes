@@ -1657,7 +1657,10 @@ function renderCalificaciones(group){
 
     ${group.students.length > 0 && group.evaluations.length > 0 ? `
     <div class="card app-font">
-      <h2>Resumen de notas</h2>
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Resumen de notas</h2>
+        <button class="btn btn-ink btn-sm" id="exportGradesBtn">⬇️ Exportar a Excel (editable)</button>
+      </div>
       <div style="overflow-x:auto;">
       <table>
         <thead>
@@ -1709,6 +1712,11 @@ function renderCalificaciones(group){
     renderCalificaciones(group);
     showToast('Evaluación agregada');
   });
+
+  const exportGradesBtn = document.getElementById('exportGradesBtn');
+  if(exportGradesBtn){
+    exportGradesBtn.addEventListener('click', ()=> exportCalificacionesToExcel(group));
+  }
 }
 
 function editEvaluation(id){
@@ -1828,6 +1836,158 @@ function openEvalOverride(evalId, studentId){
   saveState();
   renderEvalScores(group, ev);
   showToast('Adecuación curricular guardada');
+}
+
+/* ============ EXPORTAR CALIFICACIONES A EXCEL (con fórmulas editables) ============ */
+function colLetter(n){
+  let s = '';
+  while(n > 0){
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+async function exportCalificacionesToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar con fórmulas. Intenta de nuevo cuando tengas internet.');
+    return;
+  }
+  const evals = group.evaluations || [];
+  if(evals.length === 0){ showToast('No hay evaluaciones para exportar'); return; }
+  if(group.students.length === 0){ showToast('No hay estudiantes en este grupo'); return; }
+
+  showToast('Generando Excel…');
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Calificaciones');
+  const blockColors = ['F1ECFC','E6F8EF','FDF3DE','E7F1FC','FCEAF3'];
+
+  let col = 2;
+  const blocks = evals.map((ev, idx)=>{
+    const scoreCol = col, totalCol = col+1, exigCol = col+2, notaCol = col+3;
+    col += 4;
+    return { ev, scoreCol, totalCol, exigCol, notaCol, color: blockColors[idx % blockColors.length] };
+  });
+  const promedioCol = col; col++;
+  const finalCol = col; col++;
+
+  ws.mergeCells(1,1,2,1);
+  const studentHeader = ws.getCell(1,1);
+  studentHeader.value = 'Estudiante';
+  studentHeader.font = { bold:true, color:{argb:'FF2B2A3D'} };
+  studentHeader.alignment = { vertical:'middle', horizontal:'center' };
+  studentHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE9E6F5'} };
+
+  blocks.forEach(b=>{
+    ws.mergeCells(1, b.scoreCol, 1, b.notaCol);
+    const header = ws.getCell(1, b.scoreCol);
+    header.value = `${b.ev.name} (${b.ev.weightType === 'weighted' ? 'pondera ' + b.ev.weightPercent + '%' : 'promedio simple'})`;
+    header.font = { bold:true, size:10, color:{argb:'FF2B2A3D'} };
+    header.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+    for(let c=b.scoreCol; c<=b.notaCol; c++){
+      ws.getCell(1,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+b.color} };
+      ws.getCell(2,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+b.color} };
+    }
+    const subHeaders = ['Puntaje','Total','% Exig.','Nota'];
+    [b.scoreCol,b.totalCol,b.exigCol,b.notaCol].forEach((c,i)=>{
+      const cell = ws.getCell(2,c);
+      cell.value = subHeaders[i];
+      cell.font = { bold:true, size:9, color:{argb:'FF2B2A3D'} };
+      cell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+    });
+  });
+
+  ws.mergeCells(1, promedioCol, 2, promedioCol);
+  const promHeader = ws.getCell(1, promedioCol);
+  promHeader.value = 'Promedio simple';
+  promHeader.font = { bold:true, color:{argb:'FFFFFFFF'} };
+  promHeader.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+  promHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF2B2A3D'} };
+
+  ws.mergeCells(1, finalCol, 2, finalCol);
+  const finalHeader = ws.getCell(1, finalCol);
+  finalHeader.value = 'Nota final';
+  finalHeader.font = { bold:true, color:{argb:'FFFFFFFF'} };
+  finalHeader.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+  finalHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF2B2A3D'} };
+
+  group.students.forEach((student, si)=>{
+    const rowNum = 3 + si;
+    ws.getCell(rowNum, 1).value = student.name;
+    ws.getCell(rowNum, 1).font = { bold:true };
+
+    const notaRefs = [];
+    blocks.forEach(b=>{
+      const scoreVal = b.ev.scores ? b.ev.scores[student.id] : null;
+      const override = b.ev.overrides ? b.ev.overrides[student.id] : null;
+      const totalVal = (override && override.totalScore != null) ? override.totalScore : b.ev.totalScore;
+      const exigVal = (override && override.exigencia != null) ? override.exigencia : b.ev.exigencia;
+
+      ws.getCell(rowNum, b.scoreCol).value = (scoreVal !== null && scoreVal !== undefined) ? scoreVal : null;
+      ws.getCell(rowNum, b.totalCol).value = totalVal;
+      ws.getCell(rowNum, b.exigCol).value = exigVal;
+      [b.scoreCol, b.totalCol, b.exigCol].forEach(c=>{
+        ws.getCell(rowNum, c).alignment = { horizontal:'center', vertical:'middle' };
+      });
+
+      const S = colLetter(b.scoreCol) + rowNum;
+      const T = colLetter(b.totalCol) + rowNum;
+      const E = colLetter(b.exigCol) + rowNum;
+      const pExpr = `MIN(1,MAX(0,${S}/${T}))`;
+      const exigExpr = `(${E}/100)`;
+      const gradeFormula = `ROUND(MIN(7,MAX(1,IF(${pExpr}<=${exigExpr},1+3*(${pExpr}/${exigExpr}),4+3*(${pExpr}-${exigExpr})/(1-${exigExpr})))),1)`;
+      const notaCell = ws.getCell(rowNum, b.notaCol);
+      notaCell.value = { formula: `IF(OR(${S}="",${T}=0),"",${gradeFormula})` };
+      notaCell.alignment = { horizontal:'center', vertical:'middle' };
+      notaCell.font = { bold:true };
+      notaRefs.push({ ref: colLetter(b.notaCol) + rowNum, weighted: b.ev.weightType === 'weighted', weightPercent: b.ev.weightPercent || 0 });
+    });
+
+    const allRefs = notaRefs.map(n=>n.ref);
+    const promCell = ws.getCell(rowNum, promedioCol);
+    promCell.value = { formula: `IFERROR(ROUND(AVERAGE(${allRefs.join(',')}),1),"")` };
+    promCell.alignment = { horizontal:'center', vertical:'middle' };
+
+    const weightedRefs = notaRefs.filter(n=>n.weighted);
+    const simpleRefs = notaRefs.filter(n=>!n.weighted);
+    const weightTotal = weightedRefs.reduce((s,n)=> s + (n.weightPercent/100), 0);
+    const remaining = Math.max(0, 1 - weightTotal);
+
+    let finalFormula;
+    if(weightedRefs.length > 0 && simpleRefs.length > 0){
+      const weightedTerms = weightedRefs.map(n=> `${n.ref}*${(n.weightPercent/100)}`).join('+');
+      finalFormula = `IFERROR(ROUND(MIN(7,MAX(1,(${weightedTerms})+AVERAGE(${simpleRefs.map(n=>n.ref).join(',')})*${remaining})),1),"")`;
+    } else if(weightedRefs.length > 0){
+      const weightedTerms = weightedRefs.map(n=> `${n.ref}*${(n.weightPercent/100)}`).join('+');
+      const divisor = (weightTotal > 0 && weightTotal < 1) ? `/${weightTotal}` : '';
+      finalFormula = `IFERROR(ROUND(MIN(7,MAX(1,(${weightedTerms})${divisor})),1),"")`;
+    } else {
+      finalFormula = `IFERROR(ROUND(AVERAGE(${simpleRefs.map(n=>n.ref).join(',')}),1),"")`;
+    }
+    const finalCellObj = ws.getCell(rowNum, finalCol);
+    finalCellObj.value = { formula: finalFormula };
+    finalCellObj.alignment = { horizontal:'center', vertical:'middle' };
+    finalCellObj.font = { bold:true, color:{argb:'FF6C4EE3'} };
+  });
+
+  ws.getColumn(1).width = 22;
+  for(let c=2; c<=finalCol; c++){ ws.getColumn(c).width = 11; }
+  ws.getRow(1).height = 34;
+  ws.getRow(2).height = 26;
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safeGroupName = group.name.replace(/[^a-zA-Z0-9_\-]+/g,'_');
+  a.href = url;
+  a.download = `calificaciones_${safeGroupName}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Excel de calificaciones exportado');
 }
 
 /* ============ EXPORTAR A EXCEL (.xlsx con formato, con respaldo CSV sin conexión) ============ */
