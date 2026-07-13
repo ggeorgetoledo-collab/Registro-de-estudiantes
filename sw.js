@@ -1,4 +1,4 @@
-const CACHE_NAME = 'registro-clases-cache-v1';
+const CACHE_NAME = 'registro-clases-cache-v2';
 const ASSETS_TO_CACHE = [
   './registro-clases-6.html',
   './manifest.json',
@@ -22,24 +22,21 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Estrategia "red primero": si hay internet, siempre trae la versión más nueva
+// y actualiza la copia guardada. Solo usa la copia guardada si no hay conexión.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  if (!event.request.url.startsWith(self.location.origin)) return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
-          if (
-            networkResponse &&
-            networkResponse.status === 200 &&
-            event.request.url.startsWith(self.location.origin)
-          ) {
-            const responseClone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
-          }
-          return networkResponse;
-        })
-        .catch(() => cached);
-      return cached || fetchPromise;
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
+
