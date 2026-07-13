@@ -448,7 +448,8 @@ const DRIVE_FILE_NAME = 'registro-clases-data.json';
 let driveFileId = null;
 let driveTokenClient = null;
 
-function loadDriveClientId(){ return localStorage.getItem('gdrive_client_id') || ''; }
+const DEFAULT_CLIENT_ID = '305499160088-dk14k2puhdaso68o8hv7500kkct5savn.apps.googleusercontent.com';
+function loadDriveClientId(){ return localStorage.getItem('gdrive_client_id') || DEFAULT_CLIENT_ID; }
 function saveDriveClientId(id){ localStorage.setItem('gdrive_client_id', id); }
 
 function loadStoredDriveToken(){
@@ -614,12 +615,6 @@ function openDriveSettings(){
       <button class="modal-close" onclick="closeDriveSettings()">✕</button>
       <h2 style="border:none; padding-bottom:0;">☁️ Google Drive</h2>
       <p class="muted">Respalda y sincroniza tus datos entre dispositivos con tu propia cuenta de Google. Solo funciona si este archivo está alojado en una URL con https (no abierto como archivo local).</p>
-      <label>Client ID de Google (OAuth)</label>
-      <input type="text" id="driveClientIdInput" placeholder="xxxxx.apps.googleusercontent.com" value="${escapeHtml(clientId)}">
-      <div class="row" style="margin-top:8px;">
-        <button class="btn btn-outline btn-sm" onclick="saveDriveClientIdFromInput()">Guardar Client ID</button>
-      </div>
-      <hr class="divider">
       <div class="stat-row"><span>Estado</span><strong id="driveStatusText">${connected ? '☁️ Conectado' : 'No conectado'}</strong></div>
       <div class="row" style="margin-top:10px;">
         <button class="btn btn-accent btn-sm" onclick="connectDrive()">Conectar</button>
@@ -627,7 +622,15 @@ function openDriveSettings(){
         <button class="btn btn-danger btn-sm" onclick="disconnectDrive()">Desconectar</button>
       </div>
       <hr class="divider">
-      <p class="muted" style="font-size:0.76rem;">Para obtener tu Client ID: crea un proyecto gratuito en Google Cloud Console → habilita la "Google Drive API" → crea credenciales OAuth 2.0 de tipo "Aplicación web" → agrega la URL donde alojarás este archivo en "Orígenes de JavaScript autorizados" → copia el Client ID aquí.</p>
+      <details>
+        <summary class="muted" style="cursor:pointer; font-size:0.8rem;">Configuración avanzada (Client ID)</summary>
+        <label style="margin-top:10px;">Client ID de Google (OAuth)</label>
+        <input type="text" id="driveClientIdInput" placeholder="xxxxx.apps.googleusercontent.com" value="${escapeHtml(clientId)}">
+        <div class="row" style="margin-top:8px;">
+          <button class="btn btn-outline btn-sm" onclick="saveDriveClientIdFromInput()">Guardar Client ID</button>
+        </div>
+        <p class="muted" style="font-size:0.74rem; margin-top:8px;">Ya viene configurado por defecto. Solo cámbialo si te pidieron usar tu propio proyecto de Google.</p>
+      </details>
     </div>
   `;
   overlay.addEventListener('click', e=>{ if(e.target === overlay) closeDriveSettings(); });
