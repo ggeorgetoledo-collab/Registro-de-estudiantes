@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<script>
+  (function(){
+    try{
+      var t = localStorage.getItem('themePreference');
+      if(t === 'dark') document.documentElement.setAttribute('data-theme','dark');
+    }catch(e){}
+  })();
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Registro de Clases</title>
@@ -30,6 +38,25 @@
     --danger-border:rgba(240,85,74,0.35);
     --shadow: 0 6px 20px rgba(76,60,150,0.08);
     --radius: 12px;
+  }
+  :root[data-theme="dark"]{
+    --primary:#A78BFA;
+    --primary-dark:#C4B5FD;
+    --primary-light:rgba(167,139,250,0.16);
+    --primary-border:rgba(167,139,250,0.4);
+    --bg:#17141F;
+    --card-bg:#221E2E;
+    --text:#EDEAF5;
+    --text-dim:#A79FC4;
+    --border:#332C47;
+    --border-strong:#453A5E;
+    --success:#34D399;
+    --success-light:rgba(52,211,153,0.16);
+    --success-border:rgba(52,211,153,0.4);
+    --danger:#F87171;
+    --danger-light:rgba(248,113,113,0.16);
+    --danger-border:rgba(248,113,113,0.4);
+    --shadow: 0 6px 20px rgba(0,0,0,0.45);
   }
   *{box-sizing:border-box;}
   body{
@@ -81,7 +108,7 @@
     padding:8px 12px;
     border-radius:8px;
     border:1px solid var(--border-strong);
-    background:#fff;
+    background:var(--card-bg);
     color:var(--text);
     min-width:180px;
   }
@@ -160,7 +187,7 @@
     padding:9px 10px;
     border:1px solid var(--border-strong);
     border-radius:8px;
-    background:#fff;
+    background:var(--card-bg);
     color:var(--text);
     width:100%;
   }
@@ -222,6 +249,9 @@
   }
   .indicator-header-name{ max-width:110px; color:var(--text-dim); }
   .flex-between{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .accordion-header{ cursor:pointer; user-select:none; }
+  .accordion-header:hover{ opacity:0.85; }
+  .accordion-chevron{ display:inline-block; width:14px; color:var(--primary); font-weight:700; }
   .muted{ color:var(--text-dim); font-family:'Inter', sans-serif; font-size:0.82rem; }
   .divider{ border:none; border-top:1px solid var(--border); margin:16px 0; }
   .grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
@@ -354,7 +384,7 @@
     border-radius:8px;
     padding:5px;
     cursor:pointer;
-    background:#fff;
+    background:var(--card-bg);
     transition:background .12s ease;
     position:relative;
   }
@@ -381,9 +411,9 @@
     z-index:1000; padding:16px;
   }
   .modal-box{
-    background:#fff; border-radius:14px; padding:24px;
+    background:var(--card-bg); border-radius:14px; padding:24px;
     max-width:420px; width:100%; max-height:85vh; overflow-y:auto;
-    box-shadow:0 20px 50px rgba(43,42,61,0.3);
+    box-shadow:0 20px 50px rgba(0,0,0,0.35);
     font-family:'Inter', sans-serif;
   }
   .modal-close{
@@ -411,6 +441,7 @@
     <select id="groupSelect"></select>
     <button class="btn btn-accent btn-sm" id="newGroupBtn">+ Grupo</button>
     <button class="btn btn-outline btn-sm" id="driveSettingsBtn" onclick="openDriveSettings()" title="Google Drive">☁️ Drive</button>
+    <button class="btn btn-outline btn-sm" id="themeToggleBtn" onclick="toggleTheme()" title="Cambiar tema">🌙</button>
   </div>
 </header>
 
@@ -1849,6 +1880,13 @@ function editSession(sessionId){
 }
 
 /* ============ TAB: HISTORIAL ============ */
+let historialExpandedIds = new Set();
+function toggleHistorialSession(id){
+  if(historialExpandedIds.has(id)) historialExpandedIds.delete(id);
+  else historialExpandedIds.add(id);
+  renderHistorial(getActiveGroup());
+}
+
 function renderHistorial(group){
   const main = document.getElementById('main');
   const sessions = getActiveSessions(group).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
@@ -1864,18 +1902,23 @@ function renderHistorial(group){
     ${sessions.length === 0 ? '<div class="card app-font"><div class="empty-state">Aún no se han registrado clases para este grupo.</div></div>' : ''}
     ${sessions.map(session=>{
       const inds = session.indicatorSnapshot || group.indicators;
+      const expanded = historialExpandedIds.has(session.id);
+      const presentCount = session.entries.filter(e=> isEntryPresent(e)).length;
+      const absentCount = session.entries.length - presentCount;
       return `
       <div class="card app-font">
-        <div class="flex-between">
+        <div class="flex-between accordion-header" onclick="toggleHistorialSession('${session.id}')">
           <div>
+            <span class="accordion-chevron">${expanded ? '▾' : '▸'}</span>
             <span class="pill">${formatDate(session.date)}</span>
-            <span class="muted"> · ${session.time} hrs</span>
+            <span class="muted"> · ${session.time} hrs · ${presentCount} presente(s), ${absentCount} ausente(s)</span>
           </div>
-          <div class="row">
+          <div class="row" onclick="event.stopPropagation()">
             <button class="btn btn-outline btn-sm" onclick="editSession('${session.id}')">Editar</button>
             <button class="btn btn-danger btn-sm" onclick="deleteSession('${session.id}')">Eliminar</button>
           </div>
         </div>
+        ${expanded ? `
         <hr class="divider">
         <div style="overflow-x:auto;">
         <table>
@@ -1910,6 +1953,7 @@ function renderHistorial(group){
           </tbody>
         </table>
         </div>
+        ` : ''}
       </div>
     `;}).join('')}
   `;
@@ -3072,10 +3116,30 @@ function formatDate(dateStr){
   return `${d}/${m}/${y}`;
 }
 
+/* ============ TEMA CLARO / OSCURO ============ */
+function applyThemeIcon(){
+  const btn = document.getElementById('themeToggleBtn');
+  if(!btn) return;
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  btn.textContent = isDark ? '☀️' : '🌙';
+}
+function toggleTheme(){
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  if(isDark){
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('themePreference', 'light');
+  } else {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    localStorage.setItem('themePreference', 'dark');
+  }
+  applyThemeIcon();
+}
+
 /* ============ INICIO ============ */
 if(!state.schedule) state.schedule = [];
 ensureDefaultGroup();
 renderAll();
+applyThemeIcon();
 if(isDriveTokenValid(loadStoredDriveToken())){
   syncFromDrive();
 }
