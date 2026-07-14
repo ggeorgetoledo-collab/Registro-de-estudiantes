@@ -606,6 +606,21 @@ async function pushToDrive(){
       const file = await findDriveFile();
       if(file) driveFileId = file.id;
     }
+    if(driveFileId){
+      // Antes de sobrescribir, revisamos si otro dispositivo subió algo más nuevo mientras tanto
+      const remote = await downloadDriveFile(driveFileId);
+      if(remote && remote.updatedAt && remote.updatedAt > (state.updatedAt || 0)){
+        state = remote;
+        if(!state.schedule) state.schedule = [];
+        if(!state.periods) state.periods = [];
+        ensureDefaultGroup();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        renderAll();
+        showToast('⚠️ Otro dispositivo sincronizó cambios más recientes. Se cargaron esos en vez de sobrescribirlos.');
+        setDriveStatus('connected');
+        return;
+      }
+    }
     driveFileId = await uploadDriveFile(driveFileId, state);
     setDriveStatus('connected');
   }catch(e){
@@ -634,6 +649,14 @@ function openDriveSettings(){
         <button class="btn btn-danger btn-sm" onclick="disconnectDrive()">Desconectar</button>
       </div>
       <hr class="divider">
+      <p class="muted" style="font-weight:600; margin-bottom:4px;">Respaldo completo (todos los cursos y periodos)</p>
+      <div class="row">
+        <button class="btn btn-outline btn-sm" onclick="exportFullBackup()">⬇️ Descargar respaldo (.json)</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('restoreBackupInput').click()">📂 Restaurar respaldo</button>
+        <input type="file" id="restoreBackupInput" accept=".json" style="display:none;">
+      </div>
+      <p class="muted" style="font-size:0.74rem; margin-top:8px;">Guarda este archivo de vez en cuando en un lugar seguro. Si algo falla en este dispositivo (se borra el navegador, se pierde la conexión, etc.), puedes restaurar todo desde aquí.</p>
+      <hr class="divider">
       <details>
         <summary class="muted" style="cursor:pointer; font-size:0.8rem;">Configuración avanzada (Client ID)</summary>
         <label style="margin-top:10px;">Client ID de Google (OAuth)</label>
@@ -647,6 +670,47 @@ function openDriveSettings(){
   `;
   overlay.addEventListener('click', e=>{ if(e.target === overlay) closeDriveSettings(); });
   document.body.appendChild(overlay);
+  document.getElementById('restoreBackupInput').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(file) importFullBackup(file);
+  });
+}
+
+function exportFullBackup(){
+  const data = JSON.stringify(state, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `respaldo_registro_clases_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Respaldo completo descargado');
+}
+
+function importFullBackup(file){
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const data = JSON.parse(ev.target.result);
+      if(!data || !Array.isArray(data.groups)){ showToast('Ese archivo no es un respaldo válido'); return; }
+      if(!confirm('Esto reemplazará TODOS los datos actuales en este dispositivo por los del respaldo. ¿Continuar?')) return;
+      state = data;
+      if(!state.schedule) state.schedule = [];
+      if(!state.periods) state.periods = [];
+      if(state.activePeriodId === undefined) state.activePeriodId = null;
+      ensureDefaultGroup();
+      saveState();
+      closeDriveSettings();
+      renderAll();
+      showToast('Respaldo restaurado correctamente');
+    }catch(e){
+      showToast('No se pudo leer el archivo de respaldo');
+    }
+  };
+  reader.readAsText(file);
 }
 function closeDriveSettings(){
   const overlay = document.getElementById('driveModalOverlay');
@@ -977,12 +1041,14 @@ function renderNav(){
 function goToTab(tab){
   currentTab = tab;
   currentModule = moduleForTab(tab);
+  if(tab === 'registrar') registrarIndicatorSelection = null;
   renderNav();
   renderMain();
 }
 function goToModule(mod){
   currentModule = mod;
   currentTab = (MODULE_TABS[mod] || ['horario'])[0];
+  if(currentTab === 'registrar') registrarIndicatorSelection = null;
   renderNav();
   renderMain();
 }
@@ -1028,16 +1094,8 @@ function renderMain(){
 function groupHeaderCard(group){
   return `
   <div class="card app-font">
-    <div class="flex-between">
-      <div>
-        <div class="muted">Grupo actual</div>
-        <div style="font-size:1.2rem; font-weight:700; color:var(--text);">${escapeHtml(group.name)}</div>
-      </div>
-      <div class="row">
-        <button class="btn btn-outline btn-sm" onclick="renameGroup()">Renombrar</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteGroup()">Eliminar grupo</button>
-      </div>
-    </div>
+    <div class="muted">Grupo actual</div>
+    <div style="font-size:1.2rem; font-weight:700; color:var(--text);">${escapeHtml(group.name)}</div>
   </div>`;
 }
 function renameGroup(){
@@ -1062,7 +1120,18 @@ function deleteGroup(){
 function renderEstudiantes(group){
   const main = document.getElementById('main');
   main.innerHTML = `
-    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <div class="flex-between">
+        <div>
+          <div class="muted">Curso actual</div>
+          <div style="font-size:1.2rem; font-weight:700; color:var(--text);">${escapeHtml(group.name)}</div>
+        </div>
+        <div class="row">
+          <button class="btn btn-outline btn-sm" onclick="renameGroup()">Renombrar</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteGroup()">Eliminar curso</button>
+        </div>
+      </div>
+    </div>
     <div class="card app-font">
       <h2>Agregar estudiante</h2>
       <div class="row">
@@ -1090,6 +1159,10 @@ function renderEstudiantes(group){
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Estudiantes (${group.students.length})</h2>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="exportEstudiantesToExcel(getActiveGroup())">⬇️ Exportar lista</button>
+          <button class="btn btn-ink btn-sm" onclick="exportAllToExcel(getActiveGroup())">⬇️ Exportar TODO el curso</button>
+        </div>
       </div>
       ${group.students.length === 0 ? '<div class="empty-state">Aún no hay estudiantes en este grupo.</div>' :
         group.students.map(s=>`
@@ -1224,7 +1297,10 @@ function renderIndicadores(group){
       </div>
     </div>
     <div class="card app-font">
-      <h2>Indicadores actuales (${group.indicators.length})</h2>
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Indicadores actuales (${group.indicators.length})</h2>
+        <button class="btn btn-outline btn-sm" onclick="exportIndicadoresToExcel(getActiveGroup())">⬇️ Exportar</button>
+      </div>
       ${group.indicators.length === 0 ? '<div class="empty-state">Aún no hay indicadores definidos.</div>' :
         `<div>${group.indicators.map(ind=>`
           <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.levels || 5} niveles
@@ -1329,6 +1405,7 @@ function goToDateClass(entryId, iso){
   renderGroupSelect();
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
+  registrarIndicatorSelection = null;
   renderNav();
   const existingSession = getActiveSessions(group).find(s=> s.date === iso);
   if(existingSession){
@@ -1478,7 +1555,10 @@ function renderHorario(){
     </div>
 
     <div class="card app-font">
-      <h2>Clases en el horario (${schedule.length})</h2>
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Clases en el horario (${schedule.length})</h2>
+        <button class="btn btn-outline btn-sm" onclick="exportHorarioToExcel(getActiveGroup())">⬇️ Exportar horario del curso actual</button>
+      </div>
       ${schedule.length === 0 ? '<div class="empty-state">Aún no has agregado clases a tu horario.</div>' :
         `<table>
           <thead><tr><th>Día</th><th>Hora</th><th>Grupo</th><th>Nota</th><th></th></tr></thead>
@@ -1564,19 +1644,39 @@ function goToClass(entryId){
   renderGroupSelect();
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
+  registrarIndicatorSelection = null;
   renderNav();
   renderRegistrar(group, null, { date: computeDateForWeekday(entry.day), time: entry.startTime });
 }
 
 /* ============ TAB: REGISTRAR CLASE ============ */
+let registrarIndicatorSelection = null;
+let registrarCurrentSessionToEdit = null;
+let registrarCurrentPrefill = null;
+
+function toggleRegistrarIndicator(id, checked){
+  if(checked){
+    if(!registrarIndicatorSelection.includes(id)) registrarIndicatorSelection.push(id);
+  } else {
+    registrarIndicatorSelection = registrarIndicatorSelection.filter(i=>i!==id);
+  }
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+}
+function toggleAllIndicators(group, selectAll){
+  registrarIndicatorSelection = selectAll ? group.indicators.map(i=>i.id) : [];
+  renderRegistrar(group, registrarCurrentSessionToEdit, registrarCurrentPrefill);
+}
+
 function renderRegistrar(group, sessionToEdit, prefill){
   const main = document.getElementById('main');
   const today = new Date().toISOString().slice(0,10);
   const nowTime = new Date().toTimeString().slice(0,5);
   const isEdit = !!sessionToEdit;
+  registrarCurrentSessionToEdit = sessionToEdit || null;
+  registrarCurrentPrefill = prefill || null;
 
   if(group.students.length === 0){
-    main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega estudiantes en la pestaña "Estudiantes" antes de registrar una clase.</div></div>';
+    main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega estudiantes en la pestaña "Cursos" antes de registrar una clase.</div></div>';
     return;
   }
   if(group.indicators.length === 0){
@@ -1584,15 +1684,37 @@ function renderRegistrar(group, sessionToEdit, prefill){
     return;
   }
 
+  // Inicializar selección de indicadores para esta clase (banco de indicadores)
+  if(registrarIndicatorSelection === null){
+    if(isEdit && sessionToEdit.indicatorSnapshot){
+      registrarIndicatorSelection = sessionToEdit.indicatorSnapshot.map(i=>i.id);
+    } else if(group.lastUsedIndicatorIds && group.lastUsedIndicatorIds.length){
+      registrarIndicatorSelection = group.lastUsedIndicatorIds.filter(id=> group.indicators.some(i=>i.id===id));
+    } else {
+      registrarIndicatorSelection = [];
+    }
+  }
+  const selectedIndicators = group.indicators.filter(i=> registrarIndicatorSelection.includes(i.id));
+
   // Mapa rápido de valores previos si estamos editando
   const prevByStudent = {};
   if(isEdit){
     sessionToEdit.entries.forEach(e=> prevByStudent[e.studentId] = e);
   }
 
+  const saveButtonsRow = `
+    <div class="row">
+      <button class="btn btn-accent" onclick="handleSaveSession()">💾 ${isEdit ? 'Actualizar registro' : 'Guardar registro de esta clase'}</button>
+      ${isEdit ? '<button class="btn btn-outline" onclick="goToTab(\'historial\')">Cancelar</button>' : ''}
+    </div>
+  `;
+
   main.innerHTML = `
     ${groupHeaderCard(group)}
     ${isEdit ? '<div class="card app-font" style="border-left:4px solid var(--primary);"><strong>Editando clase existente</strong> <span class="muted">— los cambios reemplazarán el registro original.</span></div>' : ''}
+
+    ${saveButtonsRow}
+
     <div class="card app-font">
       <h2>Datos de la clase</h2>
       <div class="grid-2">
@@ -1608,13 +1730,32 @@ function renderRegistrar(group, sessionToEdit, prefill){
     </div>
 
     <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Indicadores de esta clase</h2>
+        <button class="btn btn-outline btn-sm" onclick="toggleAllIndicators(getActiveGroup(), ${selectedIndicators.length < group.indicators.length})">
+          ${selectedIndicators.length < group.indicators.length ? 'Seleccionar todos' : 'Deseleccionar todos'}
+        </button>
+      </div>
+      <p class="muted">Elige del banco de indicadores cuáles aplican a esta clase específica.</p>
+      <div>
+        ${group.indicators.map(ind=>`
+          <label style="display:inline-flex; align-items:center; gap:6px; margin:4px 10px 4px 0; font-family:'Inter',sans-serif; font-size:0.88rem;">
+            <input type="checkbox" value="${ind.id}" ${registrarIndicatorSelection.includes(ind.id) ? 'checked' : ''} onchange="toggleRegistrarIndicator('${ind.id}', this.checked)">
+            ${escapeHtml(ind.name)}
+          </label>
+        `).join('')}
+      </div>
+    </div>
+
+    ${selectedIndicators.length === 0 ? '<div class="card app-font"><div class="empty-state">Selecciona al menos un indicador arriba para completar el cotejo.</div></div>' : `
+    <div class="card app-font">
       <h2>Cotejo y observaciones por estudiante</h2>
       <div style="overflow-x:auto;">
       <table>
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${group.indicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
+            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
         </thead>
@@ -1624,7 +1765,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
             return `
             <tr>
               <td>${escapeHtml(s.name)}</td>
-              ${group.indicators.map(ind=>{
+              ${selectedIndicators.map(ind=>{
                 const levels = ind.levels || 5;
                 const prevVal = prevEntry ? prevEntry.cotejo[ind.id] : null;
                 let options = '<option value="">-</option>';
@@ -1648,52 +1789,52 @@ function renderRegistrar(group, sessionToEdit, prefill){
       </table>
       </div>
     </div>
+    `}
 
-    <div class="row">
-      <button class="btn btn-accent" id="saveSessionBtn">💾 ${isEdit ? 'Actualizar registro' : 'Guardar registro de esta clase'}</button>
-      ${isEdit ? '<button class="btn btn-outline" id="cancelEditBtn">Cancelar</button>' : ''}
-    </div>
+    ${saveButtonsRow}
   `;
+}
+
+function handleSaveSession(){
+  const group = getActiveGroup();
+  const sessionToEdit = registrarCurrentSessionToEdit;
+  const isEdit = !!sessionToEdit;
+  const selectedIndicators = group.indicators.filter(i=> registrarIndicatorSelection.includes(i.id));
+
+  const date = document.getElementById('sessionDate').value;
+  const time = document.getElementById('sessionTime').value;
+  if(!date || !time){ showToast('Indica fecha y horario'); return; }
+  if(selectedIndicators.length === 0){ showToast('Selecciona al menos un indicador'); return; }
+
+  const currentStudentIds = new Set(group.students.map(s=>s.id));
+  const newEntries = group.students.map(s=>{
+    const cotejo = {};
+    selectedIndicators.forEach(ind=>{
+      const sel = document.querySelector(`select[data-student="${s.id}"][data-indicator="${ind.id}"]`);
+      cotejo[ind.id] = sel && sel.value ? Number(sel.value) : null;
+    });
+    const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
+    return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
+  });
+  // Conservar datos de estudiantes que ya no están en el grupo pero tenían registro previo
+  const preservedEntries = isEdit ? sessionToEdit.entries.filter(e=> !currentStudentIds.has(e.studentId)) : [];
+  const entries = [...newEntries, ...preservedEntries];
+  const indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
 
   if(isEdit){
-    document.getElementById('cancelEditBtn').addEventListener('click', ()=>{
-      goToTab('historial');
-    });
-  }
-
-  document.getElementById('saveSessionBtn').addEventListener('click', ()=>{
-    const date = document.getElementById('sessionDate').value;
-    const time = document.getElementById('sessionTime').value;
-    if(!date || !time){ showToast('Indica fecha y horario'); return; }
-
-    const currentStudentIds = new Set(group.students.map(s=>s.id));
-    const newEntries = group.students.map(s=>{
-      const cotejo = {};
-      group.indicators.forEach(ind=>{
-        const sel = document.querySelector(`select[data-student="${s.id}"][data-indicator="${ind.id}"]`);
-        cotejo[ind.id] = sel && sel.value ? Number(sel.value) : null;
-      });
-      const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
-      return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
-    });
-    // Conservar datos de estudiantes que ya no están en el grupo pero tenían registro previo
-    const preservedEntries = isEdit ? sessionToEdit.entries.filter(e=> !currentStudentIds.has(e.studentId)) : [];
-    const entries = [...newEntries, ...preservedEntries];
-    const indicatorSnapshot = group.indicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
-
-    if(isEdit){
-      const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
-      if(idx !== -1){
-        group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot };
-      }
-      showToast('Registro actualizado correctamente');
-    } else {
-      group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId });
-      showToast('Clase registrada correctamente');
+    const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
+    if(idx !== -1){
+      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot };
     }
-    saveState();
-    goToTab('historial');
-  });
+    showToast('Registro actualizado correctamente');
+  } else {
+    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId });
+    showToast('Clase registrada correctamente');
+  }
+  group.lastUsedIndicatorIds = registrarIndicatorSelection.slice();
+  saveState();
+  registrarIndicatorSelection = null;
+  goToTab('historial');
 }
 
 function editSession(sessionId){
@@ -1702,6 +1843,7 @@ function editSession(sessionId){
   if(!session) return;
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
+  registrarIndicatorSelection = null;
   renderNav();
   renderRegistrar(group, session);
 }
@@ -1837,7 +1979,10 @@ function renderDecimas(group){
     </div>
 
     <div class="card app-font">
-      <h2>Total de décimas por estudiante</h2>
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Total de décimas por estudiante</h2>
+        <button class="btn btn-outline btn-sm" onclick="exportDecimasToExcel(getActiveGroup())">⬇️ Exportar</button>
+      </div>
       <table>
         <thead><tr><th>Estudiante</th><th>Total décimas</th></tr></thead>
         <tbody>
@@ -2357,18 +2502,11 @@ function colLetter(n){
   return s;
 }
 
-async function exportCalificacionesToExcel(group){
-  if(typeof ExcelJS === 'undefined'){
-    showToast('Se necesita conexión a internet para exportar con fórmulas. Intenta de nuevo cuando tengas internet.');
-    return;
-  }
+function addCalificacionesSheet(workbook, group){
   const evals = getActiveEvaluations(group);
   const gradeGroups = getActiveGradeGroups(group);
-  if(evals.length === 0){ showToast('No hay evaluaciones para exportar'); return; }
-  if(group.students.length === 0){ showToast('No hay estudiantes en este grupo'); return; }
+  if(evals.length === 0 || group.students.length === 0) return false;
 
-  showToast('Generando Excel…');
-  const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet('Calificaciones');
   const blockColors = ['F1ECFC','E6F8EF','FDF3DE','E7F1FC','FCEAF3'];
 
@@ -2531,18 +2669,19 @@ async function exportCalificacionesToExcel(group){
   for(let c=2; c<=finalCol; c++){ ws.getColumn(c).width = 11; }
   ws.getRow(1).height = 34;
   ws.getRow(2).height = 26;
+  return true;
+}
 
-  const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const safeGroupName = group.name.replace(/[^a-zA-Z0-9_\-]+/g,'_');
-  a.href = url;
-  a.download = `calificaciones_${safeGroupName}_${new Date().toISOString().slice(0,10)}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+async function exportCalificacionesToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar con fórmulas. Intenta de nuevo cuando tengas internet.');
+    return;
+  }
+  showToast('Generando Excel…');
+  const workbook = new ExcelJS.Workbook();
+  const added = addCalificacionesSheet(workbook, group);
+  if(!added){ showToast('No hay evaluaciones para exportar'); return; }
+  await downloadWorkbook(workbook, `calificaciones_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
   showToast('Excel de calificaciones exportado');
 }
 
@@ -2598,17 +2737,11 @@ function exportGroupToCSVFallback(group){
   showToast('Sin conexión: se exportó un .csv simple (sin colores). Ábrelo con Excel.');
 }
 
-async function exportGroupToExcel(group){
-  if(typeof ExcelJS === 'undefined'){
-    exportGroupToCSVFallback(group);
-    return;
-  }
+function addAsistenciaSheet(workbook, group){
   const sessions = getActiveSessions(group).sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
-  if(sessions.length === 0){ showToast('No hay registros para exportar'); return; }
+  if(sessions.length === 0) return false;
 
-  showToast('Generando Excel…');
-  const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet('Registro');
+  const ws = workbook.addWorksheet('Asistencia');
 
   const blockColors = ['F1ECFC','E6F8EF','FDF3DE','E7F1FC','FCEAF3'];
   let col = 2; // columna B
@@ -2623,7 +2756,6 @@ async function exportGroupToExcel(group){
   const summaryLabels = ['Presentes','Ausentes','Obtenido','Posible','% Logro'];
   const summaryEnd = summaryStart + summaryLabels.length - 1;
 
-  // Encabezado columna Estudiante (filas 1-2 combinadas)
   ws.mergeCells(1,1,2,1);
   const studentHeader = ws.getCell(1,1);
   studentHeader.value = 'Estudiante';
@@ -2631,7 +2763,6 @@ async function exportGroupToExcel(group){
   studentHeader.alignment = { vertical:'middle', horizontal:'center' };
   studentHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE9E6F5'} };
 
-  // Encabezados por bloque de clase
   blocks.forEach(block=>{
     ws.mergeCells(1, block.startCol, 1, block.endCol);
     const headerCell = ws.getCell(1, block.startCol);
@@ -2650,7 +2781,6 @@ async function exportGroupToExcel(group){
     });
   });
 
-  // Encabezado del resumen
   ws.mergeCells(1, summaryStart, 1, summaryEnd);
   const summaryHeader = ws.getCell(1, summaryStart);
   summaryHeader.value = 'Resumen';
@@ -2667,7 +2797,6 @@ async function exportGroupToExcel(group){
     ws.getCell(2,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF554C77'} };
   }
 
-  // Filas de datos: una por estudiante
   group.students.forEach((student, si)=>{
     const rowNum = 3 + si;
     const nameCell = ws.getCell(rowNum, 1);
@@ -2720,19 +2849,215 @@ async function exportGroupToExcel(group){
   for(let c=2; c<=summaryEnd; c++){ ws.getColumn(c).width = 13; }
   ws.getRow(1).height = 30;
   ws.getRow(2).height = 34;
+  return true;
+}
 
+async function exportGroupToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    exportGroupToCSVFallback(group);
+    return;
+  }
+  showToast('Generando Excel…');
+  const workbook = new ExcelJS.Workbook();
+  const added = addAsistenciaSheet(workbook, group);
+  if(!added){ showToast('No hay registros para exportar'); return; }
+  await downloadWorkbook(workbook, `registro_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Archivo Excel exportado');
+}
+
+function safeFileName(name){
+  return name.replace(/[^a-zA-Z0-9_\-]+/g,'_');
+}
+async function downloadWorkbook(workbook, filename){
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const safeGroupName = group.name.replace(/[^a-zA-Z0-9_\-]+/g,'_');
   a.href = url;
-  a.download = `registro_${safeGroupName}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast('Archivo Excel exportado');
+}
+
+/* ============ EXPORTAR: ESTUDIANTES ============ */
+function addEstudiantesSheet(workbook, group){
+  if(group.students.length === 0) return false;
+  const ws = workbook.addWorksheet('Estudiantes');
+  ws.getCell(1,1).value = 'Estudiante';
+  ws.getCell(1,1).font = { bold:true, color:{argb:'FFFFFFFF'} };
+  ws.getCell(1,1).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+  group.students.forEach((s, i)=>{ ws.getCell(2+i, 1).value = s.name; });
+  ws.getColumn(1).width = 28;
+  return true;
+}
+async function exportEstudiantesToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    exportSimpleCSV(`estudiantes_${safeFileName(group.name)}`, ['Estudiante'], group.students.map(s=>[s.name]));
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const added = addEstudiantesSheet(workbook, group);
+  if(!added){ showToast('No hay estudiantes para exportar'); return; }
+  await downloadWorkbook(workbook, `estudiantes_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Lista de estudiantes exportada');
+}
+
+/* ============ EXPORTAR: INDICADORES ============ */
+function addIndicadoresSheet(workbook, group){
+  if(group.indicators.length === 0) return false;
+  const ws = workbook.addWorksheet('Indicadores');
+  ['Indicador','Niveles de logro'].forEach((h,i)=>{
+    const cell = ws.getCell(1, i+1);
+    cell.value = h;
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+  });
+  group.indicators.forEach((ind, i)=>{
+    ws.getCell(2+i, 1).value = ind.name;
+    ws.getCell(2+i, 2).value = ind.levels || 5;
+  });
+  ws.getColumn(1).width = 30;
+  ws.getColumn(2).width = 16;
+  return true;
+}
+async function exportIndicadoresToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    exportSimpleCSV(`indicadores_${safeFileName(group.name)}`, ['Indicador','Niveles de logro'], group.indicators.map(i=>[i.name, i.levels || 5]));
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const added = addIndicadoresSheet(workbook, group);
+  if(!added){ showToast('No hay indicadores para exportar'); return; }
+  await downloadWorkbook(workbook, `indicadores_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Banco de indicadores exportado');
+}
+
+/* ============ EXPORTAR: HORARIO ============ */
+function addHorarioSheet(workbook, group){
+  const entries = state.schedule.filter(e=> e.groupId === group.id);
+  if(entries.length === 0) return false;
+  const ws = workbook.addWorksheet('Horario');
+  ['Día','Hora inicio','Hora término','Nota'].forEach((h,i)=>{
+    const cell = ws.getCell(1, i+1);
+    cell.value = h;
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+  });
+  entries.sort((a,b)=> a.day - b.day || a.startTime.localeCompare(b.startTime)).forEach((e, i)=>{
+    ws.getCell(2+i, 1).value = DAY_NAMES[e.day-1];
+    ws.getCell(2+i, 2).value = e.startTime;
+    ws.getCell(2+i, 3).value = e.endTime || '';
+    ws.getCell(2+i, 4).value = e.note || '';
+  });
+  [1,2,3,4].forEach(c=> ws.getColumn(c).width = 18);
+  return true;
+}
+async function exportHorarioToExcel(group){
+  const entries = state.schedule.filter(e=> e.groupId === group.id);
+  if(typeof ExcelJS === 'undefined'){
+    exportSimpleCSV(`horario_${safeFileName(group.name)}`, ['Día','Hora inicio','Hora término','Nota'],
+      entries.map(e=>[DAY_NAMES[e.day-1], e.startTime, e.endTime||'', e.note||'']));
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const added = addHorarioSheet(workbook, group);
+  if(!added){ showToast('No hay clases en el horario de este curso'); return; }
+  await downloadWorkbook(workbook, `horario_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Horario exportado');
+}
+
+/* ============ EXPORTAR: DÉCIMAS ============ */
+function addDecimasSheet(workbook, group){
+  const sessions = getActiveDecimas(group).filter(d=> d.values).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(sessions.length === 0 || group.students.length === 0) return false;
+  const ws = workbook.addWorksheet('Décimas');
+  const headerCell = ws.getCell(1,1);
+  headerCell.value = 'Estudiante';
+  headerCell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+  headerCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+  sessions.forEach((s,i)=>{
+    const cell = ws.getCell(1, 2+i);
+    cell.value = `${formatDate(s.date)}${s.note ? ' · ' + s.note : ''}`;
+    cell.font = { bold:true, size:10, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+    cell.alignment = { wrapText:true, horizontal:'center' };
+  });
+  const totalCol = 2 + sessions.length;
+  const totalHeader = ws.getCell(1, totalCol);
+  totalHeader.value = 'Total';
+  totalHeader.font = { bold:true, color:{argb:'FFFFFFFF'} };
+  totalHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF2B2A3D'} };
+
+  group.students.forEach((student, si)=>{
+    const rowNum = 2 + si;
+    ws.getCell(rowNum, 1).value = student.name;
+    sessions.forEach((s, i)=>{
+      const val = s.values ? s.values[student.id] : null;
+      ws.getCell(rowNum, 2+i).value = (val !== null && val !== undefined) ? val : '';
+      ws.getCell(rowNum, 2+i).alignment = { horizontal:'center' };
+    });
+    const totalCell = ws.getCell(rowNum, totalCol);
+    totalCell.value = computeStudentDecimasTotal(group, student.id);
+    totalCell.font = { bold:true, color:{argb:'FF6C4EE3'} };
+    totalCell.alignment = { horizontal:'center' };
+  });
+  ws.getColumn(1).width = 24;
+  for(let c=2; c<=totalCol; c++){ ws.getColumn(c).width = 14; }
+  return true;
+}
+async function exportDecimasToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar esta hoja.');
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const added = addDecimasSheet(workbook, group);
+  if(!added){ showToast('No hay registros de décimas para exportar'); return; }
+  await downloadWorkbook(workbook, `decimas_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Décimas exportadas');
+}
+
+/* ============ EXPORTAR TODO EL CURSO ============ */
+async function exportAllToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('Se necesita conexión a internet para generar el Excel completo.');
+    return;
+  }
+  showToast('Generando Excel completo del curso…');
+  const workbook = new ExcelJS.Workbook();
+  let any = false;
+  any = addEstudiantesSheet(workbook, group) || any;
+  any = addIndicadoresSheet(workbook, group) || any;
+  any = addHorarioSheet(workbook, group) || any;
+  any = addAsistenciaSheet(workbook, group) || any;
+  any = addCalificacionesSheet(workbook, group) || any;
+  any = addDecimasSheet(workbook, group) || any;
+  if(!any){ showToast('Este curso todavía no tiene datos para exportar'); return; }
+  await downloadWorkbook(workbook, `curso_completo_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Excel completo del curso exportado');
+}
+
+/* ============ EXPORTAR CSV SIMPLE (respaldo sin conexión) ============ */
+function csvEscapeSimple(val){
+  const s = String(val ?? '');
+  if(/[",\n;]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+function exportSimpleCSV(filenameBase, headers, rows){
+  const allRows = [headers, ...rows];
+  const csvContent = allRows.map(r=> r.map(csvEscapeSimple).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filenameBase}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Archivo exportado');
 }
 
 /* ============ UTILIDADES ============ */
