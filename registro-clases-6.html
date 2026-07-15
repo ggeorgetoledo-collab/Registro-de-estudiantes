@@ -1438,7 +1438,7 @@ function goToDateClass(entryId, iso){
   currentModule = moduleForTab('registrar');
   registrarIndicatorSelection = null;
   renderNav();
-  const existingSession = getActiveSessions(group).find(s=> s.date === iso);
+  const existingSession = getActiveSessions(group).find(s=> s.date === iso && s.time === entry.startTime);
   if(existingSession){
     renderRegistrar(group, existingSession);
   } else {
@@ -1482,7 +1482,7 @@ function renderHorario(){
           const schedForDay = schedule.filter(e=> e.day === jsWeekdayToOurDay(cell.date.getDay()));
           const dots = schedForDay.map(e=>{
             const g = state.groups.find(g=>g.id===e.groupId);
-            const registered = g ? getActiveSessions(g).some(s=> s.date === iso) : false;
+            const registered = g ? getActiveSessions(g).some(s=> s.date === iso && s.time === e.startTime) : false;
             return { color: groupColor(e.groupId).text, registered };
           });
           return `
@@ -1508,7 +1508,7 @@ function renderHorario(){
           return dayEntries.map(e=>{
             const g = state.groups.find(g=>g.id===e.groupId);
             const color = groupColor(e.groupId);
-            const registered = g ? getActiveSessions(g).some(s=> s.date === selectedCalendarDate) : false;
+            const registered = g ? getActiveSessions(g).some(s=> s.date === selectedCalendarDate && s.time === e.startTime) : false;
             return `
               <div class="day-detail-item" style="background:${color.bg}; border-color:${color.border};" onclick="goToDateClass('${e.id}','${selectedCalendarDate}')">
                 <div>
@@ -1677,7 +1677,13 @@ function goToClass(entryId){
   currentModule = moduleForTab('registrar');
   registrarIndicatorSelection = null;
   renderNav();
-  renderRegistrar(group, null, { date: computeDateForWeekday(entry.day), time: entry.startTime });
+  const targetDate = computeDateForWeekday(entry.day);
+  const existingSession = getActiveSessions(group).find(s=> s.date === targetDate && s.time === entry.startTime);
+  if(existingSession){
+    renderRegistrar(group, existingSession);
+  } else {
+    renderRegistrar(group, null, { date: targetDate, time: entry.startTime });
+  }
 }
 
 /* ============ TAB: REGISTRAR CLASE ============ */
