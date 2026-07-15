@@ -94,11 +94,36 @@
     margin-top:2px;
     letter-spacing:0.1px;
   }
-  #group-select-wrap{
+  #icon-actions-wrap{
     display:flex;
     align-items:center;
     gap:8px;
     font-family:'Inter', sans-serif;
+    flex-wrap:wrap;
+  }
+  #selector-bar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:16px;
+    align-items:center;
+    background:var(--card-bg);
+    border-bottom:1px solid var(--border);
+    padding:10px 24px;
+    font-family:'Inter', sans-serif;
+  }
+  .selector-group{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    flex-wrap:wrap;
+  }
+  .selector-label{
+    font-size:0.72rem;
+    font-weight:700;
+    color:var(--text-dim);
+    text-transform:uppercase;
+    letter-spacing:0.4px;
+    margin-right:2px;
   }
   select, input, textarea, button{
     font-family:'Inter', sans-serif;
@@ -433,18 +458,27 @@
     <h1>📋 Registro de Clases</h1>
     <div class="subtitle">Asistencia, observaciones y cotejo por indicadores — funciona sin conexión</div>
   </div>
-  <div id="group-select-wrap">
-    <select id="periodSelect" onchange="changePeriod(this.value)" title="Periodo lectivo"></select>
-    <button class="btn btn-accent btn-sm" onclick="createPeriod()" title="Crear nuevo periodo">+ Periodo</button>
-    <button class="btn btn-outline btn-sm" onclick="editPeriod()" title="Editar periodo actual">✎</button>
-    <button class="btn btn-danger btn-sm" onclick="deletePeriod()" title="Eliminar periodo actual">🗑</button>
-    <select id="groupSelect"></select>
-    <button class="btn btn-accent btn-sm" id="newGroupBtn">+ Grupo</button>
+  <div id="icon-actions-wrap">
     <button class="btn btn-outline btn-sm" id="driveSettingsBtn" onclick="openDriveSettings()" title="Google Drive">☁️ Drive</button>
     <button class="btn btn-outline btn-sm" id="reminderSettingsBtn" onclick="openReminderSettings()" title="Recordatorio de clases">🔔</button>
     <button class="btn btn-outline btn-sm" id="themeToggleBtn" onclick="toggleTheme()" title="Cambiar tema">🌙</button>
   </div>
 </header>
+
+<div id="selector-bar">
+  <div class="selector-group">
+    <span class="selector-label">Periodo</span>
+    <select id="periodSelect" onchange="changePeriod(this.value)" title="Periodo lectivo"></select>
+    <button class="btn btn-accent btn-sm" onclick="createPeriod()" title="Crear nuevo periodo">+</button>
+    <button class="btn btn-outline btn-sm" onclick="editPeriod()" title="Editar periodo actual">✎</button>
+    <button class="btn btn-danger btn-sm" onclick="deletePeriod()" title="Eliminar periodo actual">🗑</button>
+  </div>
+  <div class="selector-group">
+    <span class="selector-label">Curso</span>
+    <select id="groupSelect"></select>
+    <button class="btn btn-accent btn-sm" id="newGroupBtn">+ Curso</button>
+  </div>
+</div>
 
 <nav class="tabs app-font" id="modulesNav">
   <button data-module="horario" class="active">📅 Horario</button>
