@@ -3203,10 +3203,62 @@ function playAlarmSound(){
   }catch(e){ console.log('No se pudo reproducir el sonido', e); }
 }
 
-function triggerClassReminder(group, entry, minutesBefore){
-  playAlarmSound();
+let alarmLoopIntervalId = null;
+
+function startAlarmLoop(){
+  if(alarmLoopIntervalId) return;
+  const pulse = ()=>{
+    playAlarmSound();
+    if(navigator.vibrate) navigator.vibrate([400,200,400,200,400]);
+  };
+  pulse();
+  alarmLoopIntervalId = setInterval(pulse, 2200);
+}
+
+function stopAlarmLoop(){
+  if(alarmLoopIntervalId){
+    clearInterval(alarmLoopIntervalId);
+    alarmLoopIntervalId = null;
+  }
+  if(navigator.vibrate) navigator.vibrate(0);
+  closeAlarmBanner();
+}
+
+function closeAlarmBanner(){
+  const overlay = document.getElementById('alarmBannerOverlay');
+  if(overlay) overlay.remove();
+}
+
+function showAlarmBanner(group, entry, minutesBefore){
+  closeAlarmBanner();
   const groupName = group ? group.name : 'Tu clase';
-  showToast(`🔔 ${groupName} termina en ${minutesBefore} min — ¡no olvides registrar!`);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'alarmBannerOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="text-align:center;">
+      <div style="font-size:2.4rem;">🔔</div>
+      <h2 style="border:none; padding-bottom:0;">${escapeHtml(groupName)}</h2>
+      <p class="muted">Termina en ${minutesBefore} minutos — no olvides registrar la clase.</p>
+      <div class="row" style="justify-content:center; margin-top:14px;">
+        <button class="btn btn-accent" onclick="stopAlarmAndRegister('${group ? group.id : ''}','${entry.id}')">📝 Registrar ahora</button>
+        <button class="btn btn-outline" onclick="stopAlarmLoop()">🔕 Detener alarma</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function stopAlarmAndRegister(groupId, entryId){
+  stopAlarmLoop();
+  const entry = state.schedule.find(e=>e.id===entryId);
+  if(entry) goToClass(entryId);
+}
+
+function triggerClassReminder(group, entry, minutesBefore){
+  startAlarmLoop();
+  showAlarmBanner(group, entry, minutesBefore);
+  const groupName = group ? group.name : 'Tu clase';
   if('Notification' in window && Notification.permission === 'granted'){
     try{
       new Notification('Clase por terminar', {
@@ -3250,7 +3302,7 @@ function openReminderSettings(){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="closeReminderSettings()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🔔 Recordatorio de clases</h2>
-      <p class="muted">Te avisa con sonido (y notificación, si la permites) unos minutos antes de que termine cada clase de tu horario, para que no se te olvide registrarla.</p>
+      <p class="muted">Suena en bucle con vibración (y notificación, si la permites) unos minutos antes de que termine cada clase, hasta que tú la detengas — para que no se te olvide registrarla.</p>
       <label style="margin-top:10px; display:flex; align-items:center; gap:8px;">
         <input type="checkbox" id="reminderEnabled" style="width:auto;" ${settings.enabled ? 'checked' : ''}> Activar recordatorio
       </label>
@@ -3260,7 +3312,7 @@ function openReminderSettings(){
         <button class="btn btn-accent btn-sm" onclick="saveReminderSettingsFromModal()">Guardar</button>
         <button class="btn btn-outline btn-sm" onclick="playAlarmSound()">🔊 Probar sonido</button>
       </div>
-      <p class="muted" style="font-size:0.74rem; margin-top:10px;">Solo funciona mientras la app esté abierta (en primer o segundo plano) — si la cierras por completo, no sonará. Además, solo avisa para clases que tengan configurada una "Hora de término" en el Horario.</p>
+      <p class="muted" style="font-size:0.74rem; margin-top:10px;">Solo funciona mientras la app esté abierta (en primer o segundo plano) — si la cierras por completo, no sonará. La vibración solo está disponible en Android (Chrome), no en iPhone. Además, solo avisa para clases que tengan configurada una "Hora de término" en el Horario.</p>
     </div>
   `;
   overlay.addEventListener('click', e=>{ if(e.target === overlay) closeReminderSettings(); });
