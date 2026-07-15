@@ -797,9 +797,9 @@ function isEntryPresent(entry){
   return Object.values(entry.cotejo).some(v => v !== null && v !== undefined);
 }
 
-function computeStudentStats(group, studentId){
+function computeStudentStatsForSessions(group, studentId, sessions){
   let presentCount = 0, absentCount = 0, obtained = 0, maxPossible = 0;
-  getActiveSessions(group).forEach(session=>{
+  sessions.forEach(session=>{
     const entry = session.entries.find(e=> e.studentId === studentId);
     if(!entry) return;
     const inds = session.indicatorSnapshot || group.indicators;
@@ -819,6 +819,9 @@ function computeStudentStats(group, studentId){
   const total = presentCount + absentCount;
   const percent = maxPossible > 0 ? Math.round((obtained / maxPossible) * 100) : null;
   return { presentCount, absentCount, total, obtained, maxPossible, percent };
+}
+function computeStudentStats(group, studentId){
+  return computeStudentStatsForSessions(group, studentId, getActiveSessions(group));
 }
 
 /* ============ CALIFICACIONES: ESCALA CHILENA 1.0 - 7.0 (aprobación 4.0) ============ */
@@ -935,7 +938,7 @@ function totalWeightAssigned(group){
 
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [] };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -950,6 +953,8 @@ function ensureDefaultGroup(){
     if(!g.indicators) g.indicators = [];
     if(!g.sessions) g.sessions = [];
     if(!g.students) g.students = [];
+    if(!g.processes) g.processes = [];
+    if(g.activeProcessId === undefined) g.activeProcessId = null;
   });
   if(!state.periods) state.periods = [];
   if(state.activePeriodId === undefined) state.activePeriodId = null;
@@ -967,6 +972,107 @@ function getActiveDecimas(group){
 }
 function getActiveGradeGroups(group){
   return (group.gradeGroups || []).filter(g=> !state.activePeriodId || g.periodId === state.activePeriodId);
+}
+
+/* ============ PROCESOS (unidades dentro de un curso) ============ */
+function getActiveProcesses(group){
+  return (group.processes || []).filter(p=> !state.activePeriodId || p.periodId === state.activePeriodId);
+}
+function getActiveProcessSessions(group){
+  const periodSessions = getActiveSessions(group);
+  if(!group.activeProcessId) return periodSessions;
+  return periodSessions.filter(s=> s.processId === group.activeProcessId);
+}
+function processSelectorBar(group){
+  const processes = getActiveProcesses(group);
+  return `
+    <div class="card app-font" style="padding:12px 16px;">
+      <div class="selector-group">
+        <span class="selector-label">Proceso</span>
+        <select onchange="changeProcess(this.value)">
+          <option value="">Todos los procesos</option>
+          ${processes.map(p=>`<option value="${p.id}" ${p.id===group.activeProcessId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+        </select>
+        <button class="btn btn-accent btn-sm" onclick="createProcess()">+ Proceso</button>
+        <button class="btn btn-outline btn-sm" onclick="editProcess()">✎</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProcess()">🗑</button>
+        ${group.activeProcessId ? '<button class="btn btn-ink btn-sm" onclick="convertProcessToGrade()">🎯 Convertir en nota</button>' : ''}
+      </div>
+      <p class="muted" style="margin-top:6px; margin-bottom:0; font-size:0.78rem;">
+        ${group.activeProcessId ? 'Viendo solo las clases de este proceso — el resto del historial no influye aquí.' : 'Sin filtrar: se muestran las clases de todos los procesos de este periodo.'}
+      </p>
+    </div>
+  `;
+}
+function changeProcess(processId){
+  const group = getActiveGroup();
+  group.activeProcessId = processId || null;
+  saveState();
+  renderMain();
+}
+function createProcess(){
+  const group = getActiveGroup();
+  const name = prompt('Nombre del proceso o unidad (ej. "Unidad 1: Fracciones"):');
+  if(!name || !name.trim()) return;
+  const proc = { id: uid(), name: name.trim(), periodId: state.activePeriodId };
+  group.processes.push(proc);
+  group.activeProcessId = proc.id;
+  saveState();
+  renderMain();
+  showToast('Proceso creado: ' + proc.name);
+}
+function editProcess(){
+  const group = getActiveGroup();
+  const proc = group.processes.find(p=>p.id===group.activeProcessId);
+  if(!proc){ showToast('Selecciona un proceso específico para editarlo'); return; }
+  const newName = prompt('Nombre del proceso:', proc.name);
+  if(newName === null) return;
+  if(newName.trim()) proc.name = newName.trim();
+  saveState();
+  renderMain();
+}
+function deleteProcess(){
+  const group = getActiveGroup();
+  const proc = group.processes.find(p=>p.id===group.activeProcessId);
+  if(!proc){ showToast('Selecciona un proceso específico para eliminarlo'); return; }
+  if(!confirm(`¿Eliminar el proceso "${proc.name}"? Las clases que contiene no se borran, solo dejan de estar agrupadas bajo este proceso.`)) return;
+  group.processes = group.processes.filter(p=>p.id!==proc.id);
+  group.activeProcessId = null;
+  saveState();
+  renderMain();
+}
+function convertProcessToGrade(){
+  const group = getActiveGroup();
+  if(!group.activeProcessId){ showToast('Selecciona un proceso específico primero'); return; }
+  const proc = group.processes.find(p=>p.id===group.activeProcessId);
+  const sessions = getActiveProcessSessions(group);
+  if(sessions.length === 0){ showToast('Este proceso todavía no tiene clases registradas'); return; }
+
+  const name = prompt('Nombre de la evaluación a crear en Calificaciones:', proc ? proc.name : 'Evaluación de proceso');
+  if(!name || !name.trim()) return;
+  const exigenciaRaw = prompt('% de exigencia (aprobación = 4.0):', '60');
+  const exigencia = Number(exigenciaRaw) || 60;
+  const weightTypeRaw = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', 'simple');
+  const weightType = (weightTypeRaw || '').trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
+  let weightPercent = 0;
+  if(weightType === 'weighted'){
+    weightPercent = Number(prompt('% que pondera en la nota final:', '20')) || 0;
+  }
+
+  const scores = {};
+  group.students.forEach(s=>{
+    const stats = computeStudentStatsForSessions(group, s.id, sessions);
+    scores[s.id] = stats.percent === null ? null : stats.percent;
+  });
+
+  group.evaluations.push({
+    id: uid(), name: name.trim(), totalScore: 100, exigencia,
+    gradeGroupId: null, weightType, weightPercent,
+    scores, overrides: {}, periodId: state.activePeriodId
+  });
+  saveState();
+  showToast('Nota creada a partir de "' + (proc ? proc.name : name) + '"');
+  goToTab('calificaciones');
 }
 
 function renderPeriodSelect(){
@@ -1783,6 +1889,10 @@ function renderRegistrar(group, sessionToEdit, prefill){
 
   main.innerHTML = `
     ${groupHeaderCard(group)}
+    <div class="card app-font" style="padding:10px 16px;">
+      <span class="muted">Proceso activo: <strong style="color:var(--primary);">${group.activeProcessId ? escapeHtml((group.processes.find(p=>p.id===group.activeProcessId)||{}).name || '—') : 'Ninguno (todos los procesos)'}</strong></span>
+      <button class="btn btn-outline btn-sm" style="margin-left:8px;" onclick="goToTab('historial')">Cambiar</button>
+    </div>
     ${isEdit ? '<div class="card app-font" style="border-left:4px solid var(--primary);"><strong>Editando clase existente</strong> <span class="muted">— los cambios reemplazarán el registro original.</span></div>' : ''}
 
     ${saveButtonsRow}
@@ -1900,7 +2010,7 @@ function handleSaveSession(){
     }
     showToast('Registro actualizado correctamente');
   } else {
-    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId });
+    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: group.activeProcessId });
     showToast('Clase registrada correctamente');
   }
   group.lastUsedIndicatorIds = registrarIndicatorSelection.slice();
@@ -1930,17 +2040,18 @@ function toggleHistorialSession(id){
 
 function renderHistorial(group){
   const main = document.getElementById('main');
-  const sessions = getActiveSessions(group).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+  const sessions = getActiveProcessSessions(group).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
 
   main.innerHTML = `
     ${groupHeaderCard(group)}
+    ${processSelectorBar(group)}
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Historial de clases (${sessions.length})</h2>
         <button class="btn btn-ink btn-sm" id="exportBtn" title="Con internet: .xlsx con colores. Sin internet: .csv simple">⬇️ Exportar a Excel</button>
       </div>
     </div>
-    ${sessions.length === 0 ? '<div class="card app-font"><div class="empty-state">Aún no se han registrado clases para este grupo.</div></div>' : ''}
+    ${sessions.length === 0 ? '<div class="card app-font"><div class="empty-state">Aún no se han registrado clases para este grupo o proceso.</div></div>' : ''}
     ${sessions.map(session=>{
       const inds = session.indicatorSnapshot || group.indicators;
       const expanded = historialExpandedIds.has(session.id);
