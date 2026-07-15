@@ -1909,6 +1909,16 @@ function renderRegistrar(group, sessionToEdit, prefill){
           <input type="time" id="sessionTime" value="${isEdit ? sessionToEdit.time : (prefill && prefill.time ? prefill.time : nowTime)}">
         </div>
       </div>
+      <div style="margin-top:10px;">
+        <label>Proceso al que pertenece esta clase</label>
+        <select id="sessionProcess">
+          <option value="">Ninguno (sin proceso)</option>
+          ${getActiveProcesses(group).map(p=>{
+            const currentProcessId = isEdit ? sessionToEdit.processId : group.activeProcessId;
+            return `<option value="${p.id}" ${p.id===currentProcessId ? 'selected' : ''}>${escapeHtml(p.name)}</option>`;
+          }).join('')}
+        </select>
+      </div>
     </div>
 
     <div class="card app-font">
@@ -1985,6 +1995,7 @@ function handleSaveSession(){
 
   const date = document.getElementById('sessionDate').value;
   const time = document.getElementById('sessionTime').value;
+  const selectedProcessId = document.getElementById('sessionProcess').value || null;
   if(!date || !time){ showToast('Indica fecha y horario'); return; }
   if(selectedIndicators.length === 0){ showToast('Selecciona al menos un indicador'); return; }
 
@@ -2006,11 +2017,11 @@ function handleSaveSession(){
   if(isEdit){
     const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
     if(idx !== -1){
-      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot };
+      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot, processId: selectedProcessId };
     }
     showToast('Registro actualizado correctamente');
   } else {
-    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: group.activeProcessId });
+    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId });
     showToast('Clase registrada correctamente');
   }
   group.lastUsedIndicatorIds = registrarIndicatorSelection.slice();
