@@ -441,6 +441,7 @@
     <select id="groupSelect"></select>
     <button class="btn btn-accent btn-sm" id="newGroupBtn">+ Grupo</button>
     <button class="btn btn-outline btn-sm" id="driveSettingsBtn" onclick="openDriveSettings()" title="Google Drive">☁️ Drive</button>
+    <button class="btn btn-outline btn-sm" id="reminderSettingsBtn" onclick="openReminderSettings()" title="Recordatorio de clases">🔔</button>
     <button class="btn btn-outline btn-sm" id="themeToggleBtn" onclick="toggleTheme()" title="Cambiar tema">🌙</button>
   </div>
 </header>
@@ -3122,6 +3123,130 @@ function formatDate(dateStr){
   return `${d}/${m}/${y}`;
 }
 
+/* ============ RECORDATORIO DE FIN DE CLASE ============ */
+function loadReminderSettings(){
+  try{
+    const raw = localStorage.getItem('reminderSettings');
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return { enabled: false, minutesBefore: 5 };
+}
+function saveReminderSettings(settings){
+  localStorage.setItem('reminderSettings', JSON.stringify(settings));
+}
+function getFiredReminders(){
+  try{
+    const raw = localStorage.getItem('firedReminders');
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return {};
+}
+function markReminderFired(key){
+  const fired = getFiredReminders();
+  fired[key] = true;
+  const todayISO = toISODate(new Date());
+  Object.keys(fired).forEach(k=>{ if(!k.endsWith(todayISO)) delete fired[k]; });
+  localStorage.setItem('firedReminders', JSON.stringify(fired));
+}
+
+function playAlarmSound(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const beep = (delay)=>{
+      setTimeout(()=>{
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 880;
+        gain.gain.value = 0.2;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+      }, delay);
+    };
+    beep(0); beep(400); beep(800);
+  }catch(e){ console.log('No se pudo reproducir el sonido', e); }
+}
+
+function triggerClassReminder(group, entry, minutesBefore){
+  playAlarmSound();
+  const groupName = group ? group.name : 'Tu clase';
+  showToast(`🔔 ${groupName} termina en ${minutesBefore} min — ¡no olvides registrar!`);
+  if('Notification' in window && Notification.permission === 'granted'){
+    try{
+      new Notification('Clase por terminar', {
+        body: `${groupName} termina en ${minutesBefore} minutos. No olvides registrar la clase.`,
+        icon: './icon-192.png'
+      });
+    }catch(e){}
+  }
+}
+
+function checkClassReminders(){
+  const settings = loadReminderSettings();
+  if(!settings.enabled) return;
+  const now = new Date();
+  const todayISO = toISODate(now);
+  const todayWeekday = jsWeekdayToOurDay(now.getDay());
+  const nowMinutes = now.getHours()*60 + now.getMinutes();
+  const fired = getFiredReminders();
+
+  state.schedule.forEach(entry=>{
+    if(entry.day !== todayWeekday || !entry.endTime) return;
+    const [eh, em] = entry.endTime.split(':').map(Number);
+    const endMinutes = eh*60 + em;
+    const alertMinutes = endMinutes - (settings.minutesBefore || 5);
+    const key = entry.id + '_' + todayISO;
+    if(fired[key]) return;
+    if(nowMinutes >= alertMinutes && nowMinutes < endMinutes){
+      const group = state.groups.find(g=>g.id===entry.groupId);
+      triggerClassReminder(group, entry, settings.minutesBefore || 5);
+      markReminderFired(key);
+    }
+  });
+}
+
+function openReminderSettings(){
+  const settings = loadReminderSettings();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'reminderModalOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeReminderSettings()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🔔 Recordatorio de clases</h2>
+      <p class="muted">Te avisa con sonido (y notificación, si la permites) unos minutos antes de que termine cada clase de tu horario, para que no se te olvide registrarla.</p>
+      <label style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="reminderEnabled" style="width:auto;" ${settings.enabled ? 'checked' : ''}> Activar recordatorio
+      </label>
+      <label style="margin-top:10px;">Minutos antes de que termine la clase</label>
+      <input type="number" id="reminderMinutes" min="1" max="60" value="${settings.minutesBefore || 5}">
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveReminderSettingsFromModal()">Guardar</button>
+        <button class="btn btn-outline btn-sm" onclick="playAlarmSound()">🔊 Probar sonido</button>
+      </div>
+      <p class="muted" style="font-size:0.74rem; margin-top:10px;">Solo funciona mientras la app esté abierta (en primer o segundo plano) — si la cierras por completo, no sonará. Además, solo avisa para clases que tengan configurada una "Hora de término" en el Horario.</p>
+    </div>
+  `;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) closeReminderSettings(); });
+  document.body.appendChild(overlay);
+}
+function closeReminderSettings(){
+  const overlay = document.getElementById('reminderModalOverlay');
+  if(overlay) overlay.remove();
+}
+function saveReminderSettingsFromModal(){
+  const enabled = document.getElementById('reminderEnabled').checked;
+  const minutesBefore = Number(document.getElementById('reminderMinutes').value) || 5;
+  saveReminderSettings({ enabled, minutesBefore });
+  if(enabled && 'Notification' in window && Notification.permission === 'default'){
+    Notification.requestPermission();
+  }
+  showToast('Preferencias de recordatorio guardadas');
+  closeReminderSettings();
+}
+
 /* ============ TEMA CLARO / OSCURO ============ */
 function applyThemeIcon(){
   const btn = document.getElementById('themeToggleBtn');
@@ -3149,6 +3274,10 @@ applyThemeIcon();
 if(isDriveTokenValid(loadStoredDriveToken())){
   syncFromDrive();
 }
+
+// Revisa cada 20 segundos si toca avisar del fin de alguna clase
+checkClassReminders();
+setInterval(checkClassReminders, 20000);
 
 // Revisa cambios nuevos en Drive cada 30 segundos (evita interrumpir mientras se registra una clase)
 setInterval(()=>{
