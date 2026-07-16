@@ -457,6 +457,7 @@
   <div>
     <h1>📋 Registro de Clases</h1>
     <div class="subtitle">Asistencia, observaciones y cotejo por indicadores — funciona sin conexión</div>
+    <div class="subtitle" id="driveHeaderStatus" style="font-weight:700; margin-top:2px;"></div>
   </div>
   <div id="icon-actions-wrap">
     <button class="btn btn-outline btn-sm" id="driveSettingsBtn" onclick="openDriveSettings()" title="Google Drive">☁️ Drive</button>
@@ -541,6 +542,8 @@ function storeDriveToken(tok){ localStorage.setItem('gdrive_token', JSON.stringi
 function clearDriveToken(){ localStorage.removeItem('gdrive_token'); }
 function isDriveTokenValid(tok){ return !!(tok && tok.access_token && tok.expires_at && Date.now() < tok.expires_at - 60000); }
 
+let driveLastKnownConnected = null;
+
 function setDriveStatus(status){
   const map = {
     connected: '☁️ Conectado',
@@ -551,6 +554,42 @@ function setDriveStatus(status){
   const text = map[status] || map.disconnected;
   const modalEl = document.getElementById('driveStatusText');
   if(modalEl) modalEl.textContent = text;
+  updateDriveHeaderBadge();
+}
+
+function updateDriveHeaderBadge(){
+  const badge = document.getElementById('driveHeaderStatus');
+  if(!badge) return;
+  const stored = loadStoredDriveToken();
+  const connected = isDriveTokenValid(stored);
+  const email = localStorage.getItem('gdrive_email');
+  if(connected){
+    badge.textContent = email ? `☁️ ${email}` : '☁️ Conectado';
+    badge.style.color = 'var(--success)';
+  } else {
+    badge.textContent = '⚠️ Drive desconectado';
+    badge.style.color = 'var(--danger)';
+  }
+  if(driveLastKnownConnected === true && connected === false){
+    showToast('⚠️ Se cerró tu sesión de Google Drive. Tus cambios NO se están respaldando hasta que vuelvas a conectar.');
+  }
+  driveLastKnownConnected = connected;
+}
+
+async function fetchConnectedEmail(){
+  try{
+    const stored = loadStoredDriveToken();
+    if(!isDriveTokenValid(stored)) return;
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${stored.access_token}` }
+    });
+    if(!res.ok) return;
+    const data = await res.json();
+    if(data.email){
+      localStorage.setItem('gdrive_email', data.email);
+      updateDriveHeaderBadge();
+    }
+  }catch(e){ /* no crítico */ }
 }
 
 function connectDrive(){
@@ -563,7 +602,7 @@ function connectDrive(){
   const stored = loadStoredDriveToken();
   driveTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
-    scope: 'https://www.googleapis.com/auth/drive.appdata',
+    scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email',
     callback: (resp)=>{
       if(resp.error){
         showToast('No se pudo conectar con Google Drive');
@@ -574,6 +613,7 @@ function connectDrive(){
       storeDriveToken(tok);
       setDriveStatus('connected');
       showToast('Conectado a Google Drive');
+      fetchConnectedEmail();
       syncFromDrive();
     }
   });
@@ -583,6 +623,7 @@ function connectDrive(){
 function disconnectDrive(){
   clearDriveToken();
   driveFileId = null;
+  localStorage.removeItem('gdrive_email');
   setDriveStatus('disconnected');
   showToast('Se desconectó Google Drive (tus datos siguen guardados en este navegador)');
 }
@@ -3479,8 +3520,10 @@ if(!state.schedule) state.schedule = [];
 ensureDefaultGroup();
 renderAll();
 applyThemeIcon();
+updateDriveHeaderBadge();
 if(isDriveTokenValid(loadStoredDriveToken())){
   syncFromDrive();
+  fetchConnectedEmail();
 }
 
 // Revisa cada 20 segundos si toca avisar del fin de alguna clase
@@ -3489,6 +3532,7 @@ setInterval(checkClassReminders, 20000);
 
 // Revisa cambios nuevos en Drive cada 30 segundos (evita interrumpir mientras se registra una clase)
 setInterval(()=>{
+  updateDriveHeaderBadge();
   if(currentTab === 'registrar') return;
   if(document.hidden) return;
   if(isDriveTokenValid(loadStoredDriveToken())){
@@ -3498,6 +3542,7 @@ setInterval(()=>{
 
 // Revisa apenas vuelves a esta pestaña/app
 document.addEventListener('visibilitychange', ()=>{
+  updateDriveHeaderBadge();
   if(!document.hidden && currentTab !== 'registrar' && isDriveTokenValid(loadStoredDriveToken())){
     syncFromDrive();
   }
