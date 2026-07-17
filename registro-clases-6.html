@@ -502,9 +502,14 @@
 /* ============ ESTADO Y PERSISTENCIA (100% local, sin conexión) ============ */
 const STORAGE_KEY = 'registroClasesApp_v1';
 
+function getStorageKeyForEmail(email){
+  return email ? `${STORAGE_KEY}::${email}` : STORAGE_KEY;
+}
+let currentStorageKey = getStorageKeyForEmail(localStorage.getItem('gdrive_email'));
+
 function loadState(){
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(currentStorageKey);
     if(raw) return JSON.parse(raw);
   }catch(e){ console.error('Error leyendo almacenamiento', e); }
   return { groups: [], activeGroupId: null, schedule: [], periods: [], activePeriodId: null };
@@ -515,12 +520,37 @@ let state = loadState();
 function saveState(){
   state.updatedAt = Date.now();
   try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(currentStorageKey, JSON.stringify(state));
   }catch(e){
     console.error('Error guardando', e);
     showToast('No se pudo guardar (almacenamiento lleno o bloqueado por el navegador)');
   }
   pushToDrive();
+}
+
+// Separa el almacenamiento local cuando se detecta una cuenta de Google distinta a la última usada en este dispositivo
+function switchAccountStorage(oldEmail, newEmail){
+  if(!oldEmail){
+    // Primera vez que se conecta una cuenta: los datos actuales pasan a pertenecer a esta cuenta (no se pierde nada)
+    currentStorageKey = getStorageKeyForEmail(newEmail);
+    try{ localStorage.setItem(currentStorageKey, JSON.stringify(state)); }catch(e){}
+    return;
+  }
+  // Cambio real de cuenta: se guarda lo de la cuenta anterior tal cual, y se aíslan los datos de la nueva
+  const oldKey = getStorageKeyForEmail(oldEmail);
+  try{ localStorage.setItem(oldKey, JSON.stringify(state)); }catch(e){}
+
+  const newKey = getStorageKeyForEmail(newEmail);
+  let newState;
+  try{
+    const raw = localStorage.getItem(newKey);
+    newState = raw ? JSON.parse(raw) : { groups: [], activeGroupId: null, schedule: [], periods: [], activePeriodId: null };
+  }catch(e){
+    newState = { groups: [], activeGroupId: null, schedule: [], periods: [], activePeriodId: null };
+  }
+  currentStorageKey = newKey;
+  state = newState;
+  ensureDefaultGroup();
 }
 
 function uid(){ return 'id_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
@@ -588,10 +618,19 @@ async function fetchConnectedEmail(){
     });
     if(!res.ok) return;
     const data = await res.json();
-    if(data.email){
+    if(!data.email) return;
+    const previousEmail = localStorage.getItem('gdrive_email');
+    if(data.email !== previousEmail){
+      const isRealSwitch = !!previousEmail;
+      switchAccountStorage(previousEmail, data.email);
       localStorage.setItem('gdrive_email', data.email);
-      updateDriveHeaderBadge();
+      driveFileId = null; // el archivo de Drive de la cuenta anterior ya no aplica
+      renderAll();
+      if(isRealSwitch){
+        showToast('Cuenta de Google distinta detectada (' + data.email + ') — se separaron los datos de cada cuenta.');
+      }
     }
+    updateDriveHeaderBadge();
   }catch(e){ /* no crítico */ }
 }
 
@@ -606,7 +645,7 @@ function connectDrive(){
   driveTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
     scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email',
-    callback: (resp)=>{
+    callback: async (resp)=>{
       if(resp.error){
         showToast('No se pudo conectar con Google Drive');
         setDriveStatus('error');
@@ -616,7 +655,7 @@ function connectDrive(){
       storeDriveToken(tok);
       setDriveStatus('connected');
       showToast('Conectado a Google Drive');
-      fetchConnectedEmail();
+      await fetchConnectedEmail();
       syncFromDrive();
     }
   });
@@ -626,7 +665,7 @@ function connectDrive(){
 function disconnectDrive(){
   clearDriveToken();
   driveFileId = null;
-  localStorage.removeItem('gdrive_email');
+  // Mantenemos gdrive_email para no perder de vista de quién son los datos guardados en este dispositivo
   setDriveStatus('disconnected');
   showToast('Se desconectó Google Drive (tus datos siguen guardados en este navegador)');
 }
@@ -691,7 +730,7 @@ async function syncFromDrive(){
         state = remote;
         if(!state.schedule) state.schedule = [];
         ensureDefaultGroup();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(currentStorageKey, JSON.stringify(state));
         renderAll();
         showToast('Datos actualizados desde Google Drive');
       } else if(localUpdated > remoteUpdated){
@@ -724,7 +763,7 @@ async function pushToDrive(){
         if(!state.schedule) state.schedule = [];
         if(!state.periods) state.periods = [];
         ensureDefaultGroup();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(currentStorageKey, JSON.stringify(state));
         renderAll();
         showToast('⚠️ Otro dispositivo sincronizó cambios más recientes. Se cargaron esos en vez de sobrescribirlos.');
         setDriveStatus('connected');
@@ -2583,6 +2622,10 @@ function renderDecimaValues(group, session){
         <button class="btn btn-outline btn-sm" onclick="closeDecimaValues()">← Volver</button>
       </div>
       <p class="muted">Ingresa el valor de décimas para cada estudiante (por ejemplo 0.1, 0.3, -0.2).</p>
+      <div class="row" style="margin-bottom:10px;">
+        <input type="number" id="decimaBulkValue" step="0.1" placeholder="Valor" style="width:100px;">
+        <button class="btn btn-accent btn-sm" onclick="applyDecimaToAll('${session.id}')">✅ Asignar a todo el curso</button>
+      </div>
       <div style="overflow-x:auto;">
       <table>
         <thead><tr><th>Estudiante</th><th>Décimas</th></tr></thead>
@@ -2603,6 +2646,20 @@ function renderDecimaValues(group, session){
       </div>
     </div>
   `;
+}
+
+function applyDecimaToAll(sessionId){
+  const group = getActiveGroup();
+  const session = group.decimas.find(d=>d.id===sessionId);
+  if(!session) return;
+  const raw = document.getElementById('decimaBulkValue').value;
+  const value = raw === '' ? null : Number(raw);
+  if(value === null || isNaN(value)){ showToast('Ingresa un valor primero'); return; }
+  if(!session.values) session.values = {};
+  group.students.forEach(s=>{ session.values[s.id] = value; });
+  saveState();
+  renderDecimaValues(group, session);
+  showToast('Se asignó ' + value + ' a todo el curso');
 }
 
 function saveDecimaValue(sessionId, studentId, value){
@@ -3886,8 +3943,7 @@ renderAll();
 applyThemeIcon();
 updateDriveHeaderBadge();
 if(isDriveTokenValid(loadStoredDriveToken())){
-  syncFromDrive();
-  fetchConnectedEmail();
+  fetchConnectedEmail().then(()=> syncFromDrive());
 }
 
 // Revisa cada 20 segundos si toca avisar del fin de alguna clase
