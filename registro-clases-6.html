@@ -467,13 +467,15 @@
 </header>
 
 <div id="selector-bar">
-  <div class="selector-group">
-    <span class="selector-label">Periodo</span>
-    <select id="periodSelect" onchange="changePeriod(this.value)" title="Periodo lectivo"></select>
-    <button class="btn btn-accent btn-sm" onclick="createPeriod()" title="Crear nuevo periodo">+</button>
-    <button class="btn btn-outline btn-sm" onclick="editPeriod()" title="Editar periodo actual">✎</button>
-    <button class="btn btn-danger btn-sm" onclick="deletePeriod()" title="Eliminar periodo actual">🗑</button>
-  </div>
+  <details id="periodoDetails" class="selector-group">
+    <summary class="selector-label" style="cursor:pointer;">⚙️ Más opciones (Periodo) ▾</summary>
+    <div class="selector-group" style="margin-top:8px;">
+      <select id="periodSelect" onchange="changePeriod(this.value)" title="Periodo lectivo"></select>
+      <button class="btn btn-accent btn-sm" onclick="createPeriod()" title="Crear nuevo periodo">+</button>
+      <button class="btn btn-outline btn-sm" onclick="editPeriod()" title="Editar periodo actual">✎</button>
+      <button class="btn btn-danger btn-sm" onclick="deletePeriod()" title="Eliminar periodo actual">🗑</button>
+    </div>
+  </details>
   <div class="selector-group">
     <span class="selector-label">Curso</span>
     <select id="groupSelect"></select>
@@ -482,7 +484,8 @@
 </div>
 
 <nav class="tabs app-font" id="modulesNav">
-  <button data-module="horario" class="active">📅 Horario</button>
+  <button data-module="inicio" class="active">🏠 Inicio</button>
+  <button data-module="horario">📅 Horario</button>
   <button data-module="cursos">👥 Cursos</button>
   <button data-module="trabajo">📝 Trabajo en clases</button>
   <button data-module="calificaciones">🎯 Calificaciones</button>
@@ -1028,20 +1031,22 @@ function processSelectorBar(group){
   const processes = getActiveProcesses(group);
   return `
     <div class="card app-font" style="padding:12px 16px;">
-      <div class="selector-group">
-        <span class="selector-label">Proceso</span>
-        <select onchange="changeProcess(this.value)">
-          <option value="">Todos los procesos</option>
-          ${processes.map(p=>`<option value="${p.id}" ${p.id===group.activeProcessId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
-        </select>
-        <button class="btn btn-accent btn-sm" onclick="createProcess()">+ Proceso</button>
-        <button class="btn btn-outline btn-sm" onclick="editProcess()">✎</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteProcess()">🗑</button>
-        ${group.activeProcessId ? '<button class="btn btn-ink btn-sm" onclick="convertProcessToGrade()">🎯 Convertir en nota</button>' : ''}
-      </div>
-      <p class="muted" style="margin-top:6px; margin-bottom:0; font-size:0.78rem;">
-        ${group.activeProcessId ? 'Viendo solo las clases de este proceso — el resto del historial no influye aquí.' : 'Sin filtrar: se muestran las clases de todos los procesos de este periodo.'}
-      </p>
+      <details ${group.activeProcessId ? 'open' : ''}>
+        <summary class="selector-label" style="cursor:pointer;">⚙️ Más opciones (Proceso) ▾</summary>
+        <div class="selector-group" style="margin-top:8px;">
+          <select onchange="changeProcess(this.value)">
+            <option value="">Todos los procesos</option>
+            ${processes.map(p=>`<option value="${p.id}" ${p.id===group.activeProcessId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+          </select>
+          <button class="btn btn-accent btn-sm" onclick="createProcess()">+ Proceso</button>
+          <button class="btn btn-outline btn-sm" onclick="editProcess()">✎</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteProcess()">🗑</button>
+          ${group.activeProcessId ? '<button class="btn btn-ink btn-sm" onclick="convertProcessToGrade()">🎯 Convertir en nota</button>' : ''}
+        </div>
+        <p class="muted" style="margin-top:6px; margin-bottom:0; font-size:0.78rem;">
+          ${group.activeProcessId ? 'Viendo solo las clases de este proceso — el resto del historial no influye aquí.' : 'Sin filtrar: se muestran las clases de todos los procesos de este periodo.'}
+        </p>
+      </details>
     </div>
   `;
 }
@@ -1051,26 +1056,54 @@ function changeProcess(processId){
   saveState();
   renderMain();
 }
-function createProcess(){
+function openProcessForm(processId){
   const group = getActiveGroup();
-  const name = prompt('Nombre del proceso o unidad (ej. "Unidad 1: Fracciones"):');
-  if(!name || !name.trim()) return;
-  const proc = { id: uid(), name: name.trim(), periodId: state.activePeriodId };
-  group.processes.push(proc);
-  group.activeProcessId = proc.id;
-  saveState();
-  renderMain();
-  showToast('Proceso creado: ' + proc.name);
+  const editing = !!processId;
+  const proc = editing ? group.processes.find(p=>p.id===processId) : null;
+  if(editing && !proc) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'processFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeProcessForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">${editing ? 'Editar proceso' : 'Nuevo proceso o unidad'}</h2>
+      <label style="margin-top:8px;">Nombre</label>
+      <input type="text" id="processFormName" placeholder='Ej. "Unidad 1: Fracciones"' value="${editing ? escapeHtml(proc.name) : ''}">
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveProcessForm(${editing ? `'${processId}'` : 'null'})">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
 }
+function closeProcessForm(){
+  const overlay = document.getElementById('processFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveProcessForm(processId){
+  const group = getActiveGroup();
+  const name = document.getElementById('processFormName').value.trim();
+  if(!name){ showToast('Ingresa un nombre para el proceso'); return; }
+  if(processId){
+    const proc = group.processes.find(p=>p.id===processId);
+    if(proc) proc.name = name;
+    showToast('Proceso actualizado');
+  } else {
+    const proc = { id: uid(), name, periodId: state.activePeriodId };
+    group.processes.push(proc);
+    group.activeProcessId = proc.id;
+    showToast('Proceso creado: ' + proc.name);
+  }
+  saveState();
+  closeProcessForm();
+  renderMain();
+}
+function createProcess(){ openProcessForm(null); }
 function editProcess(){
   const group = getActiveGroup();
-  const proc = group.processes.find(p=>p.id===group.activeProcessId);
-  if(!proc){ showToast('Selecciona un proceso específico para editarlo'); return; }
-  const newName = prompt('Nombre del proceso:', proc.name);
-  if(newName === null) return;
-  if(newName.trim()) proc.name = newName.trim();
-  saveState();
-  renderMain();
+  if(!group.activeProcessId){ showToast('Selecciona un proceso específico para editarlo'); return; }
+  openProcessForm(group.activeProcessId);
 }
 function deleteProcess(){
   const group = getActiveGroup();
@@ -1089,16 +1122,50 @@ function convertProcessToGrade(){
   const sessions = getActiveProcessSessions(group);
   if(sessions.length === 0){ showToast('Este proceso todavía no tiene clases registradas'); return; }
 
-  const name = prompt('Nombre de la evaluación a crear en Calificaciones:', proc ? proc.name : 'Evaluación de proceso');
-  if(!name || !name.trim()) return;
-  const exigenciaRaw = prompt('% de exigencia (aprobación = 4.0):', '60');
-  const exigencia = Number(exigenciaRaw) || 60;
-  const weightTypeRaw = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', 'simple');
-  const weightType = (weightTypeRaw || '').trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
-  let weightPercent = 0;
-  if(weightType === 'weighted'){
-    weightPercent = Number(prompt('% que pondera en la nota final:', '20')) || 0;
-  }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'convertProcessFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeConvertProcessForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🎯 Convertir proceso en nota</h2>
+      <p class="muted">Se creará una evaluación en Calificaciones con el % de logro de cada estudiante durante "${escapeHtml(proc ? proc.name : '')}".</p>
+      <label style="margin-top:8px;">Nombre de la evaluación</label>
+      <input type="text" id="convFormName" value="${escapeHtml(proc ? proc.name : 'Evaluación de proceso')}">
+      <label style="margin-top:10px;">% de exigencia (aprobación = 4.0)</label>
+      <input type="number" id="convFormExigencia" min="1" max="99" value="60">
+      <label style="margin-top:10px;">Tipo</label>
+      <select id="convFormWeightType">
+        <option value="simple">Promedio simple</option>
+        <option value="weighted">Ponderada (%)</option>
+      </select>
+      <div id="convFormWeightWrap" style="display:none; margin-top:10px;">
+        <label>% que pondera en la nota final</label>
+        <input type="number" id="convFormWeightPercent" min="1" max="100" value="20">
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveConvertProcessForm()">Crear nota</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('convFormWeightType').addEventListener('change', function(){
+    document.getElementById('convFormWeightWrap').style.display = this.value === 'weighted' ? 'block' : 'none';
+  });
+}
+function closeConvertProcessForm(){
+  const overlay = document.getElementById('convertProcessFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveConvertProcessForm(){
+  const group = getActiveGroup();
+  const proc = group.processes.find(p=>p.id===group.activeProcessId);
+  const sessions = getActiveProcessSessions(group);
+  const name = document.getElementById('convFormName').value.trim();
+  if(!name){ showToast('Ingresa un nombre para la evaluación'); return; }
+  const exigencia = Number(document.getElementById('convFormExigencia').value) || 60;
+  const weightType = document.getElementById('convFormWeightType').value;
+  const weightPercent = weightType === 'weighted' ? (Number(document.getElementById('convFormWeightPercent').value) || 0) : 0;
 
   const scores = {};
   group.students.forEach(s=>{
@@ -1107,11 +1174,12 @@ function convertProcessToGrade(){
   });
 
   group.evaluations.push({
-    id: uid(), name: name.trim(), totalScore: 100, exigencia,
+    id: uid(), name, totalScore: 100, exigencia,
     gradeGroupId: null, weightType, weightPercent,
     scores, overrides: {}, periodId: state.activePeriodId
   });
   saveState();
+  closeConvertProcessForm();
   showToast('Nota creada a partir de "' + (proc ? proc.name : name) + '"');
   goToTab('calificaciones');
 }
@@ -1123,50 +1191,84 @@ function renderPeriodSelect(){
     .concat(state.periods.map(p=> `<option value="${p.id}" ${p.id===state.activePeriodId?'selected':''}>${escapeHtml(p.name)}</option>`));
   sel.innerHTML = options.join('');
   if(!state.activePeriodId) sel.value = '';
+  const details = document.getElementById('periodoDetails');
+  if(details && state.activePeriodId) details.open = true;
 }
 
-function createPeriod(){
-  const name = prompt('Nombre del periodo lectivo (ej. "Semestre 1 2026"):');
-  if(!name || !name.trim()) return;
-  const startDate = prompt('Fecha de inicio (AAAA-MM-DD):', toISODate(new Date()));
-  if(startDate === null) return;
-  const endDate = prompt('Fecha de término (AAAA-MM-DD):', '');
-  if(endDate === null) return;
+function openPeriodForm(periodId){
+  const editing = !!periodId;
+  const period = editing ? state.periods.find(p=>p.id===periodId) : null;
+  if(editing && !period) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'periodFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closePeriodForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">${editing ? 'Editar periodo' : 'Nuevo periodo lectivo'}</h2>
+      <label style="margin-top:8px;">Nombre</label>
+      <input type="text" id="periodFormName" placeholder='Ej. "Semestre 1 2026"' value="${editing ? escapeHtml(period.name) : ''}">
+      <div class="grid-2" style="margin-top:10px;">
+        <div>
+          <label>Fecha de inicio</label>
+          <input type="date" id="periodFormStart" value="${editing ? (period.startDate||'') : toISODate(new Date())}">
+        </div>
+        <div>
+          <label>Fecha de término</label>
+          <input type="date" id="periodFormEnd" value="${editing ? (period.endDate||'') : ''}">
+        </div>
+      </div>
+      ${!editing ? '<p class="muted" style="font-size:0.78rem; margin-top:8px;">Tus cursos, estudiantes e indicadores se mantienen igual — solo el historial, calificaciones y décimas empiezan de cero en el nuevo periodo.</p>' : ''}
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="savePeriodForm(${editing ? `'${periodId}'` : 'null'})">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closePeriodForm(){
+  const overlay = document.getElementById('periodFormOverlay');
+  if(overlay) overlay.remove();
+}
+function savePeriodForm(periodId){
+  const name = document.getElementById('periodFormName').value.trim();
+  const startDate = document.getElementById('periodFormStart').value;
+  const endDate = document.getElementById('periodFormEnd').value;
+  if(!name){ showToast('Ingresa un nombre para el periodo'); return; }
 
-  const isFirstPeriod = state.periods.length === 0;
-  const period = { id: uid(), name: name.trim(), startDate: startDate.trim(), endDate: (endDate || '').trim() };
-  state.periods.push(period);
-
-  if(isFirstPeriod){
-    // Los registros creados antes de que existieran periodos quedan asociados a este primer periodo
-    state.groups.forEach(g=>{
-      (g.sessions || []).forEach(s=>{ if(!s.periodId) s.periodId = period.id; });
-      (g.evaluations || []).forEach(e=>{ if(!e.periodId) e.periodId = period.id; });
-      (g.decimas || []).forEach(d=>{ if(!d.periodId) d.periodId = period.id; });
-      (g.gradeGroups || []).forEach(gg=>{ if(!gg.periodId) gg.periodId = period.id; });
-    });
+  if(periodId){
+    const period = state.periods.find(p=>p.id===periodId);
+    if(period){
+      period.name = name;
+      period.startDate = startDate;
+      period.endDate = endDate;
+    }
+    showToast('Periodo actualizado');
+  } else {
+    const isFirstPeriod = state.periods.length === 0;
+    const period = { id: uid(), name, startDate, endDate };
+    state.periods.push(period);
+    if(isFirstPeriod){
+      // Los registros creados antes de que existieran periodos quedan asociados a este primer periodo
+      state.groups.forEach(g=>{
+        (g.sessions || []).forEach(s=>{ if(!s.periodId) s.periodId = period.id; });
+        (g.evaluations || []).forEach(e=>{ if(!e.periodId) e.periodId = period.id; });
+        (g.decimas || []).forEach(d=>{ if(!d.periodId) d.periodId = period.id; });
+        (g.gradeGroups || []).forEach(gg=>{ if(!gg.periodId) gg.periodId = period.id; });
+      });
+    }
+    state.activePeriodId = period.id;
+    showToast('Periodo creado: ' + period.name);
   }
-
-  state.activePeriodId = period.id;
   saveState();
+  closePeriodForm();
   renderPeriodSelect();
   renderAll();
-  showToast('Periodo creado: ' + period.name + '. Los cursos, estudiantes e indicadores se mantienen.');
 }
-
+function createPeriod(){ openPeriodForm(null); }
 function editPeriod(){
-  const period = state.periods.find(p=>p.id===state.activePeriodId);
-  if(!period){ showToast('Selecciona un periodo específico para editarlo'); return; }
-  const newName = prompt('Nombre del periodo:', period.name);
-  if(newName === null) return;
-  if(newName.trim()) period.name = newName.trim();
-  const newStart = prompt('Fecha de inicio (AAAA-MM-DD):', period.startDate || '');
-  if(newStart !== null) period.startDate = newStart.trim();
-  const newEnd = prompt('Fecha de término (AAAA-MM-DD):', period.endDate || '');
-  if(newEnd !== null) period.endDate = newEnd.trim();
-  saveState();
-  renderPeriodSelect();
-  showToast('Periodo actualizado');
+  if(!state.activePeriodId){ showToast('Selecciona un periodo específico para editarlo'); return; }
+  openPeriodForm(state.activePeriodId);
 }
 
 function deletePeriod(){
@@ -1221,6 +1323,7 @@ document.getElementById('newGroupBtn').addEventListener('click', ()=>{
 
 /* ============ MÓDULOS Y PESTAÑAS ============ */
 const MODULE_TABS = {
+  inicio: ['inicio'],
   horario: ['horario'],
   cursos: ['estudiantes'],
   trabajo: ['indicadores','registrar','historial','decimas'],
@@ -1234,10 +1337,10 @@ const SUBTAB_LABELS = {
 };
 function moduleForTab(tab){
   for(const m in MODULE_TABS){ if(MODULE_TABS[m].includes(tab)) return m; }
-  return 'horario';
+  return 'inicio';
 }
-let currentModule = 'horario';
-let currentTab = 'horario';
+let currentModule = 'inicio';
+let currentTab = 'inicio';
 
 function renderNav(){
   document.querySelectorAll('#modulesNav button').forEach(b=> b.classList.toggle('active', b.dataset.module === currentModule));
@@ -1294,6 +1397,7 @@ function renderMain(){
   const group = getActiveGroup();
   if(!group){ main.innerHTML = '<div class="empty-state">Crea un grupo para comenzar.</div>'; return; }
 
+  if(currentTab === 'inicio') return renderInicio();
   if(currentTab === 'estudiantes') return renderEstudiantes(group);
   if(currentTab === 'indicadores') return renderIndicadores(group);
   if(currentTab === 'horario') return renderHorario();
@@ -1541,22 +1645,46 @@ function renderIndicadores(group){
     if(e.key === 'Enter') document.getElementById('addIndicatorBtn').click();
   });
 }
-function editIndicator(id){
+function openIndicatorForm(id){
   const group = getActiveGroup();
   const ind = group.indicators.find(i=>i.id===id);
   if(!ind) return;
-  const newName = prompt('Nombre del indicador:', ind.name);
-  if(newName === null) return;
-  if(newName.trim()) ind.name = newName.trim();
-  const newLevelsRaw = prompt('¿Cuántos niveles de logro tendrá este indicador? (2 a 10)', ind.levels || 5);
-  if(newLevelsRaw !== null){
-    let levels = parseInt(newLevelsRaw, 10);
-    if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
-  }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'indicatorFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeIndicatorForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">Editar indicador</h2>
+      <label style="margin-top:8px;">Nombre</label>
+      <input type="text" id="indicatorFormName" value="${escapeHtml(ind.name)}">
+      <label style="margin-top:10px;">Niveles de logro (2 a 10)</label>
+      <input type="number" id="indicatorFormLevels" min="2" max="10" value="${ind.levels || 5}">
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveIndicatorForm('${id}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeIndicatorForm(){
+  const overlay = document.getElementById('indicatorFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveIndicatorForm(id){
+  const group = getActiveGroup();
+  const ind = group.indicators.find(i=>i.id===id);
+  if(!ind) return;
+  const name = document.getElementById('indicatorFormName').value.trim();
+  let levels = parseInt(document.getElementById('indicatorFormLevels').value, 10);
+  if(name) ind.name = name;
+  if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
   saveState();
+  closeIndicatorForm();
   renderIndicadores(group);
   showToast('Indicador actualizado');
 }
+function editIndicator(id){ openIndicatorForm(id); }
 function deleteIndicator(id){
   const group = getActiveGroup();
   if(!confirm('¿Eliminar este indicador? Se quitará de todas las clases registradas.')) return;
@@ -1639,6 +1767,81 @@ const GROUP_PALETTE = [
 function groupColor(groupId){
   const idx = state.groups.findIndex(g=>g.id===groupId);
   return GROUP_PALETTE[idx >= 0 ? idx % GROUP_PALETTE.length : 0];
+}
+
+/* ============ TAB: INICIO (tablero del día) ============ */
+function findCurrentOrNextClass(){
+  const now = new Date();
+  const todayWeekday = jsWeekdayToOurDay(now.getDay());
+  const nowMinutes = now.getHours()*60 + now.getMinutes();
+  const todayEntries = state.schedule.filter(e=> e.day === todayWeekday);
+
+  const toMinutes = (t)=>{ const [h,m] = t.split(':').map(Number); return h*60+m; };
+
+  const current = todayEntries.find(e=>{
+    const startMin = toMinutes(e.startTime);
+    const endMin = e.endTime ? toMinutes(e.endTime) : startMin + 60;
+    return nowMinutes >= startMin && nowMinutes < endMin;
+  });
+  if(current) return { entry: current, status: 'now' };
+
+  const upcoming = todayEntries.filter(e=> toMinutes(e.startTime) > nowMinutes)
+    .sort((a,b)=> a.startTime.localeCompare(b.startTime));
+  if(upcoming[0]) return { entry: upcoming[0], status: 'next' };
+
+  return null;
+}
+
+function renderInicio(){
+  const main = document.getElementById('main');
+  if(state.groups.length === 0){
+    main.innerHTML = '<div class="empty-state">Crea un curso para comenzar.</div>';
+    return;
+  }
+  const now = new Date();
+  const todayISO = toISODate(now);
+  const todayWeekday = jsWeekdayToOurDay(now.getDay());
+  const todayEntries = state.schedule.filter(e=> e.day === todayWeekday).sort((a,b)=> a.startTime.localeCompare(b.startTime));
+  const currentOrNext = findCurrentOrNextClass();
+
+  main.innerHTML = `
+    ${currentOrNext ? (()=>{
+      const entry = currentOrNext.entry;
+      const g = state.groups.find(g=>g.id===entry.groupId);
+      return `
+        <div class="card app-font" style="border:2px solid var(--primary); text-align:center;">
+          <p class="muted" style="margin-bottom:4px;">${currentOrNext.status === 'now' ? '🔴 Clase en curso' : '⏭ Tu próxima clase de hoy'}</p>
+          <h2 style="border:none; padding-bottom:0; margin-bottom:2px;">${escapeHtml(g ? g.name : '(curso eliminado)')}</h2>
+          <p class="muted">${entry.startTime}${entry.endTime ? ' – ' + entry.endTime : ''}${entry.note ? ' · ' + escapeHtml(entry.note) : ''}</p>
+          <button class="btn btn-accent" style="margin-top:8px;" onclick="goToDateClass('${entry.id}','${todayISO}')">📝 Registrar clase ahora</button>
+        </div>
+      `;
+    })() : '<div class="card app-font"><div class="empty-state">No tienes más clases programadas para hoy.</div></div>'}
+
+    <div class="card app-font">
+      <h2>Clases de hoy · ${formatDate(todayISO)}</h2>
+      ${todayEntries.length === 0 ? '<div class="empty-state">No hay clases programadas hoy.</div>' :
+        todayEntries.map(e=>{
+          const g = state.groups.find(g=>g.id===e.groupId);
+          const color = groupColor(e.groupId);
+          const registered = g ? getActiveSessions(g).some(s=> s.date === todayISO && s.time === e.startTime) : false;
+          return `
+            <div class="day-detail-item" style="background:${color.bg}; border-color:${color.border};" onclick="goToDateClass('${e.id}','${todayISO}')">
+              <div>
+                <strong style="color:${color.text};">${escapeHtml(g ? g.name : '(curso eliminado)')}</strong>
+                <div class="muted">${e.startTime}${e.endTime ? ' – ' + e.endTime : ''}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
+              </div>
+              <span class="pill ${registered ? 'pill-success' : ''}">${registered ? 'Registrado' : 'Pendiente'}</span>
+            </div>
+          `;
+        }).join('')
+      }
+    </div>
+
+    <div class="card app-font">
+      <p class="muted">¿Buscas otro día? Ve al módulo 📅 Horario para ver el calendario completo.</p>
+    </div>
+  `;
 }
 
 function renderHorario(){
@@ -1811,23 +2014,56 @@ function renderHorario(){
   });
 }
 
-function editScheduleEntry(id){
+function openScheduleEntryForm(id){
   const entry = state.schedule.find(e=>e.id===id);
   if(!entry) return;
-  const dayRaw = prompt('Día de la semana (1=Lunes ... 7=Domingo):', entry.day);
-  if(dayRaw === null) return;
-  const day = parseInt(dayRaw, 10);
-  if(day >= 1 && day <= 7) entry.day = day;
-  const start = prompt('Hora de inicio (HH:MM):', entry.startTime);
-  if(start !== null && /^\d{2}:\d{2}$/.test(start.trim())) entry.startTime = start.trim();
-  const end = prompt('Hora de término (HH:MM, opcional):', entry.endTime || '');
-  if(end !== null) entry.endTime = end.trim();
-  const note = prompt('Nota (opcional):', entry.note || '');
-  if(note !== null) entry.note = note.trim();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'scheduleFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeScheduleEntryForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">Editar clase del horario</h2>
+      <label style="margin-top:8px;">Día</label>
+      <select id="scheduleFormDay">
+        ${DAY_NAMES.map((d,i)=>`<option value="${i+1}" ${entry.day===i+1?'selected':''}>${d}</option>`).join('')}
+      </select>
+      <div class="grid-2" style="margin-top:10px;">
+        <div>
+          <label>Hora de inicio</label>
+          <input type="time" id="scheduleFormStart" value="${entry.startTime}">
+        </div>
+        <div>
+          <label>Hora de término (opcional)</label>
+          <input type="time" id="scheduleFormEnd" value="${entry.endTime || ''}">
+        </div>
+      </div>
+      <label style="margin-top:10px;">Nota (opcional)</label>
+      <input type="text" id="scheduleFormNote" value="${escapeHtml(entry.note || '')}">
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveScheduleEntryForm('${id}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeScheduleEntryForm(){
+  const overlay = document.getElementById('scheduleFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveScheduleEntryForm(id){
+  const entry = state.schedule.find(e=>e.id===id);
+  if(!entry) return;
+  entry.day = parseInt(document.getElementById('scheduleFormDay').value, 10);
+  entry.startTime = document.getElementById('scheduleFormStart').value || entry.startTime;
+  entry.endTime = document.getElementById('scheduleFormEnd').value;
+  entry.note = document.getElementById('scheduleFormNote').value.trim();
   saveState();
+  closeScheduleEntryForm();
   renderHorario();
   showToast('Clase del horario actualizada');
 }
+function editScheduleEntry(id){ openScheduleEntryForm(id); }
 
 function deleteScheduleEntry(id){
   if(!confirm('¿Eliminar esta clase del horario?')) return;
@@ -1982,7 +2218,13 @@ function renderRegistrar(group, sessionToEdit, prefill){
 
     ${selectedIndicators.length === 0 ? '<div class="card app-font"><div class="empty-state">Selecciona al menos un indicador arriba para completar el cotejo.</div></div>' : `
     <div class="card app-font">
-      <h2>Cotejo y observaciones por estudiante</h2>
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Cotejo y observaciones por estudiante</h2>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="markAllMaxScores()">✅ Marcar todos con nota máxima</button>
+          <button class="btn btn-outline btn-sm" onclick="repeatLastClass()">🔁 Repetir última clase</button>
+        </div>
+      </div>
       <div style="overflow-x:auto;">
       <table>
         <thead>
@@ -2026,6 +2268,50 @@ function renderRegistrar(group, sessionToEdit, prefill){
 
     ${saveButtonsRow}
   `;
+}
+
+function markAllMaxScores(){
+  const group = getActiveGroup();
+  const selectedIndicators = group.indicators.filter(i=> registrarIndicatorSelection.includes(i.id));
+  group.students.forEach(s=>{
+    selectedIndicators.forEach(ind=>{
+      const sel = document.querySelector(`select[data-student="${s.id}"][data-indicator="${ind.id}"]`);
+      if(sel) sel.value = String(ind.levels || 5);
+    });
+  });
+  showToast('Todos marcados con la nota máxima. Ajusta las excepciones.');
+}
+
+function repeatLastClass(){
+  const group = getActiveGroup();
+  const excludeId = registrarCurrentSessionToEdit ? registrarCurrentSessionToEdit.id : null;
+  const sessions = getActiveSessions(group)
+    .filter(s=> s.id !== excludeId)
+    .sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+  const last = sessions[0];
+  if(!last){ showToast('No hay una clase anterior para repetir'); return; }
+
+  const lastIndIds = (last.indicatorSnapshot || []).map(i=>i.id).filter(id=> group.indicators.some(ind=>ind.id===id));
+  if(lastIndIds.length){
+    registrarIndicatorSelection = lastIndIds;
+    renderRegistrar(group, registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  }
+
+  setTimeout(()=>{
+    group.students.forEach(s=>{
+      const prevEntry = last.entries.find(e=>e.studentId===s.id);
+      if(!prevEntry) return;
+      registrarIndicatorSelection.forEach(indId=>{
+        const sel = document.querySelector(`select[data-student="${s.id}"][data-indicator="${indId}"]`);
+        if(sel && prevEntry.cotejo[indId] !== undefined && prevEntry.cotejo[indId] !== null){
+          sel.value = String(prevEntry.cotejo[indId]);
+        }
+      });
+      const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
+      if(obsEl && prevEntry.observaciones) obsEl.value = prevEntry.observaciones;
+    });
+    showToast('Se copiaron los valores de la clase anterior (' + formatDate(last.date) + ')');
+  }, 30);
 }
 
 function handleSaveSession(){
@@ -2577,25 +2863,57 @@ function renderCalificaciones(group){
   }
 }
 
-function editGradeGroup(id){
+function openGradeGroupForm(id){
   const group = getActiveGroup();
   const gg = group.gradeGroups.find(g=>g.id===id);
   if(!gg) return;
-  const newName = prompt('Nombre del grupo de notas:', gg.name);
-  if(newName === null) return;
-  if(newName.trim()) gg.name = newName.trim();
-  const newType = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', gg.weightType === 'weighted' ? 'ponderada' : 'simple');
-  if(newType !== null){
-    gg.weightType = newType.trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
-    if(gg.weightType === 'weighted'){
-      const newWeight = prompt('% que pondera en la nota final:', gg.weightPercent || 20);
-      if(newWeight !== null) gg.weightPercent = Number(newWeight) || 0;
-    }
-  }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'gradeGroupFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeGradeGroupForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">Editar grupo de notas</h2>
+      <label style="margin-top:8px;">Nombre</label>
+      <input type="text" id="ggFormName" value="${escapeHtml(gg.name)}">
+      <label style="margin-top:10px;">Tipo</label>
+      <select id="ggFormWeightType">
+        <option value="simple" ${gg.weightType!=='weighted'?'selected':''}>Promedio simple</option>
+        <option value="weighted" ${gg.weightType==='weighted'?'selected':''}>Ponderada (%)</option>
+      </select>
+      <div id="ggFormWeightWrap" style="display:${gg.weightType==='weighted'?'block':'none'}; margin-top:10px;">
+        <label>% que pondera en la nota final</label>
+        <input type="number" id="ggFormWeightPercent" min="1" max="100" value="${gg.weightPercent || 20}">
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveGradeGroupForm('${id}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('ggFormWeightType').addEventListener('change', function(){
+    document.getElementById('ggFormWeightWrap').style.display = this.value === 'weighted' ? 'block' : 'none';
+  });
+}
+function closeGradeGroupForm(){
+  const overlay = document.getElementById('gradeGroupFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveGradeGroupForm(id){
+  const group = getActiveGroup();
+  const gg = group.gradeGroups.find(g=>g.id===id);
+  if(!gg) return;
+  const name = document.getElementById('ggFormName').value.trim();
+  const weightType = document.getElementById('ggFormWeightType').value;
+  if(name) gg.name = name;
+  gg.weightType = weightType;
+  gg.weightPercent = weightType === 'weighted' ? (Number(document.getElementById('ggFormWeightPercent').value) || 0) : 0;
   saveState();
+  closeGradeGroupForm();
   renderCalificaciones(group);
   showToast('Grupo de notas actualizado');
 }
+function editGradeGroup(id){ openGradeGroupForm(id); }
 
 function deleteGradeGroup(id){
   const group = getActiveGroup();
@@ -2606,43 +2924,89 @@ function deleteGradeGroup(id){
   renderCalificaciones(group);
 }
 
-function editEvaluation(id){
+function openEvaluationForm(id){
   const group = getActiveGroup();
   const ev = group.evaluations.find(e=>e.id===id);
   if(!ev) return;
-  const newName = prompt('Nombre de la evaluación:', ev.name);
-  if(newName === null) return;
-  if(newName.trim()) ev.name = newName.trim();
-  const newTotal = prompt('Puntaje total:', ev.totalScore);
-  if(newTotal !== null && Number(newTotal) > 0) ev.totalScore = Number(newTotal);
-  const newExigencia = prompt('% de exigencia (aprobación = 4.0):', ev.exigencia);
-  if(newExigencia !== null && Number(newExigencia) > 0) ev.exigencia = Number(newExigencia);
-
   const availableGroups = getActiveGradeGroups(group);
-  if(availableGroups.length > 0){
-    const currentGroup = availableGroups.find(g=>g.id===ev.gradeGroupId);
-    const options = availableGroups.map((g,i)=> `${i+1}=${g.name}`).join(', ');
-    const raw = prompt(`Grupo de notas (escribe el número, o 0 para ninguno): ${options}`, currentGroup ? String(availableGroups.indexOf(currentGroup)+1) : '0');
-    if(raw !== null){
-      const idx = parseInt(raw, 10);
-      ev.gradeGroupId = (idx >= 1 && idx <= availableGroups.length) ? availableGroups[idx-1].id : null;
-    }
-  }
-
-  if(!ev.gradeGroupId){
-    const newType = prompt('Tipo: escribe "simple" (promedio simple) o "ponderada":', ev.weightType === 'weighted' ? 'ponderada' : 'simple');
-    if(newType !== null){
-      ev.weightType = newType.trim().toLowerCase().startsWith('pond') ? 'weighted' : 'simple';
-      if(ev.weightType === 'weighted'){
-        const newWeight = prompt('% que pondera en la nota final:', ev.weightPercent || 20);
-        if(newWeight !== null) ev.weightPercent = Number(newWeight) || 0;
-      }
-    }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'evaluationFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeEvaluationForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">Editar evaluación</h2>
+      <label style="margin-top:8px;">Nombre</label>
+      <input type="text" id="evFormName" value="${escapeHtml(ev.name)}">
+      <div class="grid-2" style="margin-top:10px;">
+        <div>
+          <label>Puntaje total</label>
+          <input type="number" id="evFormTotal" min="1" value="${ev.totalScore}">
+        </div>
+        <div>
+          <label>% de exigencia (aprobación = 4.0)</label>
+          <input type="number" id="evFormExigencia" min="1" max="99" value="${ev.exigencia}">
+        </div>
+      </div>
+      <label style="margin-top:10px;">Grupo de notas (opcional)</label>
+      <select id="evFormGradeGroup">
+        <option value="">Ninguno (evaluación suelta)</option>
+        ${availableGroups.map(g=>`<option value="${g.id}" ${g.id===ev.gradeGroupId?'selected':''}>${escapeHtml(g.name)}</option>`).join('')}
+      </select>
+      <div id="evFormStandaloneWeight" style="display:${ev.gradeGroupId?'none':'block'};">
+        <div class="grid-2" style="margin-top:10px;">
+          <div>
+            <label>Tipo</label>
+            <select id="evFormWeightType">
+              <option value="simple" ${ev.weightType!=='weighted'?'selected':''}>Promedio simple</option>
+              <option value="weighted" ${ev.weightType==='weighted'?'selected':''}>Ponderada (%)</option>
+            </select>
+          </div>
+          <div id="evFormWeightPercentWrap" style="display:${ev.weightType==='weighted'?'block':'none'};">
+            <label>% que pondera en la nota final</label>
+            <input type="number" id="evFormWeightPercent" min="1" max="100" value="${ev.weightPercent || 20}">
+          </div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveEvaluationForm('${id}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('evFormGradeGroup').addEventListener('change', function(){
+    document.getElementById('evFormStandaloneWeight').style.display = this.value ? 'none' : 'block';
+  });
+  document.getElementById('evFormWeightType').addEventListener('change', function(){
+    document.getElementById('evFormWeightPercentWrap').style.display = this.value === 'weighted' ? 'block' : 'none';
+  });
+}
+function closeEvaluationForm(){
+  const overlay = document.getElementById('evaluationFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveEvaluationForm(id){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===id);
+  if(!ev) return;
+  const name = document.getElementById('evFormName').value.trim();
+  const totalScore = Number(document.getElementById('evFormTotal').value);
+  const exigencia = Number(document.getElementById('evFormExigencia').value);
+  const gradeGroupId = document.getElementById('evFormGradeGroup').value || null;
+  if(name) ev.name = name;
+  if(totalScore > 0) ev.totalScore = totalScore;
+  if(exigencia > 0) ev.exigencia = exigencia;
+  ev.gradeGroupId = gradeGroupId;
+  if(!gradeGroupId){
+    ev.weightType = document.getElementById('evFormWeightType').value;
+    ev.weightPercent = ev.weightType === 'weighted' ? (Number(document.getElementById('evFormWeightPercent').value) || 0) : 0;
   }
   saveState();
+  closeEvaluationForm();
   renderCalificaciones(group);
   showToast('Evaluación actualizada');
 }
+function editEvaluation(id){ openEvaluationForm(id); }
 
 function deleteEvaluation(id){
   const group = getActiveGroup();
