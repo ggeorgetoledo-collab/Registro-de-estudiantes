@@ -489,6 +489,7 @@
   <button data-module="cursos">👥 Cursos</button>
   <button data-module="trabajo">📝 Trabajo en clases</button>
   <button data-module="calificaciones">🎯 Calificaciones</button>
+  <button data-module="bitacora">📓 Bitácora</button>
 </nav>
 <nav class="tabs subtabs app-font" id="subTabsNav" style="display:none;"></nav>
 
@@ -498,6 +499,7 @@
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 /* ============ ESTADO Y PERSISTENCIA (100% local, sin conexión) ============ */
 const STORAGE_KEY = 'registroClasesApp_v1';
@@ -1021,7 +1023,7 @@ function totalWeightAssigned(group){
 
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [] };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -1037,6 +1039,7 @@ function ensureDefaultGroup(){
     if(!g.sessions) g.sessions = [];
     if(!g.students) g.students = [];
     if(!g.processes) g.processes = [];
+    if(!g.bitacora) g.bitacora = [];
     if(g.activeProcessId === undefined) g.activeProcessId = null;
   });
   if(!state.periods) state.periods = [];
@@ -1352,7 +1355,7 @@ document.getElementById('groupSelect').addEventListener('change', e=>{
 document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   const name = prompt('Nombre del nuevo grupo/curso:');
   if(!name) return;
-  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [] };
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [] };
   state.groups.push(g);
   state.activeGroupId = g.id;
   saveState();
@@ -1367,6 +1370,7 @@ const MODULE_TABS = {
   cursos: ['estudiantes'],
   trabajo: ['indicadores','registrar','historial','decimas'],
   calificaciones: ['calificaciones'],
+  bitacora: ['bitacora'],
 };
 const SUBTAB_LABELS = {
   indicadores: 'Indicadores',
@@ -1444,6 +1448,7 @@ function renderMain(){
   if(currentTab === 'historial') return renderHistorial(group);
   if(currentTab === 'decimas') return renderDecimas(group);
   if(currentTab === 'calificaciones') return renderCalificaciones(group);
+  if(currentTab === 'bitacora') return renderBitacora(group);
 }
 
 /* ============ TAB: EDITAR NOMBRE / ELIMINAR GRUPO ============ */
@@ -1620,6 +1625,14 @@ function openStudentDetail(studentId){
       <p class="muted" style="margin-bottom:4px; font-weight:600;">Calificaciones</p>
       <div class="stat-row"><span>Promedio simple</span><strong>${gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'}</strong></div>
       <div class="stat-row"><span>Nota final</span><strong style="color:var(--primary); font-size:1.1rem;">${gradeResult.finalGrade !== null ? gradeResult.finalGrade.toFixed(1) : '-'}</strong></div>
+      <hr class="divider">
+      <div class="stat-row">
+        <span>Registros en bitácora</span>
+        <strong>${getActiveBitacora(group).filter(e=> (e.studentIds||[]).includes(studentId)).length}</strong>
+      </div>
+      <div class="row" style="justify-content:center; margin-top:8px;">
+        <button class="btn btn-outline btn-sm" onclick="closeStudentDetail(); bitacoraStudentFilter='${studentId}'; goToTab('bitacora');">Ver su bitácora</button>
+      </div>
     </div>
   `;
   overlay.addEventListener('click', e=>{ if(e.target === overlay) closeStudentDetail(); });
@@ -2681,6 +2694,241 @@ function deleteDecima(id){
   renderDecimas(group);
 }
 
+/* ============ TAB: BITÁCORA ============ */
+const BITACORA_CATEGORIAS = {
+  '': 'Sin categoría',
+  conducta: 'Conducta',
+  salud: 'Salud',
+  accidente: 'Accidente',
+  otro: 'Otro',
+};
+const BITACORA_CATEGORIA_COLORS = {
+  '': { bg:'#F1ECFC', text:'#6C4EE3', border:'#D4C4F5' },
+  conducta: { bg:'#FDF3DE', text:'#C6871A', border:'#F5DFA8' },
+  salud: { bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE' },
+  accidente: { bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE' },
+  otro: { bg:'#E7F1FC', text:'#2C72C7', border:'#BEDBF7' },
+};
+
+function getActiveBitacora(group){
+  return (group.bitacora || []).filter(b=> !state.activePeriodId || b.periodId === state.activePeriodId);
+}
+
+let bitacoraStudentFilter = '';
+let bitacoraExpandedIds = new Set();
+
+function toggleBitacoraEntry(id){
+  if(bitacoraExpandedIds.has(id)) bitacoraExpandedIds.delete(id);
+  else bitacoraExpandedIds.add(id);
+  renderBitacora(getActiveGroup());
+}
+
+function renderBitacora(group){
+  if(!group.bitacora) group.bitacora = [];
+  const main = document.getElementById('main');
+  const today = toISODate(new Date());
+
+  let entries = getActiveBitacora(group).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  if(bitacoraStudentFilter){
+    entries = entries.filter(e=> (e.studentIds||[]).length === 0 || e.studentIds.includes(bitacoraStudentFilter));
+  }
+
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Nuevo registro de bitácora</h2>
+      <div class="grid-2">
+        <div>
+          <label>Fecha</label>
+          <input type="date" id="bitDate" value="${today}">
+        </div>
+        <div>
+          <label>Categoría (opcional)</label>
+          <select id="bitCategoria">
+            ${Object.keys(BITACORA_CATEGORIAS).map(k=>`<option value="${k}">${BITACORA_CATEGORIAS[k]}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Alcance del registro</label>
+        <select id="bitScope" onchange="document.getElementById('bitStudentsWrap').style.display = this.value === 'estudiantes' ? 'block' : 'none';">
+          <option value="curso">General del curso</option>
+          <option value="estudiantes">Estudiante(s) específico(s)</option>
+        </select>
+      </div>
+      <div id="bitStudentsWrap" style="display:none; margin-top:10px;">
+        <label>Estudiantes involucrados</label>
+        <div>
+          ${group.students.map(s=>`
+            <label style="display:inline-flex; align-items:center; gap:6px; margin:4px 10px 4px 0; font-family:'Inter',sans-serif; font-size:0.88rem;">
+              <input type="checkbox" class="bit-student-check" value="${s.id}"> ${escapeHtml(s.name)}
+            </label>
+          `).join('')}
+        </div>
+      </div>
+      <label style="margin-top:10px;">Actividad pedagógica realizada</label>
+      <textarea id="bitActividad" placeholder="Ej. Repaso de fracciones, trabajo grupal, salida a terreno..."></textarea>
+      <label style="margin-top:10px;">Observaciones / incidentes (opcional)</label>
+      <textarea id="bitObservaciones" placeholder="Ej. Conducta, salud, accidentes, u otras observaciones..."></textarea>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addBitacoraBtn">+ Guardar registro</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Registros (${entries.length})</h2>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="exportBitacoraToExcel(getActiveGroup())">⬇️ Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="exportBitacoraToWord(getActiveGroup())">⬇️ Word</button>
+        </div>
+      </div>
+      <label style="margin-top:6px;">Filtrar por estudiante</label>
+      <select onchange="changeBitacoraFilter(this.value)">
+        <option value="">Todos (general + individuales)</option>
+        ${group.students.map(s=>`<option value="${s.id}" ${bitacoraStudentFilter===s.id?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+      </select>
+      <hr class="divider">
+      ${entries.length === 0 ? '<div class="empty-state">Aún no hay registros en la bitácora.</div>' :
+        entries.map(e=>{
+          const color = BITACORA_CATEGORIA_COLORS[e.categoria || ''];
+          const expanded = bitacoraExpandedIds.has(e.id);
+          const scopeLabel = (e.studentIds && e.studentIds.length > 0)
+            ? '👤 ' + e.studentIds.map(id=>{ const s=group.students.find(s=>s.id===id); return s ? s.name : ''; }).filter(Boolean).join(', ')
+            : '🏫 Curso completo';
+          return `
+            <div class="card app-font" style="border-left:4px solid ${color.border}; margin-bottom:10px;">
+              <div class="flex-between accordion-header" onclick="toggleBitacoraEntry('${e.id}')">
+                <div>
+                  <span class="accordion-chevron">${expanded ? '▾' : '▸'}</span>
+                  <span class="pill">${formatDate(e.date)}</span>
+                  ${e.categoria ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border};">${BITACORA_CATEGORIAS[e.categoria]}</span>` : ''}
+                  <span class="muted"> · ${scopeLabel}</span>
+                </div>
+                <div class="row" onclick="event.stopPropagation()">
+                  <button class="btn btn-outline btn-sm" onclick="editBitacoraEntry('${e.id}')">Editar</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteBitacoraEntry('${e.id}')">Eliminar</button>
+                </div>
+              </div>
+              ${expanded ? `
+                <hr class="divider">
+                ${e.actividadPedagogica ? `<p><strong>Actividad pedagógica:</strong> ${escapeHtml(e.actividadPedagogica)}</p>` : ''}
+                ${e.observaciones ? `<p><strong>Observaciones:</strong> ${escapeHtml(e.observaciones)}</p>` : ''}
+              ` : ''}
+            </div>
+          `;
+        }).join('')
+      }
+    </div>
+  `;
+
+  document.getElementById('addBitacoraBtn').addEventListener('click', ()=>{
+    const date = document.getElementById('bitDate').value || today;
+    const categoria = document.getElementById('bitCategoria').value;
+    const scope = document.getElementById('bitScope').value;
+    const actividadPedagogica = document.getElementById('bitActividad').value.trim();
+    const observaciones = document.getElementById('bitObservaciones').value.trim();
+    if(!actividadPedagogica && !observaciones){ showToast('Escribe al menos la actividad u observación'); return; }
+    let studentIds = [];
+    if(scope === 'estudiantes'){
+      studentIds = [...document.querySelectorAll('.bit-student-check:checked')].map(el=>el.value);
+      if(studentIds.length === 0){ showToast('Selecciona al menos un estudiante, o cambia el alcance a "General del curso"'); return; }
+    }
+    group.bitacora.push({
+      id: uid(), date, categoria, studentIds, actividadPedagogica, observaciones,
+      periodId: state.activePeriodId
+    });
+    saveState();
+    renderBitacora(group);
+    showToast('Registro de bitácora guardado');
+  });
+}
+
+function changeBitacoraFilter(studentId){
+  bitacoraStudentFilter = studentId || '';
+  renderBitacora(getActiveGroup());
+}
+
+function openBitacoraEditForm(id){
+  const group = getActiveGroup();
+  const entry = group.bitacora.find(e=>e.id===id);
+  if(!entry) return;
+  const isStudentScope = entry.studentIds && entry.studentIds.length > 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'bitacoraFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeBitacoraEditForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">Editar registro de bitácora</h2>
+      <div class="grid-2" style="margin-top:8px;">
+        <div>
+          <label>Fecha</label>
+          <input type="date" id="bitEditDate" value="${entry.date}">
+        </div>
+        <div>
+          <label>Categoría</label>
+          <select id="bitEditCategoria">
+            ${Object.keys(BITACORA_CATEGORIAS).map(k=>`<option value="${k}" ${entry.categoria===k?'selected':''}>${BITACORA_CATEGORIAS[k]}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <label style="margin-top:10px;">Alcance del registro</label>
+      <select id="bitEditScope" onchange="document.getElementById('bitEditStudentsWrap').style.display = this.value === 'estudiantes' ? 'block' : 'none';">
+        <option value="curso" ${!isStudentScope?'selected':''}>General del curso</option>
+        <option value="estudiantes" ${isStudentScope?'selected':''}>Estudiante(s) específico(s)</option>
+      </select>
+      <div id="bitEditStudentsWrap" style="display:${isStudentScope?'block':'none'}; margin-top:10px;">
+        <label>Estudiantes involucrados</label>
+        <div>
+          ${group.students.map(s=>`
+            <label style="display:inline-flex; align-items:center; gap:6px; margin:4px 10px 4px 0; font-family:'Inter',sans-serif; font-size:0.88rem;">
+              <input type="checkbox" class="bit-edit-student-check" value="${s.id}" ${(entry.studentIds||[]).includes(s.id)?'checked':''}> ${escapeHtml(s.name)}
+            </label>
+          `).join('')}
+        </div>
+      </div>
+      <label style="margin-top:10px;">Actividad pedagógica realizada</label>
+      <textarea id="bitEditActividad">${escapeHtml(entry.actividadPedagogica || '')}</textarea>
+      <label style="margin-top:10px;">Observaciones / incidentes</label>
+      <textarea id="bitEditObservaciones">${escapeHtml(entry.observaciones || '')}</textarea>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveBitacoraEditForm('${id}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeBitacoraEditForm(){
+  const overlay = document.getElementById('bitacoraFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveBitacoraEditForm(id){
+  const group = getActiveGroup();
+  const entry = group.bitacora.find(e=>e.id===id);
+  if(!entry) return;
+  entry.date = document.getElementById('bitEditDate').value || entry.date;
+  entry.categoria = document.getElementById('bitEditCategoria').value;
+  const scope = document.getElementById('bitEditScope').value;
+  entry.studentIds = scope === 'estudiantes'
+    ? [...document.querySelectorAll('.bit-edit-student-check:checked')].map(el=>el.value)
+    : [];
+  entry.actividadPedagogica = document.getElementById('bitEditActividad').value.trim();
+  entry.observaciones = document.getElementById('bitEditObservaciones').value.trim();
+  saveState();
+  closeBitacoraEditForm();
+  renderBitacora(group);
+  showToast('Registro actualizado');
+}
+function editBitacoraEntry(id){ openBitacoraEditForm(id); }
+function deleteBitacoraEntry(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar este registro de bitácora?')) return;
+  group.bitacora = group.bitacora.filter(e=>e.id!==id);
+  saveState();
+  renderBitacora(group);
+}
+
 /* ============ TAB: CALIFICACIONES ============ */
 let calActiveEvalId = null;
 
@@ -3688,6 +3936,159 @@ async function exportDecimasToExcel(group){
   showToast('Décimas exportadas');
 }
 
+/* ============ EXPORTAR: BITÁCORA ============ */
+function addBitacoraSheet(workbook, group){
+  const entries = getActiveBitacora(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(entries.length === 0) return false;
+  const ws = workbook.addWorksheet('Bitácora');
+  ['Fecha','Categoría','Alcance','Actividad pedagógica','Observaciones'].forEach((h,i)=>{
+    const cell = ws.getCell(1, i+1);
+    cell.value = h;
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+    cell.alignment = { wrapText:true };
+  });
+  entries.forEach((e, i)=>{
+    const row = 2 + i;
+    const scope = (e.studentIds && e.studentIds.length > 0)
+      ? e.studentIds.map(id=>{ const s=group.students.find(s=>s.id===id); return s ? s.name : ''; }).filter(Boolean).join(', ')
+      : 'Curso completo';
+    ws.getCell(row, 1).value = formatDate(e.date);
+    ws.getCell(row, 2).value = BITACORA_CATEGORIAS[e.categoria || ''];
+    ws.getCell(row, 3).value = scope;
+    ws.getCell(row, 4).value = e.actividadPedagogica || '';
+    ws.getCell(row, 5).value = e.observaciones || '';
+    [1,2,3,4,5].forEach(c=> ws.getCell(row,c).alignment = { wrapText:true, vertical:'top' });
+  });
+  ws.getColumn(1).width = 14;
+  ws.getColumn(2).width = 14;
+  ws.getColumn(3).width = 22;
+  ws.getColumn(4).width = 40;
+  ws.getColumn(5).width = 40;
+  return true;
+}
+async function exportBitacoraToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar esta hoja.');
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const added = addBitacoraSheet(workbook, group);
+  if(!added){ showToast('No hay registros de bitácora para exportar'); return; }
+  await downloadWorkbook(workbook, `bitacora_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Bitácora exportada a Excel');
+}
+
+function xmlEscapeWord(str){
+  return String(str ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+function wordCell(text, opts={}){
+  const bold = opts.bold ? '<w:b/>' : '';
+  const shading = opts.shade ? `<w:shd w:val="clear" w:fill="${opts.shade}"/>` : '';
+  const color = opts.color ? `<w:color w:val="${opts.color}"/>` : '';
+  return `<w:tc><w:tcPr>${shading}</w:tcPr><w:p><w:pPr><w:rPr>${bold}${color}</w:rPr></w:pPr><w:r><w:rPr>${bold}${color}</w:rPr><w:t xml:space="preserve">${xmlEscapeWord(text)}</w:t></w:r></w:p></w:tc>`;
+}
+function wordRow(cellsHtml){
+  return `<w:tr>${cellsHtml}</w:tr>`;
+}
+
+async function exportBitacoraToWord(group){
+  if(typeof JSZip === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar a Word.');
+    return;
+  }
+  const entries = getActiveBitacora(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(entries.length === 0){ showToast('No hay registros de bitácora para exportar'); return; }
+
+  const headerRow = wordRow(
+    ['Fecha','Categoría','Alcance','Actividad pedagógica','Observaciones']
+      .map(h=> wordCell(h, { bold:true, shade:'6C4EE3', color:'FFFFFF' })).join('')
+  );
+  const dataRows = entries.map(e=>{
+    const scope = (e.studentIds && e.studentIds.length > 0)
+      ? e.studentIds.map(id=>{ const s=group.students.find(s=>s.id===id); return s ? s.name : ''; }).filter(Boolean).join(', ')
+      : 'Curso completo';
+    return wordRow([
+      wordCell(formatDate(e.date)),
+      wordCell(BITACORA_CATEGORIAS[e.categoria || '']),
+      wordCell(scope),
+      wordCell(e.actividadPedagogica || ''),
+      wordCell(e.observaciones || '')
+    ].join(''));
+  }).join('');
+
+  const tableXml = `<w:tbl>
+    <w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/></w:tblPr>
+    <w:tblGrid><w:gridCol w:w="1100"/><w:gridCol w:w="1300"/><w:gridCol w:w="1800"/><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid>
+    ${headerRow}
+    ${dataRows}
+  </w:tbl>`;
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">Bitácora - ${xmlEscapeWord(group.name)}</w:t></w:r></w:p>
+    <w:p/>
+    ${tableXml}
+  </w:body>
+</w:document>`;
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`;
+
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+
+  const documentRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
+  <w:style w:type="table" w:styleId="TableGrid">
+    <w:name w:val="Table Grid"/>
+    <w:tblPr><w:tblBorders>
+      <w:top w:val="single" w:sz="4" w:color="auto"/>
+      <w:left w:val="single" w:sz="4" w:color="auto"/>
+      <w:bottom w:val="single" w:sz="4" w:color="auto"/>
+      <w:right w:val="single" w:sz="4" w:color="auto"/>
+      <w:insideH w:val="single" w:sz="4" w:color="auto"/>
+      <w:insideV w:val="single" w:sz="4" w:color="auto"/>
+    </w:tblBorders></w:tblPr>
+  </w:style>
+</w:styles>`;
+
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', contentTypesXml);
+  zip.folder('_rels').file('.rels', relsXml);
+  const wordFolder = zip.folder('word');
+  wordFolder.file('document.xml', documentXml);
+  wordFolder.file('styles.xml', stylesXml);
+  wordFolder.folder('_rels').file('document.xml.rels', documentRelsXml);
+
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bitacora_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Bitácora exportada a Word');
+}
+
 /* ============ EXPORTAR TODO EL CURSO ============ */
 async function exportAllToExcel(group){
   if(typeof ExcelJS === 'undefined'){
@@ -3703,6 +4104,7 @@ async function exportAllToExcel(group){
   any = addAsistenciaSheet(workbook, group) || any;
   any = addCalificacionesSheet(workbook, group) || any;
   any = addDecimasSheet(workbook, group) || any;
+  any = addBitacoraSheet(workbook, group) || any;
   if(!any){ showToast('Este curso todavía no tiene datos para exportar'); return; }
   await downloadWorkbook(workbook, `curso_completo_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
   showToast('Excel completo del curso exportado');
