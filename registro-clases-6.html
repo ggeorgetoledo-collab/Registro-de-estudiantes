@@ -895,7 +895,9 @@ function getActiveGroup(){
 }
 
 function isEntryPresent(entry){
-  if(!entry || !entry.cotejo) return false;
+  if(!entry) return false;
+  if(entry.presente !== undefined && entry.presente !== null) return !!entry.presente;
+  if(!entry.cotejo) return false;
   return Object.values(entry.cotejo).some(v => v !== null && v !== undefined);
 }
 
@@ -1417,14 +1419,14 @@ function renderNav(){
 function goToTab(tab){
   currentTab = tab;
   currentModule = moduleForTab(tab);
-  if(tab === 'registrar') registrarIndicatorSelection = null;
+  if(tab === 'registrar'){ registrarIndicatorSelection = null; registrarAttendanceOnly = null; }
   renderNav();
   renderMain();
 }
 function goToModule(mod){
   currentModule = mod;
   currentTab = (MODULE_TABS[mod] || ['horario'])[0];
-  if(currentTab === 'registrar') registrarIndicatorSelection = null;
+  if(currentTab === 'registrar'){ registrarIndicatorSelection = null; registrarAttendanceOnly = null; }
   renderNav();
   renderMain();
 }
@@ -1546,7 +1548,10 @@ function renderEstudiantes(group){
         group.students.map(s=>`
           <div class="student-list-item">
             <button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')">Eliminar</button>
+            <div class="row" style="gap:6px;">
+              <button class="btn btn-outline btn-sm" onclick="editStudentName('${s.id}')">✎ Editar</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')">Eliminar</button>
+            </div>
           </div>
         `).join('')
       }
@@ -1603,6 +1608,43 @@ function deleteStudent(id){
   group.students = group.students.filter(s=>s.id!==id);
   saveState();
   renderEstudiantes(group);
+}
+
+function editStudentName(id){
+  const group = getActiveGroup();
+  const student = group.students.find(s=>s.id===id);
+  if(!student) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'studentNameFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeStudentNameForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">Editar estudiante</h2>
+      <label style="margin-top:8px;">Nombre completo</label>
+      <input type="text" id="studentNameFormInput" value="${escapeHtml(student.name)}">
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveStudentNameForm('${id}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeStudentNameForm(){
+  const overlay = document.getElementById('studentNameFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveStudentNameForm(id){
+  const group = getActiveGroup();
+  const student = group.students.find(s=>s.id===id);
+  if(!student) return;
+  const name = document.getElementById('studentNameFormInput').value.trim();
+  if(!name){ showToast('El nombre no puede quedar vacío'); return; }
+  student.name = name;
+  saveState();
+  closeStudentNameForm();
+  renderEstudiantes(group);
+  showToast('Estudiante actualizado');
 }
 
 /* ============ MODAL: RESUMEN DE ESTUDIANTE ============ */
@@ -1776,7 +1818,11 @@ function saveIndicatorForm(id){
   if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
   saveState();
   closeIndicatorForm();
-  renderIndicadores(group);
+  if(currentTab === 'registrar'){
+    renderRegistrar(group, registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  } else {
+    renderIndicadores(group);
+  }
   showToast('Indicador actualizado');
 }
 function editIndicator(id){ openIndicatorForm(id); }
@@ -1842,6 +1888,7 @@ function goToDateClass(entryId, iso){
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
   registrarIndicatorSelection = null;
+  registrarAttendanceOnly = null;
   renderNav();
   const existingSession = getActiveSessions(group).find(s=> s.date === iso && s.time === entry.startTime);
   if(existingSession){
@@ -2216,6 +2263,7 @@ function goToClass(entryId){
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
   registrarIndicatorSelection = null;
+  registrarAttendanceOnly = null;
   renderNav();
   const targetDate = computeDateForWeekday(entry.day);
   const existingSession = getActiveSessions(group).find(s=> s.date === targetDate && s.time === entry.startTime);
@@ -2228,6 +2276,7 @@ function goToClass(entryId){
 
 /* ============ TAB: REGISTRAR CLASE ============ */
 let registrarIndicatorSelection = null;
+let registrarAttendanceOnly = null;
 let registrarCurrentSessionToEdit = null;
 let registrarCurrentPrefill = null;
 let registrarThemeFilter = '';
@@ -2311,9 +2360,10 @@ function renderRegistrar(group, sessionToEdit, prefill){
     main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega estudiantes en la pestaña "Cursos" antes de registrar una clase.</div></div>';
     return;
   }
-  if(group.indicators.length === 0){
-    main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega al menos un indicador en la pestaña "Indicadores" antes de registrar una clase.</div></div>';
-    return;
+
+  // Inicializar modo de asistencia solamente (sin indicadores)
+  if(registrarAttendanceOnly === null){
+    registrarAttendanceOnly = isEdit ? (!sessionToEdit.indicatorSnapshot || sessionToEdit.indicatorSnapshot.length === 0) : false;
   }
 
   // Inicializar selección de indicadores para esta clase (banco de indicadores)
@@ -2375,8 +2425,13 @@ function renderRegistrar(group, sessionToEdit, prefill){
           }).join('')}
         </select>
       </div>
+      <label style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" style="width:auto;" ${registrarAttendanceOnly ? 'checked' : ''} onchange="toggleAttendanceOnlyMode(this.checked)">
+        Registrar solo asistencia (sin indicadores)
+      </label>
     </div>
 
+    ${registrarAttendanceOnly ? '' : `
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Indicadores de esta clase</h2>
@@ -2396,18 +2451,47 @@ function renderRegistrar(group, sessionToEdit, prefill){
         </select>
       ` : ''}
       <div style="margin-top:8px;">
-        ${indicatorsToShow.length === 0 ? '<p class="muted">No hay indicadores para este tema.</p>' :
+        ${indicatorsToShow.length === 0 ? '<p class="muted">No hay indicadores para este tema. Crea uno con "+ Nuevo indicador".</p>' :
           indicatorsToShow.map(ind=>`
-            <label style="display:inline-flex; align-items:center; gap:6px; margin:4px 10px 4px 0; font-family:'Inter',sans-serif; font-size:0.88rem;">
-              <input type="checkbox" value="${ind.id}" ${registrarIndicatorSelection.includes(ind.id) ? 'checked' : ''} onchange="toggleRegistrarIndicator('${ind.id}', this.checked)">
-              ${escapeHtml(ind.name)}${ind.tema ? ` <span class="muted">(${escapeHtml(ind.tema)})</span>` : ''}
-            </label>
+            <span style="display:inline-flex; align-items:center; gap:4px; margin:4px 10px 4px 0;">
+              <label style="display:inline-flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:0.88rem;">
+                <input type="checkbox" value="${ind.id}" ${registrarIndicatorSelection.includes(ind.id) ? 'checked' : ''} onchange="toggleRegistrarIndicator('${ind.id}', this.checked)">
+                ${escapeHtml(ind.name)}${ind.tema ? ` <span class="muted">(${escapeHtml(ind.tema)})</span>` : ''}
+              </label>
+              <button onclick="openIndicatorForm('${ind.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; padding:0; font-size:0.85rem;">✎</button>
+            </span>
           `).join('')
         }
       </div>
     </div>
+    `}
 
-    ${selectedIndicators.length === 0 ? '<div class="card app-font"><div class="empty-state">Selecciona al menos un indicador arriba para completar el cotejo.</div></div>' : `
+    ${registrarAttendanceOnly ? `
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Asistencia por estudiante</h2>
+        <button class="btn btn-outline btn-sm" onclick="markAllAttendance(true)">✅ Marcar todos presentes</button>
+      </div>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Estudiante</th><th>Presente</th><th style="min-width:180px;">Observaciones</th></tr></thead>
+        <tbody>
+          ${group.students.map(s=>{
+            const prevEntry = prevByStudent[s.id];
+            const wasPresent = prevEntry ? isEntryPresent(prevEntry) : true;
+            return `
+              <tr>
+                <td>${escapeHtml(s.name)}</td>
+                <td><input type="checkbox" data-attendance-student="${s.id}" style="width:auto;" ${wasPresent ? 'checked' : ''}></td>
+                <td><textarea data-student="${s.id}" data-obs="1" placeholder="Observaciones...">${prevEntry ? escapeHtml(prevEntry.observaciones || '') : ''}</textarea></td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    ` : (selectedIndicators.length === 0 ? '<div class="card app-font"><div class="empty-state">Selecciona al menos un indicador arriba para completar el cotejo, o activa "Registrar solo asistencia".</div></div>' : `
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Cotejo y observaciones por estudiante</h2>
@@ -2455,10 +2539,19 @@ function renderRegistrar(group, sessionToEdit, prefill){
       </table>
       </div>
     </div>
-    `}
+    `)}
 
     ${saveButtonsRow}
   `;
+}
+
+function toggleAttendanceOnlyMode(checked){
+  registrarAttendanceOnly = checked;
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+}
+function markAllAttendance(present){
+  document.querySelectorAll('input[type="checkbox"][data-attendance-student]').forEach(cb=>{ cb.checked = present; });
+  showToast(present ? 'Se marcaron todos presentes' : 'Se marcaron todos ausentes');
 }
 
 function markAllMaxScores(){
@@ -2515,22 +2608,38 @@ function handleSaveSession(){
   const time = document.getElementById('sessionTime').value;
   const selectedProcessId = document.getElementById('sessionProcess').value || null;
   if(!date || !time){ showToast('Indica fecha y horario'); return; }
-  if(selectedIndicators.length === 0){ showToast('Selecciona al menos un indicador'); return; }
+  if(!registrarAttendanceOnly && selectedIndicators.length === 0){
+    showToast('Selecciona al menos un indicador, o activa "Registrar solo asistencia"');
+    return;
+  }
 
   const currentStudentIds = new Set(group.students.map(s=>s.id));
-  const newEntries = group.students.map(s=>{
-    const cotejo = {};
-    selectedIndicators.forEach(ind=>{
-      const sel = document.querySelector(`select[data-student="${s.id}"][data-indicator="${ind.id}"]`);
-      cotejo[ind.id] = sel && sel.value ? Number(sel.value) : null;
+  let newEntries, indicatorSnapshot;
+
+  if(registrarAttendanceOnly){
+    newEntries = group.students.map(s=>{
+      const checkbox = document.querySelector(`input[type="checkbox"][data-attendance-student="${s.id}"]`);
+      const presente = checkbox ? checkbox.checked : true;
+      const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
+      return { studentId: s.id, cotejo: {}, presente, observaciones: obsEl ? obsEl.value.trim() : '' };
     });
-    const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
-    return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
-  });
+    indicatorSnapshot = [];
+  } else {
+    newEntries = group.students.map(s=>{
+      const cotejo = {};
+      selectedIndicators.forEach(ind=>{
+        const sel = document.querySelector(`select[data-student="${s.id}"][data-indicator="${ind.id}"]`);
+        cotejo[ind.id] = sel && sel.value ? Number(sel.value) : null;
+      });
+      const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
+      return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
+    });
+    indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
+  }
+
   // Conservar datos de estudiantes que ya no están en el grupo pero tenían registro previo
   const preservedEntries = isEdit ? sessionToEdit.entries.filter(e=> !currentStudentIds.has(e.studentId)) : [];
   const entries = [...newEntries, ...preservedEntries];
-  const indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
 
   if(isEdit){
     const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
@@ -2542,9 +2651,10 @@ function handleSaveSession(){
     group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId });
     showToast('Clase registrada correctamente');
   }
-  group.lastUsedIndicatorIds = registrarIndicatorSelection.slice();
+  if(!registrarAttendanceOnly) group.lastUsedIndicatorIds = registrarIndicatorSelection.slice();
   saveState();
   registrarIndicatorSelection = null;
+  registrarAttendanceOnly = null;
   goToTab('historial');
 }
 
@@ -2555,6 +2665,7 @@ function editSession(sessionId){
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
   registrarIndicatorSelection = null;
+  registrarAttendanceOnly = null;
   renderNav();
   renderRegistrar(group, session);
 }
