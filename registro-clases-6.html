@@ -3863,31 +3863,37 @@ function exportGroupToCSVFallback(group){
   const sessions = getActiveSessions(group).sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
   if(sessions.length === 0){ showToast('No hay registros para exportar'); return; }
 
-  const header = ['Estudiante'];
+  const indicatorMap = new Map();
   sessions.forEach(session=>{
     const inds = session.indicatorSnapshot || group.indicators;
-    inds.forEach(ind=> header.push(`${formatDate(session.date)} ${session.time} - ${ind.name}`));
+    inds.forEach(ind=>{ if(!indicatorMap.has(ind.id)) indicatorMap.set(ind.id, ind.name); });
   });
-  header.push('Presentes','Ausentes','Obtenido','Posible','% Logro');
+  const indicatorIds = [...indicatorMap.keys()];
+
+  const header = ['Fecha','Hora','Estudiante','Asistencia', ...indicatorIds.map(id=>indicatorMap.get(id)), 'Promedio','Observaciones'];
   const rows = [header];
 
-  group.students.forEach(student=>{
-    const row = [student.name];
-    sessions.forEach(session=>{
-      const inds = session.indicatorSnapshot || group.indicators;
+  sessions.forEach(session=>{
+    const inds = session.indicatorSnapshot || group.indicators;
+    const indIdsInSession = new Set(inds.map(i=>i.id));
+    group.students.forEach(student=>{
       const entry = session.entries.find(e=> e.studentId === student.id);
-      if(!entry){
-        inds.forEach(()=> row.push(''));
-      } else if(!isEntryPresent(entry)){
-        row.push('AUSENTE');
-        for(let i=1;i<inds.length;i++) row.push('');
-      } else {
-        inds.forEach(ind=> row.push(entry.cotejo[ind.id] ?? ''));
-      }
+      if(!entry) return;
+      const present = isEntryPresent(entry);
+      let scoreSum = 0, scoreCount = 0;
+      const indicatorValues = indicatorIds.map(id=>{
+        if(present && indIdsInSession.has(id)){
+          const v = entry.cotejo[id];
+          if(v !== null && v !== undefined){ scoreSum += v; scoreCount++; return v; }
+        }
+        return '';
+      });
+      const promedio = (present && scoreCount > 0) ? Math.round((scoreSum/scoreCount)*10)/10 : '';
+      rows.push([
+        formatDate(session.date), session.time, student.name, present ? 'Presente' : 'Ausente',
+        ...indicatorValues, promedio, entry.observaciones || ''
+      ]);
     });
-    const stats = computeStudentStats(group, student.id);
-    row.push(stats.presentCount, stats.absentCount, stats.obtained, stats.maxPossible, stats.percent === null ? '' : stats.percent + '%');
-    rows.push(row);
   });
 
   const csvContent = rows.map(r=> r.map(csvEscape).join(',')).join('\r\n');
@@ -3910,112 +3916,89 @@ function addAsistenciaSheet(workbook, group){
 
   const ws = workbook.addWorksheet('Asistencia');
 
-  const blockColors = ['F1ECFC','E6F8EF','FDF3DE','E7F1FC','FCEAF3'];
-  let col = 2; // columna B
-  const blocks = sessions.map((session, idx)=>{
+  // Unión de todos los indicadores distintos usados en el periodo (por id, evita duplicar si cambió el nombre)
+  const indicatorMap = new Map();
+  sessions.forEach(session=>{
     const inds = session.indicatorSnapshot || group.indicators;
-    const startCol = col;
-    const endCol = col + inds.length - 1;
-    col = endCol + 1;
-    return { session, inds, startCol, endCol, color: blockColors[idx % blockColors.length] };
+    inds.forEach(ind=>{ if(!indicatorMap.has(ind.id)) indicatorMap.set(ind.id, ind.name); });
   });
-  const summaryStart = col;
-  const summaryLabels = ['Presentes','Ausentes','Obtenido','Posible','% Logro'];
-  const summaryEnd = summaryStart + summaryLabels.length - 1;
+  const indicatorIds = [...indicatorMap.keys()];
+  const promedioCol = 5 + indicatorIds.length;
+  const obsCol = promedioCol + 1;
 
-  ws.mergeCells(1,1,2,1);
-  const studentHeader = ws.getCell(1,1);
-  studentHeader.value = 'Estudiante';
-  studentHeader.font = { bold:true, color:{argb:'FF2B2A3D'} };
-  studentHeader.alignment = { vertical:'middle', horizontal:'center' };
-  studentHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE9E6F5'} };
+  const headers = ['Fecha','Hora','Estudiante','Asistencia', ...indicatorIds.map(id=>indicatorMap.get(id)), 'Promedio','Observaciones'];
+  headers.forEach((h,i)=>{
+    const cell = ws.getCell(1, i+1);
+    cell.value = h;
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+    cell.alignment = { wrapText:true, vertical:'middle' };
+  });
 
-  blocks.forEach(block=>{
-    ws.mergeCells(1, block.startCol, 1, block.endCol);
-    const headerCell = ws.getCell(1, block.startCol);
-    headerCell.value = `${formatDate(block.session.date)} · ${block.session.time}`;
-    headerCell.font = { bold:true, color:{argb:'FF2B2A3D'} };
-    headerCell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
-    for(let c=block.startCol; c<=block.endCol; c++){
-      ws.getCell(1,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+block.color} };
-      ws.getCell(2,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+block.color} };
-    }
-    block.inds.forEach((ind, i)=>{
-      const cell = ws.getCell(2, block.startCol + i);
-      cell.value = ind.name;
-      cell.font = { bold:true, size:10, color:{argb:'FF2B2A3D'} };
-      cell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+  let rowNum = 2;
+  sessions.forEach(session=>{
+    const inds = session.indicatorSnapshot || group.indicators;
+    const indIdsInSession = new Set(inds.map(i=>i.id));
+    group.students.forEach(student=>{
+      const entry = session.entries.find(e=> e.studentId === student.id);
+      if(!entry) return; // el estudiante no estaba en el curso al momento de esta clase
+
+      const present = isEntryPresent(entry);
+      ws.getCell(rowNum, 1).value = formatDate(session.date);
+      ws.getCell(rowNum, 2).value = session.time;
+      ws.getCell(rowNum, 3).value = student.name;
+
+      const asistCell = ws.getCell(rowNum, 4);
+      asistCell.value = present ? 'Presente' : 'Ausente';
+      asistCell.font = present ? { bold:true, color:{argb:'FF22B573'} } : { bold:true, color:{argb:'FFD8493E'} };
+      if(!present) asistCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDECEA'} };
+
+      let scoreSum = 0, scoreCount = 0;
+      indicatorIds.forEach((id, i)=>{
+        const col = 5 + i;
+        if(present && indIdsInSession.has(id)){
+          const v = entry.cotejo[id];
+          ws.getCell(rowNum, col).value = (v !== null && v !== undefined) ? v : '';
+          if(v !== null && v !== undefined){ scoreSum += v; scoreCount++; }
+        }
+      });
+
+      ws.getCell(rowNum, promedioCol).value = (present && scoreCount > 0) ? Math.round((scoreSum/scoreCount)*10)/10 : '';
+      ws.getCell(rowNum, obsCol).value = entry.observaciones || '';
+      rowNum++;
     });
   });
 
-  ws.mergeCells(1, summaryStart, 1, summaryEnd);
-  const summaryHeader = ws.getCell(1, summaryStart);
-  summaryHeader.value = 'Resumen';
-  summaryHeader.font = { bold:true, color:{argb:'FFFFFFFF'} };
-  summaryHeader.alignment = { vertical:'middle', horizontal:'center' };
-  summaryLabels.forEach((label, i)=>{
-    const cell = ws.getCell(2, summaryStart + i);
-    cell.value = label;
-    cell.font = { bold:true, size:10, color:{argb:'FFFFFFFF'} };
-    cell.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+  ws.getColumn(1).width = 12;
+  ws.getColumn(2).width = 8;
+  ws.getColumn(3).width = 24;
+  ws.getColumn(4).width = 11;
+  for(let i=0;i<indicatorIds.length;i++){ ws.getColumn(5+i).width = 14; }
+  ws.getColumn(promedioCol).width = 11;
+  ws.getColumn(obsCol).width = 30;
+  ws.getRow(1).height = 26;
+
+  // Hoja liviana con el resumen por estudiante (una sola fila cada uno)
+  const wsSummary = workbook.addWorksheet('Asistencia - Resumen');
+  ['Estudiante','Presentes','Ausentes','Obtenido','Posible','% Logro'].forEach((h,i)=>{
+    const cell = wsSummary.getCell(1, i+1);
+    cell.value = h;
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
   });
-  for(let c=summaryStart; c<=summaryEnd; c++){
-    ws.getCell(1,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF2B2A3D'} };
-    ws.getCell(2,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF554C77'} };
-  }
-
-  group.students.forEach((student, si)=>{
-    const rowNum = 3 + si;
-    const nameCell = ws.getCell(rowNum, 1);
-    nameCell.value = student.name;
-    nameCell.font = { bold:true };
-    nameCell.alignment = { vertical:'middle' };
-
-    blocks.forEach(block=>{
-      const entry = block.session.entries.find(e=> e.studentId === student.id);
-      if(!entry){
-        ws.mergeCells(rowNum, block.startCol, rowNum, block.endCol);
-        const cell = ws.getCell(rowNum, block.startCol);
-        cell.value = '—';
-        cell.alignment = { horizontal:'center', vertical:'middle' };
-        cell.font = { color:{argb:'FFB4B0C9'}, italic:true };
-      } else if(!isEntryPresent(entry)){
-        ws.mergeCells(rowNum, block.startCol, rowNum, block.endCol);
-        const cell = ws.getCell(rowNum, block.startCol);
-        cell.value = 'AUSENTE';
-        cell.font = { bold:true, color:{argb:'FFD8493E'} };
-        cell.alignment = { horizontal:'center', vertical:'middle' };
-        cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDECEA'} };
-      } else {
-        block.inds.forEach((ind, i)=>{
-          const cell = ws.getCell(rowNum, block.startCol + i);
-          const v = entry.cotejo[ind.id];
-          cell.value = (v !== null && v !== undefined) ? v : '';
-          cell.alignment = { horizontal:'center', vertical:'middle' };
-        });
-      }
-    });
-
+  group.students.forEach((student, i)=>{
     const stats = computeStudentStats(group, student.id);
-    const summaryValues = [
-      stats.presentCount,
-      stats.absentCount,
-      stats.obtained,
-      stats.maxPossible,
-      stats.percent === null ? '' : stats.percent + '%'
-    ];
-    summaryValues.forEach((val, i)=>{
-      const cell = ws.getCell(rowNum, summaryStart + i);
-      cell.value = val;
-      cell.alignment = { horizontal:'center', vertical:'middle' };
-      if(i === 4) cell.font = { bold:true, color:{argb:'FF6C4EE3'} };
-    });
+    const row = 2 + i;
+    wsSummary.getCell(row,1).value = student.name;
+    wsSummary.getCell(row,2).value = stats.presentCount;
+    wsSummary.getCell(row,3).value = stats.absentCount;
+    wsSummary.getCell(row,4).value = stats.obtained;
+    wsSummary.getCell(row,5).value = stats.maxPossible;
+    wsSummary.getCell(row,6).value = stats.percent === null ? '' : stats.percent + '%';
   });
+  wsSummary.getColumn(1).width = 26;
+  for(let c=2;c<=6;c++){ wsSummary.getColumn(c).width = 12; }
 
-  ws.getColumn(1).width = 24;
-  for(let c=2; c<=summaryEnd; c++){ ws.getColumn(c).width = 13; }
-  ws.getRow(1).height = 30;
-  ws.getRow(2).height = 34;
   return true;
 }
 
