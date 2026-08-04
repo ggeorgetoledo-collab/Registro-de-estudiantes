@@ -1042,7 +1042,7 @@ function totalWeightAssigned(group){
 
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [] };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [] };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -1059,6 +1059,7 @@ function ensureDefaultGroup(){
     if(!g.students) g.students = [];
     if(!g.processes) g.processes = [];
     if(!g.bitacora) g.bitacora = [];
+    if(!g.entregas) g.entregas = [];
     if(g.activeProcessId === undefined) g.activeProcessId = null;
   });
   if(!state.periods) state.periods = [];
@@ -1374,7 +1375,7 @@ document.getElementById('groupSelect').addEventListener('change', e=>{
 document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   const name = prompt('Nombre del nuevo grupo/curso:');
   if(!name) return;
-  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [] };
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [] };
   state.groups.push(g);
   state.activeGroupId = g.id;
   saveState();
@@ -1387,7 +1388,7 @@ const MODULE_TABS = {
   inicio: ['inicio'],
   horario: ['horario'],
   cursos: ['estudiantes'],
-  trabajo: ['indicadores','registrar','historial','decimas'],
+  trabajo: ['indicadores','registrar','historial','decimas','entregas'],
   calificaciones: ['calificaciones'],
   bitacora: ['bitacora'],
 };
@@ -1396,6 +1397,7 @@ const SUBTAB_LABELS = {
   registrar: 'Registrar clase',
   historial: 'Historial',
   decimas: 'Décimas',
+  entregas: 'Entregas',
 };
 function moduleForTab(tab){
   for(const m in MODULE_TABS){ if(MODULE_TABS[m].includes(tab)) return m; }
@@ -1466,6 +1468,7 @@ function renderMain(){
   if(currentTab === 'registrar') return renderRegistrar(group);
   if(currentTab === 'historial') return renderHistorial(group);
   if(currentTab === 'decimas') return renderDecimas(group);
+  if(currentTab === 'entregas') return renderEntregas(group);
   if(currentTab === 'calificaciones') return renderCalificaciones(group);
   if(currentTab === 'bitacora') return renderBitacora(group);
 }
@@ -2003,6 +2006,7 @@ function renderInicio(){
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('indicadores')">🎚️<span>Indicadores</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('historial')">🗂️<span>Historial</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('decimas')">➕<span>Décimas</span></button>
+        <button class="btn btn-outline quick-link-btn" onclick="goToTab('entregas')">📥<span>Entregas</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('calificaciones')">🎯<span>Calificaciones</span></button>
       </div>
     </div>
@@ -2942,6 +2946,200 @@ function deleteDecima(id){
   if(decActiveSessionId === id) decActiveSessionId = null;
   saveState();
   renderDecimas(group);
+}
+
+/* ============ TAB: ENTREGAS (guías/trabajos: en plazo, fuera de plazo, no entregado) ============ */
+const ENTREGA_ESTADOS = {
+  en_plazo: { label:'En plazo', color:{bg:'#E6F8EF', text:'#1F9D64', border:'#B9EBD1'} },
+  fuera_plazo: { label:'Fuera de plazo', color:{bg:'#FDF3DE', text:'#C6871A', border:'#F5DFA8'} },
+  no_entregada: { label:'No entregada', color:{bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE'} },
+};
+
+function getActiveEntregas(group){
+  return (group.entregas || []).filter(e=> !state.activePeriodId || e.periodId === state.activePeriodId);
+}
+
+let entregaActiveId = null;
+
+function renderEntregas(group){
+  if(!group.entregas) group.entregas = [];
+  if(entregaActiveId){
+    const entrega = group.entregas.find(e=>e.id === entregaActiveId);
+    if(entrega) return renderEntregaValues(group, entrega);
+    entregaActiveId = null;
+  }
+
+  const main = document.getElementById('main');
+  if(group.students.length === 0){
+    main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega estudiantes antes de registrar entregas.</div></div>';
+    return;
+  }
+
+  const today = toISODate(new Date());
+  const entregas = getActiveEntregas(group).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Nueva entrega (guía o trabajo)</h2>
+      <div class="grid-2">
+        <div>
+          <label>Nombre de la guía / trabajo</label>
+          <input type="text" id="entName" placeholder="Ej. Guía N°3 - Ecuaciones">
+        </div>
+        <div>
+          <label>Fecha de entrega</label>
+          <input type="date" id="entDate" value="${today}">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addEntregaBtn">+ Crear y completar por estudiante</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Entregas registradas (${entregas.length})</h2>
+      ${entregas.length === 0 ? '<div class="empty-state">Aún no has registrado entregas.</div>' :
+        entregas.map(e=>{
+          const estados = e.estados || {};
+          const counts = { en_plazo:0, fuera_plazo:0, no_entregada:0 };
+          Object.values(estados).forEach(v=>{ if(counts[v] !== undefined) counts[v]++; });
+          return `
+            <div class="student-list-item" style="align-items:flex-start;">
+              <div>
+                <strong>${escapeHtml(e.name)}</strong>
+                <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada</div>
+              </div>
+              <div class="row" style="gap:6px;">
+                <button class="btn btn-accent btn-sm" onclick="openEntregaValues('${e.id}')">Completar / editar</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteEntrega('${e.id}')">Eliminar</button>
+              </div>
+            </div>
+          `;
+        }).join('')
+      }
+    </div>
+
+    ${entregas.length > 0 ? `
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Resumen por estudiante</h2>
+        <button class="btn btn-outline btn-sm" onclick="exportEntregasToExcel(getActiveGroup())">⬇️ Exportar</button>
+      </div>
+      <table>
+        <thead><tr><th>Estudiante</th><th>En plazo</th><th>Fuera de plazo</th><th>No entregada</th></tr></thead>
+        <tbody>
+          ${group.students.map(s=>{
+            const stats = computeStudentEntregaStats(group, s.id);
+            return `
+              <tr>
+                <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
+                <td style="color:${ENTREGA_ESTADOS.en_plazo.color.text}; font-weight:700;">${stats.en_plazo}</td>
+                <td style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text}; font-weight:700;">${stats.fuera_plazo}</td>
+                <td style="color:${ENTREGA_ESTADOS.no_entregada.color.text}; font-weight:700;">${stats.no_entregada}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    ` : ''}
+  `;
+
+  document.getElementById('addEntregaBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('entName').value.trim();
+    const date = document.getElementById('entDate').value || today;
+    if(!name){ showToast('Ingresa el nombre de la guía o trabajo'); return; }
+    const entrega = { id: uid(), name, date, periodId: state.activePeriodId, estados: {} };
+    group.entregas.push(entrega);
+    saveState();
+    entregaActiveId = entrega.id;
+    renderEntregas(group);
+    showToast('Entrega creada, marca el estado de cada estudiante');
+  });
+}
+
+function computeStudentEntregaStats(group, studentId){
+  const stats = { en_plazo:0, fuera_plazo:0, no_entregada:0 };
+  getActiveEntregas(group).forEach(e=>{
+    const estado = e.estados ? e.estados[studentId] : null;
+    if(estado && stats[estado] !== undefined) stats[estado]++;
+  });
+  return stats;
+}
+
+function openEntregaValues(id){
+  entregaActiveId = id;
+  renderEntregas(getActiveGroup());
+}
+function closeEntregaValues(){
+  entregaActiveId = null;
+  renderEntregas(getActiveGroup());
+}
+
+function renderEntregaValues(group, entrega){
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(entrega.name)} · ${formatDate(entrega.date)}</h2>
+        <button class="btn btn-outline btn-sm" onclick="closeEntregaValues()">← Volver</button>
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <button class="btn btn-accent btn-sm" onclick="markAllEntregaState('${entrega.id}','en_plazo')">✅ Marcar todos en plazo</button>
+      </div>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Estudiante</th><th>Estado</th></tr></thead>
+        <tbody>
+          ${group.students.map(s=>{
+            const current = entrega.estados ? entrega.estados[s.id] : '';
+            return `
+              <tr>
+                <td>${escapeHtml(s.name)}</td>
+                <td>
+                  <select onchange="saveEntregaState('${entrega.id}','${s.id}', this.value)">
+                    <option value="">-</option>
+                    ${Object.keys(ENTREGA_ESTADOS).map(k=>`<option value="${k}" ${current===k?'selected':''}>${ENTREGA_ESTADOS[k].label}</option>`).join('')}
+                  </select>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+}
+
+function saveEntregaState(entregaId, studentId, value){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===entregaId);
+  if(!entrega) return;
+  if(!entrega.estados) entrega.estados = {};
+  if(value){ entrega.estados[studentId] = value; }
+  else { delete entrega.estados[studentId]; }
+  saveState();
+}
+function markAllEntregaState(entregaId, value){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===entregaId);
+  if(!entrega) return;
+  if(!entrega.estados) entrega.estados = {};
+  group.students.forEach(s=>{ entrega.estados[s.id] = value; });
+  saveState();
+  renderEntregaValues(group, entrega);
+  showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[value].label + '"');
+}
+function deleteEntrega(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar este registro de entrega?')) return;
+  group.entregas = group.entregas.filter(e=>e.id!==id);
+  if(entregaActiveId === id) entregaActiveId = null;
+  saveState();
+  renderEntregas(group);
 }
 
 /* ============ TAB: BITÁCORA ============ */
@@ -4169,6 +4367,55 @@ async function exportDecimasToExcel(group){
   showToast('Décimas exportadas');
 }
 
+/* ============ EXPORTAR: ENTREGAS ============ */
+function addEntregasSheet(workbook, group){
+  const entregas = getActiveEntregas(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(entregas.length === 0 || group.students.length === 0) return false;
+  const ws = workbook.addWorksheet('Entregas');
+  const headerCell = ws.getCell(1,1);
+  headerCell.value = 'Estudiante';
+  headerCell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+  headerCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+  entregas.forEach((e,i)=>{
+    const cell = ws.getCell(1, 2+i);
+    cell.value = `${e.name} (${formatDate(e.date)})`;
+    cell.font = { bold:true, size:10, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+    cell.alignment = { wrapText:true, horizontal:'center' };
+  });
+  const colorArgb = { en_plazo:'FFE6F8EF', fuera_plazo:'FFFDF3DE', no_entregada:'FFFDECEA' };
+  const textArgb = { en_plazo:'FF1F9D64', fuera_plazo:'FFC6871A', no_entregada:'FFD8493E' };
+  group.students.forEach((student, si)=>{
+    const row = 2+si;
+    ws.getCell(row,1).value = student.name;
+    entregas.forEach((e,i)=>{
+      const estado = e.estados ? e.estados[student.id] : null;
+      const cell = ws.getCell(row, 2+i);
+      cell.value = estado ? ENTREGA_ESTADOS[estado].label : '';
+      cell.alignment = { horizontal:'center' };
+      if(estado){
+        cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:colorArgb[estado]} };
+        cell.font = { bold:true, color:{argb:textArgb[estado]} };
+      }
+    });
+  });
+  ws.getColumn(1).width = 24;
+  for(let i=0;i<entregas.length;i++){ ws.getColumn(2+i).width = 18; }
+  ws.getRow(1).height = 30;
+  return true;
+}
+async function exportEntregasToExcel(group){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar esta hoja.');
+    return;
+  }
+  const workbook = new ExcelJS.Workbook();
+  const added = addEntregasSheet(workbook, group);
+  if(!added){ showToast('No hay entregas para exportar'); return; }
+  await downloadWorkbook(workbook, `entregas_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Entregas exportadas');
+}
+
 /* ============ EXPORTAR: BITÁCORA ============ */
 function addBitacoraSheet(workbook, group){
   const entries = getActiveBitacora(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -4509,6 +4756,7 @@ async function exportAllToExcel(group){
   any = addAsistenciaSheet(workbook, group) || any;
   any = addCalificacionesSheet(workbook, group) || any;
   any = addDecimasSheet(workbook, group) || any;
+  any = addEntregasSheet(workbook, group) || any;
   any = addBitacoraSheet(workbook, group) || any;
   if(!any){ showToast('Este curso todavía no tiene datos para exportar'); return; }
   await downloadWorkbook(workbook, `curso_completo_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
