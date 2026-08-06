@@ -1388,7 +1388,7 @@ const MODULE_TABS = {
   inicio: ['inicio'],
   horario: ['horario'],
   cursos: ['estudiantes'],
-  trabajo: ['indicadores','registrar','historial','decimas','entregas'],
+  trabajo: ['indicadores','registrar','entregas','historial','decimas'],
   calificaciones: ['calificaciones'],
   bitacora: ['bitacora'],
 };
@@ -2400,8 +2400,11 @@ function renderRegistrar(group, sessionToEdit, prefill){
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font" style="padding:10px 16px;">
-      <span class="muted">Proceso activo: <strong style="color:var(--primary);">${group.activeProcessId ? escapeHtml((group.processes.find(p=>p.id===group.activeProcessId)||{}).name || '—') : 'Ninguno (todos los procesos)'}</strong></span>
-      <button class="btn btn-outline btn-sm" style="margin-left:8px;" onclick="goToTab('historial')">Cambiar</button>
+      <div class="flex-between">
+        <span class="muted">Proceso activo: <strong style="color:var(--primary);">${group.activeProcessId ? escapeHtml((group.processes.find(p=>p.id===group.activeProcessId)||{}).name || '—') : 'Ninguno (todos los procesos)'}</strong>
+        <button class="btn btn-outline btn-sm" style="margin-left:8px;" onclick="goToTab('historial')">Cambiar</button></span>
+        <button class="btn btn-accent btn-sm" onclick="goToTab('entregas')">📥 Entregas de este curso</button>
+      </div>
     </div>
     ${isEdit ? '<div class="card app-font" style="border-left:4px solid var(--primary);"><strong>Editando clase existente</strong> <span class="muted">— los cambios reemplazarán el registro original.</span></div>' : ''}
 
