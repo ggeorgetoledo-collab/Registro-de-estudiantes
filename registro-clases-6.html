@@ -3079,6 +3079,8 @@ function closeEntregaValues(){
 
 function renderEntregaValues(group, entrega){
   const main = document.getElementById('main');
+  const todayISO = toISODate(new Date());
+  const willBeLate = todayISO > entrega.date;
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
@@ -3086,23 +3088,26 @@ function renderEntregaValues(group, entrega){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(entrega.name)} · ${formatDate(entrega.date)}</h2>
         <button class="btn btn-outline btn-sm" onclick="closeEntregaValues()">← Volver</button>
       </div>
+      <p class="muted">Toca "Marcar entregada" cuando un estudiante te entregue el trabajo — la app compara la fecha de hoy con la fecha de la guía y marca automáticamente "En plazo" o "Fuera de plazo". Vuelve a tocar el botón para deshacer.</p>
+      ${willBeLate ? `<p class="muted" style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text};">⚠️ Hoy (${formatDate(todayISO)}) es después de la fecha de esta guía — lo que marques hoy quedará como "Fuera de plazo".</p>` : ''}
       <div class="row" style="margin-bottom:10px;">
-        <button class="btn btn-accent btn-sm" onclick="markAllEntregaState('${entrega.id}','en_plazo')">✅ Marcar todos en plazo</button>
+        <button class="btn btn-accent btn-sm" onclick="markAllEntregaDelivered('${entrega.id}')">✅ Marcar todos entregada (hoy)</button>
       </div>
       <div style="overflow-x:auto;">
       <table>
         <thead><tr><th>Estudiante</th><th>Estado</th></tr></thead>
         <tbody>
           ${group.students.map(s=>{
-            const current = entrega.estados ? entrega.estados[s.id] : '';
+            const estado = entrega.estados ? entrega.estados[s.id] : null;
+            const fecha = entrega.fechas ? entrega.fechas[s.id] : null;
+            const info = estado ? ENTREGA_ESTADOS[estado] : null;
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
                 <td>
-                  <select onchange="saveEntregaState('${entrega.id}','${s.id}', this.value)">
-                    <option value="">-</option>
-                    ${Object.keys(ENTREGA_ESTADOS).map(k=>`<option value="${k}" ${current===k?'selected':''}>${ENTREGA_ESTADOS[k].label}</option>`).join('')}
-                  </select>
+                  <button class="btn btn-sm" style="${info ? `background:${info.color.bg}; color:${info.color.text}; border:1px solid ${info.color.border};` : ''}" onclick="toggleEntregaDelivered('${entrega.id}','${s.id}')">
+                    ${info ? `${info.label}${fecha ? ' · ' + formatDate(fecha) : ''} (deshacer)` : '⬜ Marcar entregada'}
+                  </button>
                 </td>
               </tr>
             `;
@@ -3114,24 +3119,36 @@ function renderEntregaValues(group, entrega){
   `;
 }
 
-function saveEntregaState(entregaId, studentId, value){
+function toggleEntregaDelivered(entregaId, studentId){
   const group = getActiveGroup();
   const entrega = group.entregas.find(e=>e.id===entregaId);
   if(!entrega) return;
   if(!entrega.estados) entrega.estados = {};
-  if(value){ entrega.estados[studentId] = value; }
-  else { delete entrega.estados[studentId]; }
-  saveState();
-}
-function markAllEntregaState(entregaId, value){
-  const group = getActiveGroup();
-  const entrega = group.entregas.find(e=>e.id===entregaId);
-  if(!entrega) return;
-  if(!entrega.estados) entrega.estados = {};
-  group.students.forEach(s=>{ entrega.estados[s.id] = value; });
+  if(!entrega.fechas) entrega.fechas = {};
+
+  if(entrega.estados[studentId]){
+    delete entrega.estados[studentId];
+    delete entrega.fechas[studentId];
+  } else {
+    const todayISO = toISODate(new Date());
+    entrega.estados[studentId] = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
+    entrega.fechas[studentId] = todayISO;
+  }
   saveState();
   renderEntregaValues(group, entrega);
-  showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[value].label + '"');
+}
+function markAllEntregaDelivered(entregaId){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===entregaId);
+  if(!entrega) return;
+  if(!entrega.estados) entrega.estados = {};
+  if(!entrega.fechas) entrega.fechas = {};
+  const todayISO = toISODate(new Date());
+  const estado = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
+  group.students.forEach(s=>{ entrega.estados[s.id] = estado; entrega.fechas[s.id] = todayISO; });
+  saveState();
+  renderEntregaValues(group, entrega);
+  showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[estado].label + '"');
 }
 function deleteEntrega(id){
   const group = getActiveGroup();
@@ -4390,8 +4407,9 @@ function addEntregasSheet(workbook, group){
     ws.getCell(row,1).value = student.name;
     entregas.forEach((e,i)=>{
       const estado = e.estados ? e.estados[student.id] : null;
+      const fecha = e.fechas ? e.fechas[student.id] : null;
       const cell = ws.getCell(row, 2+i);
-      cell.value = estado ? ENTREGA_ESTADOS[estado].label : '';
+      cell.value = estado ? `${ENTREGA_ESTADOS[estado].label}${fecha ? ' (' + formatDate(fecha) + ')' : ''}` : '';
       cell.alignment = { horizontal:'center' };
       if(estado){
         cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:colorArgb[estado]} };
