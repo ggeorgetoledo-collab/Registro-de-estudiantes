@@ -294,6 +294,30 @@
     text-align:center;
   }
   .quick-link-btn span{ font-size:0.72rem; font-weight:700; }
+  .week-summary{ display:flex; flex-direction:column; gap:6px; }
+  .week-day-row{
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+    padding:8px 6px;
+    border-bottom:1px solid var(--border);
+  }
+  .week-day-row:last-child{ border-bottom:none; }
+  .week-day-row.week-day-today{ background:var(--primary-light); border-radius:8px; }
+  .week-day-label{
+    min-width:44px;
+    text-align:center;
+    font-weight:700;
+    font-size:0.78rem;
+    color:var(--text);
+    padding-top:2px;
+  }
+  .week-day-items{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    flex:1;
+  }
   .muted{ color:var(--text-dim); font-family:'Inter', sans-serif; font-size:0.82rem; }
   .divider{ border:none; border-top:1px solid var(--border); margin:16px 0; }
   .grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
@@ -1961,6 +1985,30 @@ function goToEntregasForGroup(groupId){
   goToTab('entregas');
 }
 
+function buildWeekSummary(){
+  const days = [];
+  const today = new Date();
+  for(let i=0; i<7; i++){
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+    const iso = toISODate(d);
+    const weekday = jsWeekdayToOurDay(d.getDay());
+    const classesThatDay = state.schedule
+      .filter(e=> e.day === weekday)
+      .sort((a,b)=> a.startTime.localeCompare(b.startTime));
+    const entregasThatDay = [];
+    state.groups.forEach(g=>{
+      getActiveEntregas(g).forEach(en=>{
+        const dl = getEntregaDeadline(en);
+        if(en.date === iso || (dl && dl.fecha === iso)){
+          entregasThatDay.push({ entrega: en, group: g });
+        }
+      });
+    });
+    days.push({ date: d, iso, classesThatDay, entregasThatDay });
+  }
+  return days;
+}
+
 function renderInicio(){
   const main = document.getElementById('main');
   if(state.groups.length === 0){
@@ -2022,6 +2070,35 @@ function renderInicio(){
           `;
         }).join('')
       }
+    </div>
+
+    <div class="card app-font">
+      <h2>Resumen semanal</h2>
+      <div class="week-summary">
+        ${buildWeekSummary().map(d=>{
+          const isToday = d.iso === todayISO;
+          const dayName = DAY_NAMES[jsWeekdayToOurDay(d.date.getDay())-1];
+          const hasNothing = d.classesThatDay.length === 0 && d.entregasThatDay.length === 0;
+          return `
+            <div class="week-day-row ${isToday ? 'week-day-today' : ''}">
+              <div class="week-day-label">${isToday ? 'Hoy' : dayName.slice(0,3)}<br><span class="muted" style="font-weight:400;">${d.date.getDate()}/${d.date.getMonth()+1}</span></div>
+              <div class="week-day-items">
+                ${hasNothing ? '<span class="muted" style="font-size:0.78rem;">Sin novedades</span>' : ''}
+                ${d.classesThatDay.map(e=>{
+                  const g = state.groups.find(g=>g.id===e.groupId);
+                  const color = groupColor(e.groupId);
+                  return `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; cursor:pointer;" onclick="goToDateClass('${e.id}','${d.iso}')">${escapeHtml(g?g.name:'?')} · ${e.startTime}</span>`;
+                }).join('')}
+                ${d.entregasThatDay.map(item=>{
+                  const dl = getEntregaDeadline(item.entrega);
+                  const isDeadlineDay = dl && dl.fecha === d.iso;
+                  return `<span class="pill pill-danger" style="cursor:pointer;" onclick="goToEntregasForGroup('${item.group.id}')">📥 ${escapeHtml(item.entrega.name)}${isDeadlineDay ? ' ⏰' + dl.hora : ''}</span>`;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
     </div>
 
     <div class="card app-font">
