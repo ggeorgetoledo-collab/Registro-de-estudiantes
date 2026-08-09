@@ -3092,25 +3092,29 @@ function renderEntregaValues(group, entrega){
         <button class="btn btn-outline btn-sm" onclick="closeEntregaValues()">← Volver</button>
       </div>
       <p class="muted">Toca "Marcar entregada" cuando un estudiante te entregue el trabajo — la app compara la fecha de hoy con la fecha de la guía y marca automáticamente "En plazo" o "Fuera de plazo". Vuelve a tocar el botón para deshacer.</p>
-      ${willBeLate ? `<p class="muted" style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text};">⚠️ Hoy (${formatDate(todayISO)}) es después de la fecha de esta guía — lo que marques hoy quedará como "Fuera de plazo".</p>` : ''}
+      ${willBeLate ? `<p class="muted" style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text};">⚠️ Hoy (${formatDate(todayISO)}) es después de la fecha de esta guía — lo que marques hoy quedará como "Fuera de plazo", a menos que uses la opción de excepción.</p>` : ''}
       <div class="row" style="margin-bottom:10px;">
         <button class="btn btn-accent btn-sm" onclick="markAllEntregaDelivered('${entrega.id}')">✅ Marcar todos entregada (hoy)</button>
       </div>
       <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Estudiante</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Estudiante</th><th>Estado</th><th>Excepción</th></tr></thead>
         <tbody>
           ${group.students.map(s=>{
             const estado = entrega.estados ? entrega.estados[s.id] : null;
             const fecha = entrega.fechas ? entrega.fechas[s.id] : null;
+            const isException = entrega.excepciones ? !!entrega.excepciones[s.id] : false;
             const info = estado ? ENTREGA_ESTADOS[estado] : null;
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
                 <td>
                   <button class="btn btn-sm" style="${info ? `background:${info.color.bg}; color:${info.color.text}; border:1px solid ${info.color.border};` : ''}" onclick="toggleEntregaDelivered('${entrega.id}','${s.id}')">
-                    ${info ? `${info.label}${fecha ? ' · ' + formatDate(fecha) : ''} (deshacer)` : '⬜ Marcar entregada'}
+                    ${info ? `${info.label}${isException ? ' ⭐' : ''}${fecha ? ' · ' + formatDate(fecha) : ''} (deshacer)` : '⬜ Marcar entregada'}
                   </button>
+                </td>
+                <td>
+                  ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaException('${entrega.id}','${s.id}')" title="Marcar como en plazo aunque se haya pasado la fecha">🔓 En plazo (excepción)</button>` : (isException ? '<span class="muted">⭐ Excepción aplicada</span>' : '')}
                 </td>
               </tr>
             `;
@@ -3128,10 +3132,12 @@ function toggleEntregaDelivered(entregaId, studentId){
   if(!entrega) return;
   if(!entrega.estados) entrega.estados = {};
   if(!entrega.fechas) entrega.fechas = {};
+  if(!entrega.excepciones) entrega.excepciones = {};
 
   if(entrega.estados[studentId]){
     delete entrega.estados[studentId];
     delete entrega.fechas[studentId];
+    delete entrega.excepciones[studentId];
   } else {
     const todayISO = toISODate(new Date());
     entrega.estados[studentId] = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
@@ -3139,6 +3145,21 @@ function toggleEntregaDelivered(entregaId, studentId){
   }
   saveState();
   renderEntregaValues(group, entrega);
+}
+function markEntregaException(entregaId, studentId){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===entregaId);
+  if(!entrega) return;
+  if(!entrega.estados) entrega.estados = {};
+  if(!entrega.fechas) entrega.fechas = {};
+  if(!entrega.excepciones) entrega.excepciones = {};
+  const todayISO = toISODate(new Date());
+  entrega.estados[studentId] = 'en_plazo';
+  entrega.fechas[studentId] = entrega.fechas[studentId] || todayISO;
+  entrega.excepciones[studentId] = true;
+  saveState();
+  renderEntregaValues(group, entrega);
+  showToast('Marcado como en plazo (excepción)');
 }
 function markAllEntregaDelivered(entregaId){
   const group = getActiveGroup();
@@ -4411,8 +4432,9 @@ function addEntregasSheet(workbook, group){
     entregas.forEach((e,i)=>{
       const estado = e.estados ? e.estados[student.id] : null;
       const fecha = e.fechas ? e.fechas[student.id] : null;
+      const isException = e.excepciones ? !!e.excepciones[student.id] : false;
       const cell = ws.getCell(row, 2+i);
-      cell.value = estado ? `${ENTREGA_ESTADOS[estado].label}${fecha ? ' (' + formatDate(fecha) + ')' : ''}` : '';
+      cell.value = estado ? `${ENTREGA_ESTADOS[estado].label}${isException ? ' (excepción)' : ''}${fecha ? ' - ' + formatDate(fecha) : ''}` : '';
       cell.alignment = { horizontal:'center' };
       if(estado){
         cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:colorArgb[estado]} };
