@@ -3078,7 +3078,8 @@ function renderEntregas(group){
                 <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada</div>
               </div>
               <div class="row" style="gap:6px;">
-                <button class="btn btn-accent btn-sm" onclick="openEntregaValues('${e.id}')">Completar / editar</button>
+                <button class="btn btn-accent btn-sm" onclick="openEntregaValues('${e.id}')">Completar</button>
+                <button class="btn btn-outline btn-sm" onclick="openEntregaEditForm('${e.id}')">✎ Datos</button>
                 <button class="btn btn-outline btn-sm" onclick="openEntregaDeadlineForm('${e.id}')">🔔 Plazo</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteEntrega('${e.id}')">Eliminar</button>
               </div>
@@ -3332,6 +3333,56 @@ function deleteEntrega(id){
   if(entregaActiveId === id) entregaActiveId = null;
   saveState();
   renderEntregas(group);
+}
+
+function openEntregaEditForm(id){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===id);
+  if(!entrega) return;
+  const processes = getActiveProcesses(group);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'entregaEditFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeEntregaEditForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">Editar entrega</h2>
+      <label style="margin-top:8px;">Nombre de la guía / trabajo</label>
+      <input type="text" id="entEditName" value="${escapeHtml(entrega.name)}">
+      <label style="margin-top:10px;">Fecha de entrega</label>
+      <input type="date" id="entEditDate" value="${entrega.date}">
+      <label style="margin-top:10px;">Proceso</label>
+      <select id="entEditProcess">
+        <option value="">Ninguno (sin proceso)</option>
+        ${processes.map(p=>`<option value="${p.id}" ${p.id===entrega.processId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+      </select>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveEntregaEditForm('${id}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeEntregaEditForm(){
+  const overlay = document.getElementById('entregaEditFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveEntregaEditForm(id){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===id);
+  if(!entrega) return;
+  const name = document.getElementById('entEditName').value.trim();
+  const date = document.getElementById('entEditDate').value;
+  const processId = document.getElementById('entEditProcess').value || null;
+  if(!name){ showToast('El nombre no puede quedar vacío'); return; }
+  if(!date){ showToast('Indica la fecha de entrega'); return; }
+  entrega.name = name;
+  entrega.date = date;
+  entrega.processId = processId;
+  saveState();
+  closeEntregaEditForm();
+  renderEntregas(group);
+  showToast('Entrega actualizada');
 }
 
 function openEntregaDeadlineForm(id){
