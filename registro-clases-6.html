@@ -1089,6 +1089,11 @@ function getActiveProcessSessions(group){
   if(!group.activeProcessId) return periodSessions;
   return periodSessions.filter(s=> s.processId === group.activeProcessId);
 }
+function getActiveProcessEntregas(group){
+  const periodEntregas = getActiveEntregas(group);
+  if(!group.activeProcessId) return periodEntregas;
+  return periodEntregas.filter(e=> e.processId === group.activeProcessId);
+}
 function processSelectorBar(group){
   const processes = getActiveProcesses(group);
   return `
@@ -3022,10 +3027,11 @@ function renderEntregas(group){
   }
 
   const today = toISODate(new Date());
-  const entregas = getActiveEntregas(group).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  const entregas = getActiveProcessEntregas(group).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
 
   main.innerHTML = `
     ${groupHeaderCard(group)}
+    ${processSelectorBar(group)}
     <div class="card app-font">
       <h2>Nueva entrega (guía o trabajo)</h2>
       <div class="grid-2">
@@ -3038,6 +3044,7 @@ function renderEntregas(group){
           <input type="date" id="entDate" value="${today}">
         </div>
       </div>
+      <p class="muted" style="margin-top:6px;">Proceso: <strong style="color:var(--primary);">${group.activeProcessId ? escapeHtml((group.processes.find(p=>p.id===group.activeProcessId)||{}).name || '—') : 'Ninguno (todos los procesos)'}</strong> (cámbialo arriba en "Más opciones")</p>
       <div style="margin-top:10px;">
         <label>Plazo y recordatorio (opcional — activa una alarma si quedan pendientes)</label>
         <div class="grid-2">
@@ -3085,19 +3092,24 @@ function renderEntregas(group){
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Resumen por estudiante</h2>
-        <button class="btn btn-outline btn-sm" onclick="exportEntregasToExcel(getActiveGroup())">⬇️ Exportar</button>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-ink btn-sm" onclick="openEntregasToGradeForm()">🎯 Convertir en nota</button>
+          <button class="btn btn-outline btn-sm" onclick="exportEntregasToExcel(getActiveGroup())">⬇️ Exportar</button>
+        </div>
       </div>
       <table>
-        <thead><tr><th>Estudiante</th><th>En plazo</th><th>Fuera de plazo</th><th>No entregada</th></tr></thead>
+        <thead><tr><th>Estudiante</th><th>En plazo</th><th>Fuera de plazo</th><th>No entregada</th><th>Clases presente</th></tr></thead>
         <tbody>
           ${group.students.map(s=>{
-            const stats = computeStudentEntregaStats(group, s.id);
+            const stats = computeStudentEntregaStats(group, s.id, entregas);
+            const asistStats = computeStudentStatsForSessions(group, s.id, getActiveProcessSessions(group));
             return `
               <tr>
                 <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
                 <td style="color:${ENTREGA_ESTADOS.en_plazo.color.text}; font-weight:700;">${stats.en_plazo}</td>
                 <td style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text}; font-weight:700;">${stats.fuera_plazo}</td>
                 <td style="color:${ENTREGA_ESTADOS.no_entregada.color.text}; font-weight:700;">${stats.no_entregada}</td>
+                <td style="color:var(--success); font-weight:700;">${asistStats.presentCount} / ${asistStats.total}</td>
               </tr>
             `;
           }).join('')}
@@ -3113,7 +3125,7 @@ function renderEntregas(group){
     const plazoFecha = document.getElementById('entPlazoFecha').value || null;
     const plazoHora = document.getElementById('entPlazoHora').value || null;
     if(!name){ showToast('Ingresa el nombre de la guía o trabajo'); return; }
-    const entrega = { id: uid(), name, date, plazoFecha, plazoHora, periodId: state.activePeriodId, estados: {} };
+    const entrega = { id: uid(), name, date, plazoFecha, plazoHora, periodId: state.activePeriodId, processId: group.activeProcessId, estados: {} };
     group.entregas.push(entrega);
     saveState();
     entregaActiveId = entrega.id;
@@ -3122,9 +3134,9 @@ function renderEntregas(group){
   });
 }
 
-function computeStudentEntregaStats(group, studentId){
+function computeStudentEntregaStats(group, studentId, entregasList){
   const stats = { en_plazo:0, fuera_plazo:0, no_entregada:0 };
-  getActiveEntregas(group).forEach(e=>{
+  (entregasList || getActiveEntregas(group)).forEach(e=>{
     const estado = e.estados ? e.estados[studentId] : null;
     if(estado && stats[estado] !== undefined) stats[estado]++;
   });
@@ -3238,6 +3250,81 @@ function markAllEntregaDelivered(entregaId){
   renderEntregaValues(group, entrega);
   showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[estado].label + '"');
 }
+function openEntregasToGradeForm(){
+  const group = getActiveGroup();
+  const entregas = getActiveProcessEntregas(group);
+  if(entregas.length === 0){ showToast('No hay entregas para convertir'); return; }
+  const procName = group.activeProcessId ? ((group.processes.find(p=>p.id===group.activeProcessId)||{}).name) : null;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'entregasGradeFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeEntregasToGradeForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🎯 Convertir entregas en nota</h2>
+      <p class="muted">Se creará una evaluación en Calificaciones con el cumplimiento de entregas${procName ? ' de "' + escapeHtml(procName) + '"' : ''} (${entregas.length} entrega(s) en este filtro). En plazo = 1 punto, fuera de plazo = 0,5 punto, no entregada = 0.</p>
+      <label style="margin-top:8px;">Nombre de la evaluación</label>
+      <input type="text" id="entGradeName" value="${procName ? 'Entregas - ' + escapeHtml(procName) : 'Entregas'}">
+      <label style="margin-top:10px;">Total de entregas para el cálculo</label>
+      <input type="number" id="entGradeTotal" min="1" step="0.5" value="${entregas.length}">
+      <p class="muted" style="font-size:0.74rem; margin-top:4px;">Por defecto es la cantidad real de entregas en este filtro (${entregas.length}). Cámbialo si quieres que el cálculo considere un total distinto (por ejemplo, para no perjudicar a quienes tuvieron menos guías, o para dar margen).</p>
+      <label style="margin-top:10px;">% de exigencia (aprobación = 4.0)</label>
+      <input type="number" id="entGradeExigencia" min="1" max="99" value="60">
+      <label style="margin-top:10px;">Tipo</label>
+      <select id="entGradeWeightType">
+        <option value="simple">Promedio simple</option>
+        <option value="weighted">Ponderada (%)</option>
+      </select>
+      <div id="entGradeWeightWrap" style="display:none; margin-top:10px;">
+        <label>% que pondera en la nota final</label>
+        <input type="number" id="entGradeWeightPercent" min="1" max="100" value="20">
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveEntregasToGradeForm()">Crear nota</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('entGradeWeightType').addEventListener('change', function(){
+    document.getElementById('entGradeWeightWrap').style.display = this.value === 'weighted' ? 'block' : 'none';
+  });
+}
+function closeEntregasToGradeForm(){
+  const overlay = document.getElementById('entregasGradeFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveEntregasToGradeForm(){
+  const group = getActiveGroup();
+  const entregas = getActiveProcessEntregas(group);
+  const name = document.getElementById('entGradeName').value.trim();
+  if(!name){ showToast('Ingresa un nombre para la evaluación'); return; }
+  const totalEntregas = Number(document.getElementById('entGradeTotal').value) || entregas.length;
+  const exigencia = Number(document.getElementById('entGradeExigencia').value) || 60;
+  const weightType = document.getElementById('entGradeWeightType').value;
+  const weightPercent = weightType === 'weighted' ? (Number(document.getElementById('entGradeWeightPercent').value) || 0) : 0;
+
+  const ENTREGA_PUNTOS = { en_plazo: 1, fuera_plazo: 0.5, no_entregada: 0 };
+  const scores = {};
+  group.students.forEach(s=>{
+    let obtained = 0;
+    entregas.forEach(e=>{
+      const estado = e.estados ? e.estados[s.id] : null;
+      obtained += ENTREGA_PUNTOS[estado] || 0;
+    });
+    scores[s.id] = totalEntregas > 0 ? Math.round((obtained / totalEntregas) * 100) : 0;
+  });
+
+  group.evaluations.push({
+    id: uid(), name, totalScore: 100, exigencia,
+    gradeGroupId: null, weightType, weightPercent,
+    scores, overrides: {}, periodId: state.activePeriodId
+  });
+  saveState();
+  closeEntregasToGradeForm();
+  showToast('Nota creada a partir de las entregas');
+  goToTab('calificaciones');
+}
+
 function deleteEntrega(id){
   const group = getActiveGroup();
   if(!confirm('¿Eliminar este registro de entrega?')) return;
