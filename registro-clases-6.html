@@ -1946,6 +1946,16 @@ function goToBitacoraForGroup(groupId){
   goToTab('bitacora');
 }
 
+function goToEntregasForGroup(groupId){
+  const group = state.groups.find(g=>g.id===groupId);
+  if(!group){ showToast('Ese curso ya no existe'); return; }
+  state.activeGroupId = group.id;
+  saveState();
+  renderGroupSelect();
+  entregaActiveId = null;
+  goToTab('entregas');
+}
+
 function renderInicio(){
   const main = document.getElementById('main');
   if(state.groups.length === 0){
@@ -1969,6 +1979,7 @@ function renderInicio(){
           <p class="muted">${entry.startTime}${entry.endTime ? ' – ' + entry.endTime : ''}${entry.note ? ' · ' + escapeHtml(entry.note) : ''}</p>
           <div class="row" style="justify-content:center; margin-top:8px;">
             <button class="btn btn-accent" onclick="goToDateClass('${entry.id}','${todayISO}')">📝 Registrar clase ahora</button>
+            <button class="btn btn-accent" onclick="goToEntregasForGroup('${entry.groupId}')">📥 Entregas</button>
             <button class="btn btn-outline" onclick="goToBitacoraForGroup('${entry.groupId}')">📓 Bitácora</button>
           </div>
         </div>
@@ -1982,14 +1993,26 @@ function renderInicio(){
           const g = state.groups.find(g=>g.id===e.groupId);
           const color = groupColor(e.groupId);
           const registered = g ? getActiveSessions(g).some(s=> s.date === todayISO && s.time === e.startTime) : false;
+          const entregasHoy = g ? getActiveEntregas(g).filter(en=> en.date === todayISO) : [];
+          let entregaLabel = 'Sin guía hoy';
+          if(entregasHoy.length > 0){
+            const pendientes = entregasHoy.reduce((sum, en)=>{
+              const marcados = en.estados ? Object.keys(en.estados).length : 0;
+              return sum + Math.max(0, g.students.length - marcados);
+            }, 0);
+            entregaLabel = pendientes > 0 ? `${pendientes} por marcar` : 'Todo marcado';
+          }
           return `
             <div class="day-detail-item" style="background:${color.bg}; border-color:${color.border}; flex-wrap:wrap;">
               <div onclick="goToDateClass('${e.id}','${todayISO}')" style="cursor:pointer; flex:1; min-width:140px;">
                 <strong style="color:${color.text};">${escapeHtml(g ? g.name : '(curso eliminado)')}</strong>
                 <div class="muted">${e.startTime}${e.endTime ? ' – ' + e.endTime : ''}${e.note ? ' · ' + escapeHtml(e.note) : ''}</div>
               </div>
-              <span class="pill ${registered ? 'pill-success' : ''}" onclick="goToDateClass('${e.id}','${todayISO}')" style="cursor:pointer;">${registered ? 'Registrado' : 'Pendiente'}</span>
-              <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); goToBitacoraForGroup('${e.groupId}')">📓 Bitácora</button>
+              <div class="row" style="gap:6px;">
+                <button class="btn btn-sm ${registered ? 'btn-outline' : 'btn-accent'}" onclick="goToDateClass('${e.id}','${todayISO}')">📝 ${registered ? 'Asistencia ✓' : 'Asistencia'}</button>
+                <button class="btn btn-sm ${entregasHoy.length > 0 ? 'btn-accent' : 'btn-outline'}" onclick="goToEntregasForGroup('${e.groupId}')" title="${entregaLabel}">📥 ${entregasHoy.length > 0 ? entregaLabel : 'Entrega'}</button>
+                <button class="btn btn-outline btn-sm" onclick="goToBitacoraForGroup('${e.groupId}')">📓</button>
+              </div>
             </div>
           `;
         }).join('')
@@ -3006,6 +3029,10 @@ function renderEntregas(group){
           <input type="date" id="entDate" value="${today}">
         </div>
       </div>
+      <div style="margin-top:10px;">
+        <label>Hora límite (opcional — activa un recordatorio con alarma si quedan pendientes)</label>
+        <input type="time" id="entHoraLimite">
+      </div>
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addEntregaBtn">+ Crear y completar por estudiante</button>
       </div>
@@ -3022,10 +3049,12 @@ function renderEntregas(group){
             <div class="student-list-item" style="align-items:flex-start;">
               <div>
                 <strong>${escapeHtml(e.name)}</strong>
+                ${e.horaLimite ? `<span class="pill" style="margin-left:6px;">🔔 ${e.horaLimite}</span>` : ''}
                 <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada</div>
               </div>
               <div class="row" style="gap:6px;">
                 <button class="btn btn-accent btn-sm" onclick="openEntregaValues('${e.id}')">Completar / editar</button>
+                <button class="btn btn-outline btn-sm" onclick="openEntregaDeadlineForm('${e.id}')">🔔 Plazo</button>
                 <button class="btn btn-danger btn-sm" onclick="deleteEntrega('${e.id}')">Eliminar</button>
               </div>
             </div>
@@ -3063,8 +3092,9 @@ function renderEntregas(group){
   document.getElementById('addEntregaBtn').addEventListener('click', ()=>{
     const name = document.getElementById('entName').value.trim();
     const date = document.getElementById('entDate').value || today;
+    const horaLimite = document.getElementById('entHoraLimite').value || null;
     if(!name){ showToast('Ingresa el nombre de la guía o trabajo'); return; }
-    const entrega = { id: uid(), name, date, periodId: state.activePeriodId, estados: {} };
+    const entrega = { id: uid(), name, date, horaLimite, periodId: state.activePeriodId, estados: {} };
     group.entregas.push(entrega);
     saveState();
     entregaActiveId = entrega.id;
@@ -3196,6 +3226,55 @@ function deleteEntrega(id){
   if(entregaActiveId === id) entregaActiveId = null;
   saveState();
   renderEntregas(group);
+}
+
+function openEntregaDeadlineForm(id){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===id);
+  if(!entrega) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'entregaDeadlineFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeEntregaDeadlineForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🔔 Plazo y recordatorio</h2>
+      <p class="muted">"${escapeHtml(entrega.name)}" · ${formatDate(entrega.date)}</p>
+      <label style="margin-top:8px;">Hora límite</label>
+      <input type="time" id="entregaDeadlineInput" value="${entrega.horaLimite || ''}">
+      <p class="muted" style="font-size:0.76rem; margin-top:8px;">Si a esa hora, ese día, todavía quedan estudiantes sin marcar, sonará una alarma en bucle (como las de fin de clase) hasta que la detengas — recuerda tener activados los recordatorios en 🔔 arriba.</p>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveEntregaDeadlineForm('${id}')">Guardar</button>
+        <button class="btn btn-outline btn-sm" onclick="clearEntregaDeadline('${id}')">Quitar plazo</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeEntregaDeadlineForm(){
+  const overlay = document.getElementById('entregaDeadlineFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveEntregaDeadlineForm(id){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===id);
+  if(!entrega) return;
+  const val = document.getElementById('entregaDeadlineInput').value;
+  entrega.horaLimite = val || null;
+  saveState();
+  closeEntregaDeadlineForm();
+  renderEntregas(group);
+  showToast(val ? 'Plazo y recordatorio guardado' : 'Sin hora límite');
+}
+function clearEntregaDeadline(id){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===id);
+  if(!entrega) return;
+  entrega.horaLimite = null;
+  saveState();
+  closeEntregaDeadlineForm();
+  renderEntregas(group);
+  showToast('Plazo eliminado');
 }
 
 /* ============ TAB: BITÁCORA ============ */
@@ -4992,6 +5071,67 @@ function checkClassReminders(){
   });
 }
 
+function showEntregaAlarmBanner(group, entrega, pendientes){
+  closeAlarmBanner();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'alarmBannerOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="text-align:center;">
+      <div style="font-size:2.4rem;">🔔</div>
+      <h2 style="border:none; padding-bottom:0;">${escapeHtml(entrega.name)}</h2>
+      <p class="muted">${escapeHtml(group.name)} · se cumplió el plazo (${entrega.horaLimite}) y quedan ${pendientes} estudiante(s) sin marcar.</p>
+      <div class="row" style="justify-content:center; margin-top:14px;">
+        <button class="btn btn-accent" onclick="stopAlarmAndGoToEntrega('${group.id}','${entrega.id}')">📥 Ir a completar</button>
+        <button class="btn btn-outline" onclick="stopAlarmLoop()">🔕 Detener alarma</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function stopAlarmAndGoToEntrega(groupId, entregaId){
+  stopAlarmLoop();
+  entregaActiveId = entregaId;
+  goToEntregasForGroup(groupId);
+}
+function triggerEntregaReminder(group, entrega, pendientes){
+  startAlarmLoop();
+  showEntregaAlarmBanner(group, entrega, pendientes);
+  if('Notification' in window && Notification.permission === 'granted'){
+    try{
+      new Notification('Plazo de entrega cumplido', {
+        body: `${entrega.name} (${group.name}): quedan ${pendientes} estudiante(s) sin marcar.`,
+        icon: './icon-192.png'
+      });
+    }catch(e){}
+  }
+}
+function checkEntregaReminders(){
+  const settings = loadReminderSettings();
+  if(!settings.enabled) return;
+  const now = new Date();
+  const todayISO = toISODate(now);
+  const nowMinutes = now.getHours()*60 + now.getMinutes();
+  const fired = getFiredReminders();
+
+  state.groups.forEach(group=>{
+    (group.entregas || []).forEach(entrega=>{
+      if(entrega.date !== todayISO || !entrega.horaLimite) return;
+      const [hh, mm] = entrega.horaLimite.split(':').map(Number);
+      const limitMinutes = hh*60 + mm;
+      if(nowMinutes < limitMinutes) return;
+      const key = 'entrega_' + entrega.id + '_' + todayISO;
+      if(fired[key]) return;
+      const marcados = entrega.estados ? Object.keys(entrega.estados).length : 0;
+      const pendientes = Math.max(0, group.students.length - marcados);
+      if(pendientes > 0){
+        triggerEntregaReminder(group, entrega, pendientes);
+      }
+      markReminderFired(key);
+    });
+  });
+}
+
 function openReminderSettings(){
   const settings = loadReminderSettings();
   const overlay = document.createElement('div');
@@ -5001,7 +5141,7 @@ function openReminderSettings(){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="closeReminderSettings()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🔔 Recordatorio de clases</h2>
-      <p class="muted">Suena en bucle con vibración (y notificación, si la permites) unos minutos antes de que termine cada clase, hasta que tú la detengas — para que no se te olvide registrarla.</p>
+      <p class="muted">Suena en bucle con vibración (y notificación, si la permites), hasta que tú la detengas: unos minutos antes de que termine cada clase, y también cuando se cumpla la "hora límite" que fijes en una entrega si aún quedan estudiantes sin marcar.</p>
       <label style="margin-top:10px; display:flex; align-items:center; gap:8px;">
         <input type="checkbox" id="reminderEnabled" style="width:auto;" ${settings.enabled ? 'checked' : ''}> Activar recordatorio
       </label>
@@ -5061,9 +5201,10 @@ if(isDriveTokenValid(loadStoredDriveToken())){
   fetchConnectedEmail().then(()=> syncFromDrive());
 }
 
-// Revisa cada 20 segundos si toca avisar del fin de alguna clase
+// Revisa cada 20 segundos si toca avisar del fin de alguna clase o del plazo de una entrega
 checkClassReminders();
-setInterval(checkClassReminders, 20000);
+checkEntregaReminders();
+setInterval(()=>{ checkClassReminders(); checkEntregaReminders(); }, 20000);
 
 // Revisa cambios nuevos en Drive cada 30 segundos (evita interrumpir mientras se registra una clase)
 setInterval(()=>{
