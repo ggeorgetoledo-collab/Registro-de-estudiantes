@@ -2962,6 +2962,17 @@ function getActiveEntregas(group){
   return (group.entregas || []).filter(e=> !state.activePeriodId || e.periodId === state.activePeriodId);
 }
 
+// Cruza con el registro de "Trabajo en clases": ¿estuvo el estudiante presente el día indicado?
+// Devuelve true/false si hay clase registrada ese día, o null si no hay ningún registro de clase en esa fecha.
+function wasStudentPresentOnDate(group, studentId, dateISO){
+  const sessionsOnDate = getActiveSessions(group).filter(s=> s.date === dateISO);
+  if(sessionsOnDate.length === 0) return null;
+  return sessionsOnDate.some(s=>{
+    const entry = s.entries.find(e=> e.studentId === studentId);
+    return entry && isEntryPresent(entry);
+  });
+}
+
 let entregaActiveId = null;
 
 function renderEntregas(group){
@@ -3098,13 +3109,16 @@ function renderEntregaValues(group, entrega){
       </div>
       <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Estudiante</th><th>Estado</th><th>Excepción</th></tr></thead>
+        <thead><tr><th>Estudiante</th><th>Estado</th><th>Excepción</th><th>Asistencia ese día</th></tr></thead>
         <tbody>
           ${group.students.map(s=>{
             const estado = entrega.estados ? entrega.estados[s.id] : null;
             const fecha = entrega.fechas ? entrega.fechas[s.id] : null;
             const isException = entrega.excepciones ? !!entrega.excepciones[s.id] : false;
             const info = estado ? ENTREGA_ESTADOS[estado] : null;
+            const presente = wasStudentPresentOnDate(group, s.id, entrega.date);
+            const asistenciaLabel = presente === null ? '<span class="muted">Sin clase registrada</span>' :
+              (presente ? '<span style="color:var(--success); font-weight:700;">🟢 Presente</span>' : '<span style="color:var(--danger); font-weight:700;">🔴 Ausente</span>');
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
@@ -3116,6 +3130,7 @@ function renderEntregaValues(group, entrega){
                 <td>
                   ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaException('${entrega.id}','${s.id}')" title="Marcar como en plazo aunque se haya pasado la fecha">🔓 En plazo (excepción)</button>` : (isException ? '<span class="muted">⭐ Excepción aplicada</span>' : '')}
                 </td>
+                <td>${asistenciaLabel}</td>
               </tr>
             `;
           }).join('')}
@@ -4433,8 +4448,10 @@ function addEntregasSheet(workbook, group){
       const estado = e.estados ? e.estados[student.id] : null;
       const fecha = e.fechas ? e.fechas[student.id] : null;
       const isException = e.excepciones ? !!e.excepciones[student.id] : false;
+      const presente = wasStudentPresentOnDate(group, student.id, e.date);
+      const asistenciaTxt = presente === null ? '' : (presente ? ' [Presente]' : ' [Ausente]');
       const cell = ws.getCell(row, 2+i);
-      cell.value = estado ? `${ENTREGA_ESTADOS[estado].label}${isException ? ' (excepción)' : ''}${fecha ? ' - ' + formatDate(fecha) : ''}` : '';
+      cell.value = estado ? `${ENTREGA_ESTADOS[estado].label}${isException ? ' (excepción)' : ''}${fecha ? ' - ' + formatDate(fecha) : ''}${asistenciaTxt}` : (presente === false ? 'Sin marcar [Ausente]' : '');
       cell.alignment = { horizontal:'center' };
       if(estado){
         cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:colorArgb[estado]} };
