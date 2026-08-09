@@ -1985,6 +1985,15 @@ function goToEntregasForGroup(groupId){
   goToTab('entregas');
 }
 
+function goToCalificacionesForGroup(groupId){
+  const group = state.groups.find(g=>g.id===groupId);
+  if(!group){ showToast('Ese curso ya no existe'); return; }
+  state.activeGroupId = group.id;
+  saveState();
+  renderGroupSelect();
+  goToTab('calificaciones');
+}
+
 function buildWeekSummary(){
   const days = [];
   const today = new Date();
@@ -1996,6 +2005,7 @@ function buildWeekSummary(){
       .filter(e=> e.day === weekday)
       .sort((a,b)=> a.startTime.localeCompare(b.startTime));
     const entregasThatDay = [];
+    const evaluationsThatDay = [];
     state.groups.forEach(g=>{
       getActiveEntregas(g).forEach(en=>{
         const dl = getEntregaDeadline(en);
@@ -2003,8 +2013,13 @@ function buildWeekSummary(){
           entregasThatDay.push({ entrega: en, group: g });
         }
       });
+      getActiveEvaluations(g).forEach(ev=>{
+        if(ev.date === iso){
+          evaluationsThatDay.push({ evaluation: ev, group: g });
+        }
+      });
     });
-    days.push({ date: d, iso, classesThatDay, entregasThatDay });
+    days.push({ date: d, iso, classesThatDay, entregasThatDay, evaluationsThatDay });
   }
   return days;
 }
@@ -2078,7 +2093,7 @@ function renderInicio(){
         ${buildWeekSummary().map(d=>{
           const isToday = d.iso === todayISO;
           const dayName = DAY_NAMES[jsWeekdayToOurDay(d.date.getDay())-1];
-          const hasNothing = d.classesThatDay.length === 0 && d.entregasThatDay.length === 0;
+          const hasNothing = d.classesThatDay.length === 0 && d.entregasThatDay.length === 0 && d.evaluationsThatDay.length === 0;
           return `
             <div class="week-day-row ${isToday ? 'week-day-today' : ''}">
               <div class="week-day-label">${isToday ? 'Hoy' : dayName.slice(0,3)}<br><span class="muted" style="font-weight:400;">${d.date.getDate()}/${d.date.getMonth()+1}</span></div>
@@ -2093,6 +2108,9 @@ function renderInicio(){
                   const dl = getEntregaDeadline(item.entrega);
                   const isDeadlineDay = dl && dl.fecha === d.iso;
                   return `<span class="pill pill-danger" style="cursor:pointer;" onclick="goToEntregasForGroup('${item.group.id}')">📥 ${escapeHtml(item.entrega.name)}${isDeadlineDay ? ' ⏰' + dl.hora : ''}</span>`;
+                }).join('')}
+                ${d.evaluationsThatDay.map(item=>{
+                  return `<span class="pill" style="cursor:pointer; background:var(--primary-light); color:var(--primary-dark); border-color:var(--primary-border);" onclick="goToCalificacionesForGroup('${item.group.id}')">🎯 ${escapeHtml(item.evaluation.name)} · ${escapeHtml(item.group.name)}</span>`;
                 }).join('')}
               </div>
             </div>
@@ -3847,6 +3865,10 @@ function renderCalificaciones(group){
             ${gradeGroups.map(gg=>`<option value="${gg.id}">${escapeHtml(gg.name)}</option>`).join('')}
           </select>
         </div>
+        <div>
+          <label>Fecha (opcional — aparece en el resumen semanal)</label>
+          <input type="date" id="evalDate">
+        </div>
       </div>
       <div id="evalStandaloneWeight">
         <div class="grid-2" style="margin-top:10px;">
@@ -3883,6 +3905,7 @@ function renderCalificaciones(group){
             <div>
               <strong>${escapeHtml(e.name)}</strong>
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
+              ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
                 ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
               </div>
@@ -3979,12 +4002,13 @@ function renderCalificaciones(group){
     const totalScore = Number(document.getElementById('evalTotalScore').value);
     const exigencia = Number(document.getElementById('evalExigencia').value);
     const gradeGroupId = document.getElementById('evalGradeGroup').value || null;
+    const date = document.getElementById('evalDate').value || null;
     const weightType = document.getElementById('evalWeightType').value;
     const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
     if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
     group.evaluations.push({
       id: uid(), name, totalScore, exigencia: exigencia || 60,
-      gradeGroupId,
+      gradeGroupId, date,
       weightType, weightPercent: weightPercent || 0,
       scores: {}, overrides: {}, periodId: state.activePeriodId
     });
@@ -4089,6 +4113,8 @@ function openEvaluationForm(id){
         <option value="">Ninguno (evaluación suelta)</option>
         ${availableGroups.map(g=>`<option value="${g.id}" ${g.id===ev.gradeGroupId?'selected':''}>${escapeHtml(g.name)}</option>`).join('')}
       </select>
+      <label style="margin-top:10px;">Fecha (opcional — aparece en el resumen semanal)</label>
+      <input type="date" id="evFormDate" value="${ev.date || ''}">
       <div id="evFormStandaloneWeight" style="display:${ev.gradeGroupId?'none':'block'};">
         <div class="grid-2" style="margin-top:10px;">
           <div>
@@ -4129,10 +4155,12 @@ function saveEvaluationForm(id){
   const totalScore = Number(document.getElementById('evFormTotal').value);
   const exigencia = Number(document.getElementById('evFormExigencia').value);
   const gradeGroupId = document.getElementById('evFormGradeGroup').value || null;
+  const date = document.getElementById('evFormDate').value || null;
   if(name) ev.name = name;
   if(totalScore > 0) ev.totalScore = totalScore;
   if(exigencia > 0) ev.exigencia = exigencia;
   ev.gradeGroupId = gradeGroupId;
+  ev.date = date;
   if(!gradeGroupId){
     ev.weightType = document.getElementById('evFormWeightType').value;
     ev.weightPercent = ev.weightType === 'weighted' ? (Number(document.getElementById('evFormWeightPercent').value) || 0) : 0;
