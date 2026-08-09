@@ -2985,6 +2985,15 @@ function getActiveEntregas(group){
   return (group.entregas || []).filter(e=> !state.activePeriodId || e.periodId === state.activePeriodId);
 }
 
+// Devuelve {fecha, hora} del plazo de una entrega, o null si no tiene uno configurado.
+// Compatible con entregas antiguas que solo guardaban "horaLimite" (implícitamente en la fecha de la guía).
+function getEntregaDeadline(entrega){
+  const fecha = entrega.plazoFecha || (entrega.horaLimite ? entrega.date : null);
+  const hora = entrega.plazoHora || entrega.horaLimite || null;
+  if(!fecha || !hora) return null;
+  return { fecha, hora };
+}
+
 // Cruza con el registro de "Trabajo en clases": ¿estuvo el estudiante presente el día indicado?
 // Devuelve true/false si hay clase registrada ese día, o null si no hay ningún registro de clase en esa fecha.
 function wasStudentPresentOnDate(group, studentId, dateISO){
@@ -3030,8 +3039,17 @@ function renderEntregas(group){
         </div>
       </div>
       <div style="margin-top:10px;">
-        <label>Hora límite (opcional — activa un recordatorio con alarma si quedan pendientes)</label>
-        <input type="time" id="entHoraLimite">
+        <label>Plazo y recordatorio (opcional — activa una alarma si quedan pendientes)</label>
+        <div class="grid-2">
+          <div>
+            <label class="muted" style="font-size:0.74rem;">Fecha límite</label>
+            <input type="date" id="entPlazoFecha">
+          </div>
+          <div>
+            <label class="muted" style="font-size:0.74rem;">Hora límite</label>
+            <input type="time" id="entPlazoHora">
+          </div>
+        </div>
       </div>
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addEntregaBtn">+ Crear y completar por estudiante</button>
@@ -3049,7 +3067,7 @@ function renderEntregas(group){
             <div class="student-list-item" style="align-items:flex-start;">
               <div>
                 <strong>${escapeHtml(e.name)}</strong>
-                ${e.horaLimite ? `<span class="pill" style="margin-left:6px;">🔔 ${e.horaLimite}</span>` : ''}
+                ${(()=>{ const dl = getEntregaDeadline(e); return dl ? `<span class="pill" style="margin-left:6px;">🔔 ${formatDate(dl.fecha)} ${dl.hora}</span>` : ''; })()}
                 <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada</div>
               </div>
               <div class="row" style="gap:6px;">
@@ -3092,9 +3110,10 @@ function renderEntregas(group){
   document.getElementById('addEntregaBtn').addEventListener('click', ()=>{
     const name = document.getElementById('entName').value.trim();
     const date = document.getElementById('entDate').value || today;
-    const horaLimite = document.getElementById('entHoraLimite').value || null;
+    const plazoFecha = document.getElementById('entPlazoFecha').value || null;
+    const plazoHora = document.getElementById('entPlazoHora').value || null;
     if(!name){ showToast('Ingresa el nombre de la guía o trabajo'); return; }
-    const entrega = { id: uid(), name, date, horaLimite, periodId: state.activePeriodId, estados: {} };
+    const entrega = { id: uid(), name, date, plazoFecha, plazoHora, periodId: state.activePeriodId, estados: {} };
     group.entregas.push(entrega);
     saveState();
     entregaActiveId = entrega.id;
@@ -3232,6 +3251,7 @@ function openEntregaDeadlineForm(id){
   const group = getActiveGroup();
   const entrega = group.entregas.find(e=>e.id===id);
   if(!entrega) return;
+  const current = getEntregaDeadline(entrega);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'entregaDeadlineFormOverlay';
@@ -3239,10 +3259,18 @@ function openEntregaDeadlineForm(id){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="closeEntregaDeadlineForm()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🔔 Plazo y recordatorio</h2>
-      <p class="muted">"${escapeHtml(entrega.name)}" · ${formatDate(entrega.date)}</p>
-      <label style="margin-top:8px;">Hora límite</label>
-      <input type="time" id="entregaDeadlineInput" value="${entrega.horaLimite || ''}">
-      <p class="muted" style="font-size:0.76rem; margin-top:8px;">Si a esa hora, ese día, todavía quedan estudiantes sin marcar, sonará una alarma en bucle (como las de fin de clase) hasta que la detengas — recuerda tener activados los recordatorios en 🔔 arriba.</p>
+      <p class="muted">"${escapeHtml(entrega.name)}" · guía con fecha ${formatDate(entrega.date)}</p>
+      <div class="grid-2" style="margin-top:8px;">
+        <div>
+          <label>Fecha límite</label>
+          <input type="date" id="entregaDeadlineDateInput" value="${current ? current.fecha : ''}">
+        </div>
+        <div>
+          <label>Hora límite</label>
+          <input type="time" id="entregaDeadlineTimeInput" value="${current ? current.hora : ''}">
+        </div>
+      </div>
+      <p class="muted" style="font-size:0.76rem; margin-top:8px;">La fecha límite no tiene que ser la misma que la fecha de la guía — útil si das más plazo. Si al llegar esa fecha y hora todavía quedan estudiantes sin marcar, sonará una alarma en bucle (como las de fin de clase) hasta que la detengas — recuerda tener activados los recordatorios en 🔔 arriba.</p>
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveEntregaDeadlineForm('${id}')">Guardar</button>
         <button class="btn btn-outline btn-sm" onclick="clearEntregaDeadline('${id}')">Quitar plazo</button>
@@ -3259,17 +3287,22 @@ function saveEntregaDeadlineForm(id){
   const group = getActiveGroup();
   const entrega = group.entregas.find(e=>e.id===id);
   if(!entrega) return;
-  const val = document.getElementById('entregaDeadlineInput').value;
-  entrega.horaLimite = val || null;
+  const fecha = document.getElementById('entregaDeadlineDateInput').value || null;
+  const hora = document.getElementById('entregaDeadlineTimeInput').value || null;
+  entrega.plazoFecha = fecha;
+  entrega.plazoHora = hora;
+  entrega.horaLimite = null; // limpiar formato antiguo si existía
   saveState();
   closeEntregaDeadlineForm();
   renderEntregas(group);
-  showToast(val ? 'Plazo y recordatorio guardado' : 'Sin hora límite');
+  showToast((fecha && hora) ? 'Plazo y recordatorio guardado' : 'Sin plazo configurado');
 }
 function clearEntregaDeadline(id){
   const group = getActiveGroup();
   const entrega = group.entregas.find(e=>e.id===id);
   if(!entrega) return;
+  entrega.plazoFecha = null;
+  entrega.plazoHora = null;
   entrega.horaLimite = null;
   saveState();
   closeEntregaDeadlineForm();
@@ -5073,6 +5106,7 @@ function checkClassReminders(){
 
 function showEntregaAlarmBanner(group, entrega, pendientes){
   closeAlarmBanner();
+  const dl = getEntregaDeadline(entrega);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'alarmBannerOverlay';
@@ -5080,7 +5114,7 @@ function showEntregaAlarmBanner(group, entrega, pendientes){
     <div class="modal-box app-font" style="text-align:center;">
       <div style="font-size:2.4rem;">🔔</div>
       <h2 style="border:none; padding-bottom:0;">${escapeHtml(entrega.name)}</h2>
-      <p class="muted">${escapeHtml(group.name)} · se cumplió el plazo (${entrega.horaLimite}) y quedan ${pendientes} estudiante(s) sin marcar.</p>
+      <p class="muted">${escapeHtml(group.name)} · se cumplió el plazo (${dl ? formatDate(dl.fecha) + ' ' + dl.hora : ''}) y quedan ${pendientes} estudiante(s) sin marcar.</p>
       <div class="row" style="justify-content:center; margin-top:14px;">
         <button class="btn btn-accent" onclick="stopAlarmAndGoToEntrega('${group.id}','${entrega.id}')">📥 Ir a completar</button>
         <button class="btn btn-outline" onclick="stopAlarmLoop()">🔕 Detener alarma</button>
@@ -5116,8 +5150,9 @@ function checkEntregaReminders(){
 
   state.groups.forEach(group=>{
     (group.entregas || []).forEach(entrega=>{
-      if(entrega.date !== todayISO || !entrega.horaLimite) return;
-      const [hh, mm] = entrega.horaLimite.split(':').map(Number);
+      const dl = getEntregaDeadline(entrega);
+      if(!dl || dl.fecha !== todayISO) return;
+      const [hh, mm] = dl.hora.split(':').map(Number);
       const limitMinutes = hh*60 + mm;
       if(nowMinutes < limitMinutes) return;
       const key = 'entrega_' + entrega.id + '_' + todayISO;
