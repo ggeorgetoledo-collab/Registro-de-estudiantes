@@ -2811,6 +2811,7 @@ function toggleHistorialSession(id){
 function renderHistorial(group){
   const main = document.getElementById('main');
   const sessions = getActiveProcessSessions(group).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+  const sinProcesoCount = sessions.filter(s=> !s.processId).length;
 
   main.innerHTML = `
     ${groupHeaderCard(group)}
@@ -2820,6 +2821,7 @@ function renderHistorial(group){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Historial de clases (${sessions.length})</h2>
         <button class="btn btn-ink btn-sm" id="exportBtn" title="Con internet: .xlsx con colores. Sin internet: .csv simple">⬇️ Exportar a Excel</button>
       </div>
+      ${sinProcesoCount > 0 ? `<p class="muted" style="color:var(--danger); margin-top:6px; margin-bottom:0;">⚠️ ${sinProcesoCount} clase(s) sin proceso asignado</p>` : (sessions.length > 0 ? '<p class="muted" style="color:var(--success); margin-top:6px; margin-bottom:0;">✅ Todas las clases tienen un proceso asignado</p>' : '')}
     </div>
     ${sessions.length === 0 ? '<div class="card app-font"><div class="empty-state">Aún no se han registrado clases para este grupo o proceso.</div></div>' : ''}
     ${sessions.map(session=>{
@@ -2827,12 +2829,14 @@ function renderHistorial(group){
       const expanded = historialExpandedIds.has(session.id);
       const presentCount = session.entries.filter(e=> isEntryPresent(e)).length;
       const absentCount = session.entries.length - presentCount;
+      const proceso = session.processId ? group.processes.find(p=>p.id===session.processId) : null;
       return `
       <div class="card app-font">
         <div class="flex-between accordion-header" onclick="toggleHistorialSession('${session.id}')">
           <div>
             <span class="accordion-chevron">${expanded ? '▾' : '▸'}</span>
             <span class="pill">${formatDate(session.date)}</span>
+            ${proceso ? `<span class="pill" style="margin-left:4px;">📂 ${escapeHtml(proceso.name)}</span>` : '<span class="pill pill-danger" style="margin-left:4px;">⚠️ Sin proceso</span>'}
             <span class="muted"> · ${session.time} hrs · ${presentCount} presente(s), ${absentCount} ausente(s)</span>
           </div>
           <div class="row" onclick="event.stopPropagation()">
