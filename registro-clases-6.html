@@ -531,6 +531,7 @@
   <button data-module="trabajo">📝 Trabajo en clases</button>
   <button data-module="calificaciones">🎯 Calificaciones</button>
   <button data-module="bitacora">📓 Bitácora</button>
+  <button data-module="rubricas">📋 Rúbricas</button>
 </nav>
 <nav class="tabs subtabs app-font" id="subTabsNav" style="display:none;"></nav>
 
@@ -1442,8 +1443,9 @@ const MODULE_TABS = {
   horario: ['horario'],
   cursos: ['estudiantes'],
   trabajo: ['indicadores','registrar','entregas','historial','decimas'],
-  calificaciones: ['calificaciones','rubricas'],
+  calificaciones: ['calificaciones'],
   bitacora: ['bitacora'],
+  rubricas: ['rubricas'],
 };
 const SUBTAB_LABELS = {
   indicadores: 'Indicadores',
@@ -1823,6 +1825,7 @@ function renderIndicadores(group){
       ${visibleIndicators.length === 0 ? '<div class="empty-state">No hay indicadores para mostrar.</div>' :
         `<div style="margin-top:8px;">${visibleIndicators.map(ind=>`
           <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.niveles ? ind.niveles.length + ' niveles (rúbrica)' : (ind.levels || 5) + ' niveles'}${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
+            ${ind.sourceRubricaId ? `<button onclick="goToRubrica('${ind.sourceRubricaId}')" style="color:var(--primary);" title="Ver rúbrica">📋</button>` : ''}
             <button onclick="editIndicator('${ind.id}')" style="color:var(--primary);">✎</button>
             <button onclick="deleteIndicator('${ind.id}')">✕</button>
           </span>
@@ -1841,15 +1844,17 @@ function renderIndicadores(group){
     if(!levels || levels < 2) levels = 2;
     if(levels > 10) levels = 10;
     let niveles = null;
+    let sourceRubricaId = null;
     if(criterioSelect && criterioSelect.value){
       const [rubricaId, criterioId] = criterioSelect.value.split('::');
       const rubrica = group.rubricas.find(r=>r.id===rubricaId);
       const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
       if(criterio){
         niveles = criterio.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos}));
+        sourceRubricaId = rubricaId;
       }
     }
-    group.indicators.push({id: uid(), name, levels, tema: temaInput.value.trim(), niveles});
+    group.indicators.push({id: uid(), name, levels, tema: temaInput.value.trim(), niveles, sourceRubricaId});
     saveState();
     renderIndicadores(group);
     showToast('Indicador agregado');
@@ -1913,8 +1918,10 @@ function saveIndicatorForm(id){
       const rubrica = group.rubricas.find(r=>r.id===rubricaId);
       const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
       ind.niveles = criterio ? criterio.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos})) : null;
+      ind.sourceRubricaId = criterio ? rubricaId : null;
     } else {
       ind.niveles = null;
+      ind.sourceRubricaId = null;
     }
   }
   saveState();
@@ -2033,6 +2040,13 @@ function findCurrentOrNextClass(){
   if(upcoming[0]) return { entry: upcoming[0], status: 'next' };
 
   return null;
+}
+
+function goToRubrica(rubricaId){
+  const group = getActiveGroup();
+  if(!group || !group.rubricas.find(r=>r.id===rubricaId)){ showToast('Esa rúbrica ya no existe en el banco'); return; }
+  rubricaActiveId = rubricaId;
+  goToTab('rubricas');
 }
 
 function goToBitacoraForGroup(groupId){
@@ -2657,6 +2671,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 <input type="checkbox" value="${ind.id}" ${registrarIndicatorSelection.includes(ind.id) ? 'checked' : ''} onchange="toggleRegistrarIndicator('${ind.id}', this.checked)">
                 ${escapeHtml(ind.name)}${ind.tema ? ` <span class="muted">(${escapeHtml(ind.tema)})</span>` : ''}
               </label>
+              ${ind.sourceRubricaId ? `<button onclick="goToRubrica('${ind.sourceRubricaId}')" style="background:none; border:none; color:var(--primary); cursor:pointer; padding:0; font-size:0.85rem;" title="Ver rúbrica">📋</button>` : ''}
               <button onclick="openIndicatorForm('${ind.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; padding:0; font-size:0.85rem;">✎</button>
             </span>
           `).join('')
@@ -4568,7 +4583,7 @@ function renderCalificaciones(group){
               <strong>${escapeHtml(e.name)}</strong>
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
               ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
-              ${e.rubricaSnapshot ? `<span class="pill" style="margin-left:6px;">📋 ${escapeHtml(e.rubricaSnapshot.name)}</span>` : ''}
+              ${e.rubricaSnapshot ? `<button class="pill" style="margin-left:6px; cursor:pointer; border:1px solid var(--primary-border);" onclick="goToRubrica('${e.rubricaSnapshot.id}')">📋 ${escapeHtml(e.rubricaSnapshot.name)}</button>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
                 ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
               </div>
@@ -4879,7 +4894,9 @@ function renderEvalScores(group, evaluation){
           <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(evaluation.name)}</h2>
           <button class="btn btn-outline btn-sm" onclick="closeEvalScores()">← Volver</button>
         </div>
-        <p class="muted">Rúbrica: ${escapeHtml(evaluation.rubricaSnapshot.name)} · Puntaje total: ${evaluation.totalScore} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)</p>
+        <p class="muted">Rúbrica: ${escapeHtml(evaluation.rubricaSnapshot.name)} · Puntaje total: ${evaluation.totalScore} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)
+          <button class="btn btn-outline btn-sm" style="margin-left:8px;" onclick="goToRubrica('${evaluation.rubricaSnapshot.id}')">📋 Abrir en Rúbricas</button>
+        </p>
         <details>
           <summary class="muted" style="cursor:pointer; font-size:0.82rem;">Ver rúbrica completa (criterios y niveles) ▾</summary>
           ${evaluation.rubricaSnapshot.criterios.map(c=>`
