@@ -3920,6 +3920,21 @@ function renderRubricas(group){
     </div>
 
     <div class="card app-font">
+      <h2>Importar rúbrica desde archivo</h2>
+      <p class="muted">Sube un Word (.docx) o Excel (.xlsx) con una tabla: los criterios/indicadores en filas, y los niveles en columnas — el mismo formato que exportas desde aquí. Idealmente cada celda de nivel indica el puntaje, por ejemplo "Excelente (4 pts): descripción...".</p>
+      <div class="row">
+        <div style="flex:1; min-width:200px;">
+          <label>Nombre de la rúbrica a crear (opcional)</label>
+          <input type="text" id="rubricaImportName" placeholder="Si lo dejas vacío, se usa el nombre del archivo">
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <input type="file" id="rubricaImportFile" accept=".xlsx,.xls,.docx">
+        <button class="btn btn-accent btn-sm" id="importRubricaBtn">📥 Importar</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
       <h2>Rúbricas creadas (${group.rubricas.length})</h2>
       ${group.rubricas.length === 0 ? '<div class="empty-state">Aún no has creado ninguna rúbrica.</div>' :
         group.rubricas.map(r=>{
@@ -3942,6 +3957,8 @@ function renderRubricas(group){
       }
     </div>
   `;
+
+  document.getElementById('importRubricaBtn').addEventListener('click', ()=> importRubricaFile());
 
   document.getElementById('addRubricaBtn').addEventListener('click', ()=>{
     const name = document.getElementById('newRubricaName').value.trim();
@@ -3972,8 +3989,133 @@ function deleteRubrica(id){
   renderRubricas(group);
 }
 
+/* ============ IMPORTAR RÚBRICAS DESDE WORD/EXCEL ============ */
+function parseNivelCellText(raw, colIndex, totalCols){
+  let text = String(raw || '').replace(/\r/g,'').trim();
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  let firstLine = lines[0] || text;
+  let rest = lines.slice(1).join(' ').trim();
+
+  // "Nombre (N pts): descripción" todo en una línea
+  if(!rest){
+    const colonIdx = firstLine.indexOf(':');
+    if(colonIdx > -1 && colonIdx < 60){
+      rest = firstLine.slice(colonIdx + 1).trim();
+      firstLine = firstLine.slice(0, colonIdx).trim();
+    }
+  }
+
+  let puntos = null;
+  const paren = firstLine.match(/\(([\d.,]+)\s*(pts?|puntos?)?\)/i);
+  if(paren){
+    puntos = parseFloat(paren[1].replace(',', '.'));
+    firstLine = firstLine.replace(paren[0], '').trim();
+  } else {
+    const loose = firstLine.match(/([\d.,]+)\s*(pts?|puntos?)\s*$/i);
+    if(loose){
+      puntos = parseFloat(loose[1].replace(',', '.'));
+      firstLine = firstLine.replace(loose[0], '').trim();
+    }
+  }
+  if(puntos === null || isNaN(puntos)){
+    // sin puntaje detectado: se asume descendente según la posición de columna (la primera = mayor puntaje)
+    puntos = Math.max(0, totalCols - colIndex + 1);
+  }
+  return { id: uid(), name: firstLine || `Nivel ${colIndex}`, description: rest, puntos };
+}
+
+async function importRubricaFromExcelFile(file){
+  const buffer = await file.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const ws = workbook.worksheets[0];
+  if(!ws) return [];
+  const criterios = [];
+  ws.eachRow((row, rowNumber)=>{
+    if(rowNumber === 1) return; // fila de encabezado
+    const criterioName = String(row.getCell(1).text || '').trim();
+    if(!criterioName) return;
+    const totalCols = row.actualCellCount - 1;
+    const niveles = [];
+    for(let c = 2; c <= row.cellCount; c++){
+      const raw = String(row.getCell(c).text || '').trim();
+      if(!raw) continue;
+      niveles.push(parseNivelCellText(raw, c - 1, totalCols));
+    }
+    if(niveles.length > 0) criterios.push({ id: uid(), name: criterioName, niveles });
+  });
+  return criterios;
+}
+
+async function importRubricaFromWordFile(file){
+  const buffer = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buffer);
+  const docFile = zip.file('word/document.xml');
+  if(!docFile) return [];
+  const xml = await docFile.async('text');
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const rows = Array.from(doc.getElementsByTagNameNS(ns, 'tr'));
+  const criterios = [];
+  const getCellText = (tc)=> Array.from(tc.getElementsByTagNameNS(ns, 't')).map(t=>t.textContent).join('');
+  rows.forEach((tr, idx)=>{
+    if(idx === 0) return; // fila de encabezado
+    const cells = Array.from(tr.getElementsByTagNameNS(ns, 'tc'));
+    if(cells.length === 0) return;
+    const criterioName = getCellText(cells[0]).trim();
+    if(!criterioName) return;
+    const totalCols = cells.length - 1;
+    const niveles = [];
+    for(let c = 1; c < cells.length; c++){
+      const raw = getCellText(cells[c]).trim();
+      if(!raw) continue;
+      niveles.push(parseNivelCellText(raw, c, totalCols));
+    }
+    if(niveles.length > 0) criterios.push({ id: uid(), name: criterioName, niveles });
+  });
+  return criterios;
+}
+
+async function importRubricaFile(){
+  const group = getActiveGroup();
+  const input = document.getElementById('rubricaImportFile');
+  const file = input.files[0];
+  if(!file){ showToast('Selecciona un archivo primero'); return; }
+  const nameInput = document.getElementById('rubricaImportName');
+  const rubricaName = (nameInput && nameInput.value.trim()) || file.name.replace(/\.[^.]+$/, '');
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  showToast('Importando rúbrica…');
+  try{
+    let criterios;
+    if(ext === 'xlsx' || ext === 'xls'){
+      if(typeof ExcelJS === 'undefined'){ showToast('Se necesita conexión a internet para importar Excel.'); return; }
+      criterios = await importRubricaFromExcelFile(file);
+    } else if(ext === 'docx'){
+      if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para importar Word.'); return; }
+      criterios = await importRubricaFromWordFile(file);
+    } else {
+      showToast('Formato no soportado. Usa un archivo .xlsx o .docx');
+      return;
+    }
+    if(!criterios || criterios.length === 0){
+      showToast('No se encontraron criterios en el archivo. Revisa que tenga una tabla con criterios en filas y niveles en columnas.');
+      return;
+    }
+    const rubrica = { id: uid(), name: rubricaName, criterios };
+    group.rubricas.push(rubrica);
+    saveState();
+    renderRubricas(group);
+    showToast(`Rúbrica importada con ${criterios.length} criterio(s) — revisa los puntajes antes de usarla.`);
+  }catch(e){
+    console.error('Error importando rúbrica', e);
+    showToast('No se pudo leer el archivo. Revisa que tenga una tabla válida.');
+  }
+}
+
 function renderRubricaEditor(group, rubrica){
   const main = document.getElementById('main');
+  const maxNiveles = Math.max(1, ...rubrica.criterios.map(c=>c.niveles.length), 0);
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
@@ -3985,44 +4127,57 @@ function renderRubricaEditor(group, rubrica){
         </div>
       </div>
       <div class="row" style="margin-top:8px;">
-        <input type="text" id="newCriterioName" placeholder="Nombre del criterio (ej. Contenido)" style="flex:1; min-width:180px;">
-        <button class="btn btn-accent btn-sm" onclick="addCriterio('${rubrica.id}')">+ Agregar criterio</button>
+        <input type="text" id="newCriterioName" placeholder="Nombre del criterio/indicador (fila nueva)" style="flex:1; min-width:180px;">
+        <button class="btn btn-accent btn-sm" onclick="addCriterio('${rubrica.id}')">+ Agregar fila (criterio)</button>
       </div>
     </div>
 
-    ${rubrica.criterios.length === 0 ? '<div class="card app-font"><div class="empty-state">Agrega al menos un criterio para empezar a definir niveles.</div></div>' : ''}
-    ${rubrica.criterios.map(c=>`
-      <div class="card app-font">
-        <div class="flex-between">
-          <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(c.name)}</h2>
-          <div class="row" style="gap:6px;">
-            <button class="btn btn-outline btn-sm" onclick="renameCriterio('${rubrica.id}','${c.id}')">✎</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteCriterio('${rubrica.id}','${c.id}')">Eliminar</button>
-          </div>
-        </div>
-        ${c.niveles.length === 0 ? '<p class="muted">Sin niveles todavía.</p>' : `
-          <table>
-            <thead><tr><th>Nivel</th><th>Descripción</th><th>Puntos</th><th></th></tr></thead>
-            <tbody>
-              ${c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).map(n=>`
-                <tr>
-                  <td><strong>${escapeHtml(n.name)}</strong></td>
-                  <td>${escapeHtml(n.description || '')}</td>
-                  <td class="avg-badge">${n.puntos}</td>
-                  <td class="row" style="gap:4px;">
-                    <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}','${n.id}')">✎</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteNivel('${rubrica.id}','${c.id}','${n.id}')">✕</button>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `}
-        <div class="row" style="margin-top:10px;">
-          <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}', null)">+ Agregar nivel</button>
-        </div>
+    ${rubrica.criterios.length === 0 ? '<div class="card app-font"><div class="empty-state">Agrega al menos un criterio para empezar a definir niveles.</div></div>' : `
+    <div class="card app-font">
+      <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:140px;">Criterio / Indicador</th>
+            ${Array.from({length:maxNiveles}, (_,i)=>`<th style="min-width:170px;">Nivel ${i+1}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${rubrica.criterios.map(c=>{
+            const ordenados = c.niveles.slice().sort((a,b)=>b.puntos-a.puntos);
+            return `
+              <tr>
+                <td style="vertical-align:top;">
+                  <strong>${escapeHtml(c.name)}</strong>
+                  <div class="row" style="gap:4px; margin-top:6px;">
+                    <button class="btn btn-outline btn-sm" onclick="renameCriterio('${rubrica.id}','${c.id}')">✎</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteCriterio('${rubrica.id}','${c.id}')">✕</button>
+                  </div>
+                </td>
+                ${Array.from({length:maxNiveles}, (_,i)=>{
+                  const n = ordenados[i];
+                  if(n){
+                    return `<td style="vertical-align:top;">
+                      <strong>${escapeHtml(n.name)}</strong> <span class="muted">(${n.puntos} pts)</span>
+                      <div class="muted" style="font-size:0.78rem; margin-top:2px;">${escapeHtml(n.description || '')}</div>
+                      <div class="row" style="gap:4px; margin-top:6px;">
+                        <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}','${n.id}')">✎</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteNivel('${rubrica.id}','${c.id}','${n.id}')">✕</button>
+                      </div>
+                    </td>`;
+                  }
+                  return `<td style="vertical-align:top;">
+                    <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}', null)">+ Agregar</button>
+                  </td>`;
+                }).join('')}
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
       </div>
-    `).join('')}
+    </div>
+    `}
   `;
 }
 
