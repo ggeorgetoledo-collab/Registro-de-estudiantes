@@ -2882,6 +2882,32 @@ function renderHistorial(group){
         ` : ''}
       </div>
     `;}).join('')}
+
+    ${group.students.length > 0 ? `
+    <div class="card app-font">
+      <h2>Resumen por estudiante (Trabajo en clases)</h2>
+      <table>
+        <thead><tr><th>Estudiante</th><th>Presente</th><th>Ausente</th><th>% de logro</th></tr></thead>
+        <tbody>
+          ${group.students.map(s=>{
+            const stats = computeStudentStatsForSessions(group, s.id, sessions);
+            const deficiente = stats.percent !== null && stats.percent < 60;
+            return `
+              <tr style="${deficiente ? `background:var(--danger-light);` : ''}">
+                <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
+                <td>${stats.presentCount}</td>
+                <td>${stats.absentCount}</td>
+                <td style="font-weight:700; color:${deficiente ? 'var(--danger)' : 'var(--text)'};">
+                  ${stats.percent !== null ? stats.percent + '%' : '-'}${deficiente ? ' ⚠️' : ''}
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:0.76rem; margin-top:8px;">⚠️ Se marcan en rojo los estudiantes con menos de 60% de logro.</p>
+    </div>
+    ` : ''}
   `;
 
   document.getElementById('exportBtn').addEventListener('click', ()=> exportGroupToExcel(group));
@@ -3198,23 +3224,28 @@ function renderEntregas(group){
         </div>
       </div>
       <table>
-        <thead><tr><th>Estudiante</th><th>En plazo</th><th>Fuera de plazo</th><th>No entregada</th><th>Clases presente</th></tr></thead>
+        <thead><tr><th>Estudiante</th><th>En plazo</th><th>Fuera de plazo</th><th>No entregada</th><th>% cumplimiento</th><th>Clases presente</th></tr></thead>
         <tbody>
           ${group.students.map(s=>{
             const stats = computeStudentEntregaStats(group, s.id, entregas);
             const asistStats = computeStudentStatsForSessions(group, s.id, getActiveProcessSessions(group));
+            const totalEnt = entregas.length;
+            const cumplimiento = totalEnt > 0 ? Math.round(((stats.en_plazo * 1 + stats.fuera_plazo * 0.5) / totalEnt) * 100) : null;
+            const deficiente = cumplimiento !== null && cumplimiento < 60;
             return `
-              <tr>
+              <tr style="${deficiente ? `background:var(--danger-light);` : ''}">
                 <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
                 <td style="color:${ENTREGA_ESTADOS.en_plazo.color.text}; font-weight:700;">${stats.en_plazo}</td>
                 <td style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text}; font-weight:700;">${stats.fuera_plazo}</td>
                 <td style="color:${ENTREGA_ESTADOS.no_entregada.color.text}; font-weight:700;">${stats.no_entregada}</td>
+                <td style="font-weight:700; color:${deficiente ? 'var(--danger)' : 'var(--text)'};">${cumplimiento !== null ? cumplimiento + '%' : '-'}${deficiente ? ' ⚠️' : ''}</td>
                 <td style="color:var(--success); font-weight:700;">${asistStats.presentCount} / ${asistStats.total}</td>
               </tr>
             `;
           }).join('')}
         </tbody>
       </table>
+      <p class="muted" style="font-size:0.76rem; margin-top:8px;">⚠️ Se marcan en rojo los estudiantes con menos de 60% de cumplimiento (en plazo = 1 punto, fuera de plazo = 0,5 punto).</p>
     </div>
     ` : ''}
   `;
