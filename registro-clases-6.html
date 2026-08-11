@@ -925,6 +925,13 @@ function isEntryPresent(entry){
   return Object.values(entry.cotejo).some(v => v !== null && v !== undefined);
 }
 
+function indicatorMaxPoints(ind){
+  if(ind.niveles && ind.niveles.length){
+    return Math.max(...ind.niveles.map(n=>n.puntos));
+  }
+  return ind.levels || 5;
+}
+
 function computeStudentStatsForSessions(group, studentId, sessions){
   let presentCount = 0, absentCount = 0, obtained = 0, maxPossible = 0;
   sessions.forEach(session=>{
@@ -937,7 +944,7 @@ function computeStudentStatsForSessions(group, studentId, sessions){
         const v = entry.cotejo[ind.id];
         if(v !== null && v !== undefined){
           obtained += v;
-          maxPossible += (ind.levels || 5);
+          maxPossible += indicatorMaxPoints(ind);
         }
       });
     } else {
@@ -1010,8 +1017,24 @@ function computeUnitGrade(unit, studentId){
   return Math.round((notas.reduce((a,b)=>a+b,0)/notas.length) * 10) / 10;
 }
 
+function computeRubricaScoreForStudent(evaluation, studentId){
+  if(!evaluation.rubricaSnapshot) return null;
+  const seleccion = evaluation.rubricaScores ? evaluation.rubricaScores[studentId] : null;
+  if(!seleccion) return null;
+  let total = 0, algunaSeleccion = false;
+  evaluation.rubricaSnapshot.criterios.forEach(c=>{
+    const nivelId = seleccion[c.id];
+    if(!nivelId) return;
+    const nivel = c.niveles.find(n=>n.id===nivelId);
+    if(nivel){ total += nivel.puntos; algunaSeleccion = true; }
+  });
+  return algunaSeleccion ? total : null;
+}
+
 function computeStudentEvalGrade(evaluation, studentId){
-  const score = evaluation.scores ? evaluation.scores[studentId] : null;
+  const score = evaluation.rubricaSnapshot
+    ? computeRubricaScoreForStudent(evaluation, studentId)
+    : (evaluation.scores ? evaluation.scores[studentId] : null);
   if(score === null || score === undefined) return null;
   const params = getEvalParamsForStudent(evaluation, studentId);
   return computeChileGrade(score, params.totalScore, params.exigencia);
@@ -1066,7 +1089,7 @@ function totalWeightAssigned(group){
 
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [] };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], rubricas: [] };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -1084,6 +1107,7 @@ function ensureDefaultGroup(){
     if(!g.processes) g.processes = [];
     if(!g.bitacora) g.bitacora = [];
     if(!g.entregas) g.entregas = [];
+    if(!g.rubricas) g.rubricas = [];
     if(g.activeProcessId === undefined) g.activeProcessId = null;
   });
   if(!state.periods) state.periods = [];
@@ -1404,7 +1428,7 @@ document.getElementById('groupSelect').addEventListener('change', e=>{
 document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   const name = prompt('Nombre del nuevo grupo/curso:');
   if(!name) return;
-  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [] };
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], rubricas: [] };
   state.groups.push(g);
   state.activeGroupId = g.id;
   saveState();
@@ -1418,7 +1442,7 @@ const MODULE_TABS = {
   horario: ['horario'],
   cursos: ['estudiantes'],
   trabajo: ['indicadores','registrar','entregas','historial','decimas'],
-  calificaciones: ['calificaciones'],
+  calificaciones: ['calificaciones','rubricas'],
   bitacora: ['bitacora'],
 };
 const SUBTAB_LABELS = {
@@ -1427,6 +1451,8 @@ const SUBTAB_LABELS = {
   historial: 'Historial',
   decimas: 'Décimas',
   entregas: 'Entregas',
+  calificaciones: 'Calificaciones',
+  rubricas: 'Rúbricas',
 };
 function moduleForTab(tab){
   for(const m in MODULE_TABS){ if(MODULE_TABS[m].includes(tab)) return m; }
@@ -1499,6 +1525,7 @@ function renderMain(){
   if(currentTab === 'decimas') return renderDecimas(group);
   if(currentTab === 'entregas') return renderEntregas(group);
   if(currentTab === 'calificaciones') return renderCalificaciones(group);
+  if(currentTab === 'rubricas') return renderRubricas(group);
   if(currentTab === 'bitacora') return renderBitacora(group);
 }
 
@@ -1748,27 +1775,37 @@ function renderIndicadores(group){
   const main = document.getElementById('main');
   const themes = [...new Set(group.indicators.map(i=>i.tema).filter(Boolean))];
   const visibleIndicators = indicadoresThemeFilter ? group.indicators.filter(i=> i.tema === indicadoresThemeFilter) : group.indicators;
+  const criterioOptions = (group.rubricas || []).flatMap(r=> r.criterios.filter(c=>c.niveles.length>0).map(c=>
+    `<option value="${r.id}::${c.id}">${escapeHtml(r.name)} → ${escapeHtml(c.name)}</option>`
+  )).join('');
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
       <h2>Agregar indicador de evaluación</h2>
-      <p class="muted">Define cuántos niveles de logro tendrá cada indicador (por ejemplo, 3, 4 o 5 niveles).</p>
+      <p class="muted">Define cuántos niveles de logro tendrá cada indicador (por ejemplo, 3, 4 o 5 niveles), o usa los niveles de un criterio de una rúbrica ya creada.</p>
       <div class="row">
         <div style="flex:1; min-width:200px;">
           <label>Nombre del indicador</label>
           <input type="text" id="newIndicatorName" placeholder="Ej. Participación en clase">
         </div>
         <div style="width:140px;">
-          <label>Niveles de logro</label>
+          <label>Niveles de logro (0 a N)</label>
           <input type="number" id="newIndicatorLevels" min="2" max="10" value="5">
         </div>
         <div style="flex:1; min-width:160px;">
           <label>Unidad / tema (opcional)</label>
           <input type="text" id="newIndicatorTema" placeholder="Ej. Unidad 1">
         </div>
-        <div style="align-self:flex-end;">
-          <button class="btn btn-accent" id="addIndicatorBtn">+ Agregar</button>
-        </div>
+      </div>
+      ${criterioOptions ? `
+      <label style="margin-top:10px;">O usar niveles de un criterio de rúbrica (opcional)</label>
+      <select id="newIndicatorCriterio">
+        <option value="">Ninguno (usar niveles numéricos de arriba)</option>
+        ${criterioOptions}
+      </select>
+      ` : ''}
+      <div class="row" style="margin-top:12px;">
+        <button class="btn btn-accent" id="addIndicatorBtn">+ Agregar</button>
       </div>
     </div>
     <div class="card app-font">
@@ -1785,7 +1822,7 @@ function renderIndicadores(group){
       ` : ''}
       ${visibleIndicators.length === 0 ? '<div class="empty-state">No hay indicadores para mostrar.</div>' :
         `<div style="margin-top:8px;">${visibleIndicators.map(ind=>`
-          <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.levels || 5} niveles${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
+          <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.niveles ? ind.niveles.length + ' niveles (rúbrica)' : (ind.levels || 5) + ' niveles'}${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
             <button onclick="editIndicator('${ind.id}')" style="color:var(--primary);">✎</button>
             <button onclick="deleteIndicator('${ind.id}')">✕</button>
           </span>
@@ -1797,12 +1834,22 @@ function renderIndicadores(group){
     const input = document.getElementById('newIndicatorName');
     const levelsInput = document.getElementById('newIndicatorLevels');
     const temaInput = document.getElementById('newIndicatorTema');
+    const criterioSelect = document.getElementById('newIndicatorCriterio');
     const name = input.value.trim();
     if(!name) return;
     let levels = parseInt(levelsInput.value, 10);
     if(!levels || levels < 2) levels = 2;
     if(levels > 10) levels = 10;
-    group.indicators.push({id: uid(), name, levels, tema: temaInput.value.trim()});
+    let niveles = null;
+    if(criterioSelect && criterioSelect.value){
+      const [rubricaId, criterioId] = criterioSelect.value.split('::');
+      const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+      const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
+      if(criterio){
+        niveles = criterio.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos}));
+      }
+    }
+    group.indicators.push({id: uid(), name, levels, tema: temaInput.value.trim(), niveles});
     saveState();
     renderIndicadores(group);
     showToast('Indicador agregado');
@@ -1815,6 +1862,9 @@ function openIndicatorForm(id){
   const group = getActiveGroup();
   const ind = group.indicators.find(i=>i.id===id);
   if(!ind) return;
+  const criterioOptions = (group.rubricas || []).flatMap(r=> r.criterios.filter(c=>c.niveles.length>0).map(c=>
+    `<option value="${r.id}::${c.id}">${escapeHtml(r.name)} → ${escapeHtml(c.name)}</option>`
+  )).join('');
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'indicatorFormOverlay';
@@ -1828,6 +1878,14 @@ function openIndicatorForm(id){
       <input type="number" id="indicatorFormLevels" min="2" max="10" value="${ind.levels || 5}">
       <label style="margin-top:10px;">Unidad / tema (opcional)</label>
       <input type="text" id="indicatorFormTema" value="${escapeHtml(ind.tema || '')}">
+      ${criterioOptions ? `
+      <label style="margin-top:10px;">Usar niveles de un criterio de rúbrica</label>
+      <select id="indicatorFormCriterio">
+        <option value="">Ninguno (usar niveles numéricos de arriba)</option>
+        ${criterioOptions}
+      </select>
+      ${ind.niveles ? '<p class="muted" style="font-size:0.74rem; margin-top:4px;">Ya tiene niveles de rúbrica aplicados. Elige "Ninguno" para volver a niveles numéricos.</p>' : ''}
+      ` : ''}
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveIndicatorForm('${id}')">Guardar</button>
       </div>
@@ -1848,6 +1906,17 @@ function saveIndicatorForm(id){
   ind.tema = document.getElementById('indicatorFormTema').value.trim();
   if(name) ind.name = name;
   if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
+  const criterioSelect = document.getElementById('indicatorFormCriterio');
+  if(criterioSelect){
+    if(criterioSelect.value){
+      const [rubricaId, criterioId] = criterioSelect.value.split('::');
+      const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+      const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
+      ind.niveles = criterio ? criterio.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos})) : null;
+    } else {
+      ind.niveles = null;
+    }
+  }
   saveState();
   closeIndicatorForm();
   if(currentTab === 'registrar'){
@@ -2635,7 +2704,10 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
+            ${selectedIndicators.map(ind=> ind.niveles
+              ? `<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(rúbrica)</span></th>`
+              : `<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`
+            ).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
         </thead>
@@ -2646,11 +2718,17 @@ function renderRegistrar(group, sessionToEdit, prefill){
             <tr>
               <td>${escapeHtml(s.name)}</td>
               ${selectedIndicators.map(ind=>{
-                const levels = ind.levels || 5;
                 const prevVal = prevEntry ? prevEntry.cotejo[ind.id] : null;
                 let options = '<option value="">-</option>';
-                for(let n=0; n<=levels; n++){
-                  options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
+                if(ind.niveles){
+                  ind.niveles.slice().sort((a,b)=>b.puntos-a.puntos).forEach(n=>{
+                    options += `<option value="${n.puntos}" title="${escapeHtml(n.description||'')}" ${prevVal===n.puntos?'selected':''}>${escapeHtml(n.name)} (${n.puntos})</option>`;
+                  });
+                } else {
+                  const levels = ind.levels || 5;
+                  for(let n=0; n<=levels; n++){
+                    options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
+                  }
                 }
                 return `
                 <td>
@@ -2764,7 +2842,7 @@ function handleSaveSession(){
       const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
       return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
     });
-    indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
+    indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5, niveles: i.niveles || null}));
   }
 
   // Conservar datos de estudiantes que ya no están en el grupo pero tenían registro previo
@@ -3813,8 +3891,375 @@ function deleteBitacoraEntry(id){
   renderBitacora(group);
 }
 
+/* ============ TAB: RÚBRICAS (banco reutilizable) ============ */
+let rubricaActiveId = null;
+
+function renderRubricas(group){
+  if(!group.rubricas) group.rubricas = [];
+  if(rubricaActiveId){
+    const rubrica = group.rubricas.find(r=>r.id===rubricaActiveId);
+    if(rubrica) return renderRubricaEditor(group, rubrica);
+    rubricaActiveId = null;
+  }
+
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Banco de rúbricas</h2>
+      <p class="muted">Crea rúbricas reutilizables (criterios con niveles descriptivos) para usarlas en evaluaciones de Calificaciones o en indicadores de Trabajo en clases.</p>
+      <div class="row">
+        <div style="flex:1; min-width:200px;">
+          <label>Nombre de la nueva rúbrica</label>
+          <input type="text" id="newRubricaName" placeholder="Ej. Rúbrica de ensayo">
+        </div>
+        <div style="align-self:flex-end;">
+          <button class="btn btn-accent" id="addRubricaBtn">+ Crear rúbrica</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Rúbricas creadas (${group.rubricas.length})</h2>
+      ${group.rubricas.length === 0 ? '<div class="empty-state">Aún no has creado ninguna rúbrica.</div>' :
+        group.rubricas.map(r=>{
+          const maxPuntos = r.criterios.reduce((sum,c)=> sum + (c.niveles.length ? Math.max(...c.niveles.map(n=>n.puntos)) : 0), 0);
+          return `
+            <div class="student-list-item" style="align-items:flex-start;">
+              <div>
+                <strong>${escapeHtml(r.name)}</strong>
+                <div class="muted">${r.criterios.length} criterio(s) · puntaje máximo ${maxPuntos}</div>
+              </div>
+              <div class="row" style="gap:6px;">
+                <button class="btn btn-accent btn-sm" onclick="openRubricaEditor('${r.id}')">Editar</button>
+                <button class="btn btn-outline btn-sm" onclick="exportRubricaToExcel('${r.id}')">⬇️ Excel</button>
+                <button class="btn btn-outline btn-sm" onclick="exportRubricaToWord('${r.id}')">⬇️ Word</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteRubrica('${r.id}')">Eliminar</button>
+              </div>
+            </div>
+          `;
+        }).join('')
+      }
+    </div>
+  `;
+
+  document.getElementById('addRubricaBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('newRubricaName').value.trim();
+    if(!name){ showToast('Ingresa un nombre para la rúbrica'); return; }
+    const rubrica = { id: uid(), name, criterios: [] };
+    group.rubricas.push(rubrica);
+    saveState();
+    rubricaActiveId = rubrica.id;
+    renderRubricas(group);
+    showToast('Rúbrica creada, agrégale criterios y niveles');
+  });
+}
+
+function openRubricaEditor(id){
+  rubricaActiveId = id;
+  renderRubricas(getActiveGroup());
+}
+function closeRubricaEditor(){
+  rubricaActiveId = null;
+  renderRubricas(getActiveGroup());
+}
+function deleteRubrica(id){
+  const group = getActiveGroup();
+  if(!confirm('¿Eliminar esta rúbrica? Las evaluaciones o indicadores que ya la usaron conservan su copia, pero no podrás volver a aplicarla.')) return;
+  group.rubricas = group.rubricas.filter(r=>r.id!==id);
+  if(rubricaActiveId === id) rubricaActiveId = null;
+  saveState();
+  renderRubricas(group);
+}
+
+function renderRubricaEditor(group, rubrica){
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(rubrica.name)}</h2>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="renameRubrica('${rubrica.id}')">✎ Renombrar</button>
+          <button class="btn btn-outline btn-sm" onclick="closeRubricaEditor()">← Volver</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <input type="text" id="newCriterioName" placeholder="Nombre del criterio (ej. Contenido)" style="flex:1; min-width:180px;">
+        <button class="btn btn-accent btn-sm" onclick="addCriterio('${rubrica.id}')">+ Agregar criterio</button>
+      </div>
+    </div>
+
+    ${rubrica.criterios.length === 0 ? '<div class="card app-font"><div class="empty-state">Agrega al menos un criterio para empezar a definir niveles.</div></div>' : ''}
+    ${rubrica.criterios.map(c=>`
+      <div class="card app-font">
+        <div class="flex-between">
+          <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(c.name)}</h2>
+          <div class="row" style="gap:6px;">
+            <button class="btn btn-outline btn-sm" onclick="renameCriterio('${rubrica.id}','${c.id}')">✎</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteCriterio('${rubrica.id}','${c.id}')">Eliminar</button>
+          </div>
+        </div>
+        ${c.niveles.length === 0 ? '<p class="muted">Sin niveles todavía.</p>' : `
+          <table>
+            <thead><tr><th>Nivel</th><th>Descripción</th><th>Puntos</th><th></th></tr></thead>
+            <tbody>
+              ${c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).map(n=>`
+                <tr>
+                  <td><strong>${escapeHtml(n.name)}</strong></td>
+                  <td>${escapeHtml(n.description || '')}</td>
+                  <td class="avg-badge">${n.puntos}</td>
+                  <td class="row" style="gap:4px;">
+                    <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}','${n.id}')">✎</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteNivel('${rubrica.id}','${c.id}','${n.id}')">✕</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `}
+        <div class="row" style="margin-top:10px;">
+          <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}', null)">+ Agregar nivel</button>
+        </div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function addCriterio(rubricaId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  if(!rubrica) return;
+  const name = document.getElementById('newCriterioName').value.trim();
+  if(!name){ showToast('Ingresa un nombre para el criterio'); return; }
+  rubrica.criterios.push({ id: uid(), name, niveles: [] });
+  saveState();
+  renderRubricaEditor(group, rubrica);
+}
+function renameRubrica(rubricaId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  if(!rubrica) return;
+  const name = prompt('Nombre de la rúbrica:', rubrica.name);
+  if(!name || !name.trim()) return;
+  rubrica.name = name.trim();
+  saveState();
+  renderRubricaEditor(group, rubrica);
+}
+function renameCriterio(rubricaId, criterioId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
+  if(!criterio) return;
+  const name = prompt('Nombre del criterio:', criterio.name);
+  if(!name || !name.trim()) return;
+  criterio.name = name.trim();
+  saveState();
+  renderRubricaEditor(group, rubrica);
+}
+function deleteCriterio(rubricaId, criterioId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  if(!rubrica) return;
+  if(!confirm('¿Eliminar este criterio y todos sus niveles?')) return;
+  rubrica.criterios = rubrica.criterios.filter(c=>c.id!==criterioId);
+  saveState();
+  renderRubricaEditor(group, rubrica);
+}
+
+function openNivelForm(rubricaId, criterioId, nivelId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
+  if(!criterio) return;
+  const nivel = nivelId ? criterio.niveles.find(n=>n.id===nivelId) : null;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'nivelFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeNivelForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">${nivel ? 'Editar nivel' : 'Nuevo nivel'}</h2>
+      <p class="muted">Criterio: ${escapeHtml(criterio.name)}</p>
+      <label style="margin-top:8px;">Nombre del nivel</label>
+      <input type="text" id="nivelFormName" placeholder="Ej. Excelente" value="${nivel ? escapeHtml(nivel.name) : ''}">
+      <label style="margin-top:10px;">Descripción</label>
+      <textarea id="nivelFormDescription" placeholder="Qué debe cumplir el estudiante para este nivel...">${nivel ? escapeHtml(nivel.description || '') : ''}</textarea>
+      <label style="margin-top:10px;">Puntos</label>
+      <input type="number" id="nivelFormPuntos" min="0" step="0.5" value="${nivel ? nivel.puntos : 0}">
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="saveNivelForm('${rubricaId}','${criterioId}','${nivelId || ''}')">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeNivelForm(){
+  const overlay = document.getElementById('nivelFormOverlay');
+  if(overlay) overlay.remove();
+}
+function saveNivelForm(rubricaId, criterioId, nivelId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
+  if(!criterio) return;
+  const name = document.getElementById('nivelFormName').value.trim();
+  const description = document.getElementById('nivelFormDescription').value.trim();
+  const puntos = Number(document.getElementById('nivelFormPuntos').value) || 0;
+  if(!name){ showToast('Ingresa un nombre para el nivel'); return; }
+  if(nivelId){
+    const nivel = criterio.niveles.find(n=>n.id===nivelId);
+    if(nivel){ nivel.name = name; nivel.description = description; nivel.puntos = puntos; }
+  } else {
+    criterio.niveles.push({ id: uid(), name, description, puntos });
+  }
+  saveState();
+  closeNivelForm();
+  renderRubricaEditor(group, rubrica);
+}
+function deleteNivel(rubricaId, criterioId, nivelId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
+  if(!criterio) return;
+  if(!confirm('¿Eliminar este nivel?')) return;
+  criterio.niveles = criterio.niveles.filter(n=>n.id!==nivelId);
+  saveState();
+  renderRubricaEditor(group, rubrica);
+}
+
+function rubricaMaxPoints(rubrica){
+  return rubrica.criterios.reduce((sum,c)=> sum + (c.niveles.length ? Math.max(...c.niveles.map(n=>n.puntos)) : 0), 0);
+}
+
+async function exportRubricaToExcel(rubricaId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  if(!rubrica) return;
+  if(typeof ExcelJS === 'undefined'){ showToast('Se necesita conexión a internet para exportar.'); return; }
+  if(rubrica.criterios.length === 0){ showToast('Esta rúbrica no tiene criterios'); return; }
+
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Rúbrica');
+  const maxNiveles = Math.max(...rubrica.criterios.map(c=>c.niveles.length), 1);
+
+  const headerCell = ws.getCell(1,1);
+  headerCell.value = 'Criterio';
+  headerCell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+  headerCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+  for(let i=0;i<maxNiveles;i++){
+    const cell = ws.getCell(1, 2+i);
+    cell.value = `Nivel ${i+1}`;
+    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+  }
+  rubrica.criterios.forEach((c, ci)=>{
+    const row = 2+ci;
+    ws.getCell(row,1).value = c.name;
+    ws.getCell(row,1).font = { bold:true };
+    ws.getCell(row,1).alignment = { wrapText:true, vertical:'top' };
+    c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).forEach((n,ni)=>{
+      const cell = ws.getCell(row, 2+ni);
+      cell.value = `${n.name} (${n.puntos} pts)\n${n.description||''}`;
+      cell.alignment = { wrapText:true, vertical:'top' };
+    });
+  });
+  ws.getColumn(1).width = 22;
+  for(let i=0;i<maxNiveles;i++){ ws.getColumn(2+i).width = 30; }
+  rubrica.criterios.forEach((c,ci)=>{ ws.getRow(2+ci).height = 80; });
+
+  await downloadWorkbook(workbook, `rubrica_${safeFileName(rubrica.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Rúbrica exportada a Excel');
+}
+
+async function exportRubricaToWord(rubricaId){
+  const group = getActiveGroup();
+  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+  if(!rubrica) return;
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para exportar.'); return; }
+  if(rubrica.criterios.length === 0){ showToast('Esta rúbrica no tiene criterios'); return; }
+
+  const maxNiveles = Math.max(...rubrica.criterios.map(c=>c.niveles.length), 1);
+  const headers = ['Criterio', ...Array.from({length:maxNiveles}, (_,i)=> `Nivel ${i+1}`)];
+  const rows = rubrica.criterios.map(c=>{
+    const ordenados = c.niveles.slice().sort((a,b)=>b.puntos-a.puntos);
+    const celdas = [c.name];
+    for(let i=0;i<maxNiveles;i++){
+      const n = ordenados[i];
+      celdas.push(n ? `${n.name} (${n.puntos} pts): ${n.description||''}` : '');
+    }
+    return celdas;
+  });
+
+  let body = wordHeading(`Rúbrica: ${rubrica.name}`, 32);
+  body += wordTable(headers, rows, [1800, ...Array.from({length:maxNiveles}, ()=>2800)]);
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>${body}</w:body>
+</w:document>`;
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`;
+
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+
+  const documentRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
+  <w:style w:type="table" w:styleId="TableGrid">
+    <w:name w:val="Table Grid"/>
+    <w:tblPr><w:tblBorders>
+      <w:top w:val="single" w:sz="4" w:color="auto"/>
+      <w:left w:val="single" w:sz="4" w:color="auto"/>
+      <w:bottom w:val="single" w:sz="4" w:color="auto"/>
+      <w:right w:val="single" w:sz="4" w:color="auto"/>
+      <w:insideH w:val="single" w:sz="4" w:color="auto"/>
+      <w:insideV w:val="single" w:sz="4" w:color="auto"/>
+    </w:tblBorders></w:tblPr>
+  </w:style>
+</w:styles>`;
+
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', contentTypesXml);
+  zip.folder('_rels').file('.rels', relsXml);
+  const wordFolder = zip.folder('word');
+  wordFolder.file('document.xml', documentXml);
+  wordFolder.file('styles.xml', stylesXml);
+  wordFolder.folder('_rels').file('document.xml.rels', documentRelsXml);
+
+  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rubrica_${safeFileName(rubrica.name)}_${new Date().toISOString().slice(0,10)}.docx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Rúbrica exportada a Word');
+}
+
 /* ============ TAB: CALIFICACIONES ============ */
 let calActiveEvalId = null;
+
+function toggleEvalScoreMode(mode){
+  document.getElementById('evalSimpleScoreWrap').style.display = mode === 'rubrica' ? 'none' : 'grid';
+  document.getElementById('evalRubricaWrap').style.display = mode === 'rubrica' ? 'block' : 'none';
+}
 
 function renderCalificaciones(group){
   if(!group.evaluations) group.evaluations = [];
@@ -3886,6 +4331,15 @@ function renderCalificaciones(group){
           <input type="text" id="evalName" placeholder="Ej. Prueba 1">
         </div>
         <div>
+          <label>Modo de puntaje</label>
+          <select id="evalScoreMode" onchange="toggleEvalScoreMode(this.value)">
+            <option value="simple">Puntaje simple</option>
+            <option value="rubrica">Rúbrica${group.rubricas.length===0 ? ' (crea una primero en la pestaña Rúbricas)' : ''}</option>
+          </select>
+        </div>
+      </div>
+      <div id="evalSimpleScoreWrap" class="grid-2" style="margin-top:10px;">
+        <div>
           <label>Puntaje total</label>
           <input type="number" id="evalTotalScore" min="1" value="100">
         </div>
@@ -3893,6 +4347,24 @@ function renderCalificaciones(group){
           <label>% de exigencia (aprobación = 4.0)</label>
           <input type="number" id="evalExigencia" min="1" max="99" value="60">
         </div>
+      </div>
+      <div id="evalRubricaWrap" style="display:none; margin-top:10px;">
+        <div class="grid-2">
+          <div>
+            <label>Rúbrica a usar</label>
+            <select id="evalRubricaSelect">
+              <option value="">Selecciona una rúbrica</option>
+              ${group.rubricas.map(r=>`<option value="${r.id}">${escapeHtml(r.name)} (máx. ${rubricaMaxPoints(r)} pts)</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label>% de exigencia (aprobación = 4.0)</label>
+            <input type="number" id="evalRubricaExigencia" min="1" max="99" value="60">
+          </div>
+        </div>
+        <p class="muted" style="font-size:0.76rem; margin-top:6px;">El puntaje total se calcula automáticamente sumando el nivel máximo de cada criterio de la rúbrica.</p>
+      </div>
+      <div class="grid-2" style="margin-top:10px;">
         <div>
           <label>Grupo de notas (opcional)</label>
           <select id="evalGradeGroup">
@@ -3941,6 +4413,7 @@ function renderCalificaciones(group){
               <strong>${escapeHtml(e.name)}</strong>
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
               ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
+              ${e.rubricaSnapshot ? `<span class="pill" style="margin-left:6px;">📋 ${escapeHtml(e.rubricaSnapshot.name)}</span>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
                 ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
               </div>
@@ -4034,18 +4507,38 @@ function renderCalificaciones(group){
 
   document.getElementById('addEvalBtn').addEventListener('click', ()=>{
     const name = document.getElementById('evalName').value.trim();
-    const totalScore = Number(document.getElementById('evalTotalScore').value);
-    const exigencia = Number(document.getElementById('evalExigencia').value);
+    const scoreMode = document.getElementById('evalScoreMode').value;
     const gradeGroupId = document.getElementById('evalGradeGroup').value || null;
     const date = document.getElementById('evalDate').value || null;
     const weightType = document.getElementById('evalWeightType').value;
     const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
-    if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
+    if(!name){ showToast('Ingresa un nombre para la evaluación'); return; }
+
+    let totalScore, exigencia, rubricaSnapshot = null;
+    if(scoreMode === 'rubrica'){
+      const rubricaId = document.getElementById('evalRubricaSelect').value;
+      const rubrica = group.rubricas.find(r=>r.id===rubricaId);
+      if(!rubrica){ showToast('Selecciona una rúbrica'); return; }
+      if(rubrica.criterios.length === 0 || rubrica.criterios.some(c=>c.niveles.length===0)){
+        showToast('Esa rúbrica necesita al menos un criterio con niveles definidos'); return;
+      }
+      rubricaSnapshot = {
+        id: rubrica.id, name: rubrica.name,
+        criterios: rubrica.criterios.map(c=>({ id:c.id, name:c.name, niveles: c.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos})) }))
+      };
+      totalScore = rubricaSnapshot.criterios.reduce((sum,c)=> sum + (c.niveles.length ? Math.max(...c.niveles.map(n=>n.puntos)) : 0), 0);
+      exigencia = Number(document.getElementById('evalRubricaExigencia').value) || 60;
+    } else {
+      totalScore = Number(document.getElementById('evalTotalScore').value);
+      exigencia = Number(document.getElementById('evalExigencia').value);
+      if(!totalScore || totalScore <= 0){ showToast('Ingresa un puntaje total válido'); return; }
+    }
+
     group.evaluations.push({
       id: uid(), name, totalScore, exigencia: exigencia || 60,
-      gradeGroupId, date,
+      gradeGroupId, date, rubricaSnapshot,
       weightType, weightPercent: weightPercent || 0,
-      scores: {}, overrides: {}, periodId: state.activePeriodId
+      scores: {}, overrides: {}, rubricaScores: {}, periodId: state.activePeriodId
     });
     saveState();
     renderCalificaciones(group);
@@ -4222,6 +4715,65 @@ function openEvalScores(evalId){
 
 function renderEvalScores(group, evaluation){
   const main = document.getElementById('main');
+
+  if(evaluation.rubricaSnapshot){
+    main.innerHTML = `
+      ${groupHeaderCard(group)}
+      <div class="card app-font">
+        <div class="flex-between">
+          <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(evaluation.name)}</h2>
+          <button class="btn btn-outline btn-sm" onclick="closeEvalScores()">← Volver</button>
+        </div>
+        <p class="muted">Rúbrica: ${escapeHtml(evaluation.rubricaSnapshot.name)} · Puntaje total: ${evaluation.totalScore} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)</p>
+        <details>
+          <summary class="muted" style="cursor:pointer; font-size:0.82rem;">Ver rúbrica completa (criterios y niveles) ▾</summary>
+          ${evaluation.rubricaSnapshot.criterios.map(c=>`
+            <p style="margin-bottom:2px; margin-top:10px;"><strong>${escapeHtml(c.name)}</strong></p>
+            <table>
+              <thead><tr><th>Nivel</th><th>Descripción</th><th>Puntos</th></tr></thead>
+              <tbody>
+                ${c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).map(n=>`
+                  <tr><td>${escapeHtml(n.name)}</td><td>${escapeHtml(n.description||'')}</td><td>${n.puntos}</td></tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `).join('')}
+        </details>
+      </div>
+      ${group.students.map(s=>{
+        const nota = computeStudentEvalGrade(evaluation, s.id);
+        const seleccion = (evaluation.rubricaScores && evaluation.rubricaScores[s.id]) || {};
+        return `
+          <div class="card app-font">
+            <div class="flex-between">
+              <strong>${escapeHtml(s.name)}</strong>
+              <span class="avg-badge">Nota: ${nota !== null ? nota.toFixed(1) : '-'}</span>
+            </div>
+            <div style="overflow-x:auto; margin-top:8px;">
+            <table>
+              <thead><tr><th>Criterio</th><th>Nivel seleccionado</th></tr></thead>
+              <tbody>
+                ${evaluation.rubricaSnapshot.criterios.map(c=>`
+                  <tr>
+                    <td>${escapeHtml(c.name)}</td>
+                    <td>
+                      <select onchange="saveRubricaScore('${evaluation.id}','${s.id}','${c.id}', this.value)" title="${escapeHtml((c.niveles.find(n=>n.id===seleccion[c.id])||{}).description || '')}">
+                        <option value="">-</option>
+                        ${c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).map(n=>`<option value="${n.id}" ${seleccion[c.id]===n.id?'selected':''}>${escapeHtml(n.name)} (${n.puntos} pts)</option>`).join('')}
+                      </select>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    `;
+    return;
+  }
+
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
@@ -4274,6 +4826,18 @@ function saveEvalScore(evalId, studentId, value){
   if(!ev.scores) ev.scores = {};
   const num = value === '' ? null : Number(value);
   ev.scores[studentId] = (num === null || isNaN(num)) ? null : num;
+  saveState();
+  renderEvalScores(group, ev);
+}
+
+function saveRubricaScore(evalId, studentId, criterioId, nivelId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  if(!ev.rubricaScores) ev.rubricaScores = {};
+  if(!ev.rubricaScores[studentId]) ev.rubricaScores[studentId] = {};
+  if(nivelId){ ev.rubricaScores[studentId][criterioId] = nivelId; }
+  else { delete ev.rubricaScores[studentId][criterioId]; }
   saveState();
   renderEvalScores(group, ev);
 }
