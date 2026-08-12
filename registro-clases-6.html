@@ -2565,32 +2565,6 @@ function renderRegistrar(group, sessionToEdit, prefill){
       </label>
     </div>
 
-    ${entregasDelDia.map(entrega=>{
-      return `
-      <div class="card app-font" style="border-left:4px solid var(--primary);">
-        <div class="flex-between">
-          <h2 style="border:none; margin-bottom:0; padding-bottom:0;">📥 Entrega de hoy: ${escapeHtml(entrega.name)}</h2>
-          <button class="btn btn-outline btn-sm" onclick="markAllEntregaDeliveredInline('${entrega.id}')">✅ Todos entregada</button>
-        </div>
-        <p class="muted" style="font-size:0.78rem;">Esto marca la entrega por separado del registro de asistencia/indicadores de arriba — quedan como datos independientes, solo te evita ir a otro módulo para hacerlo.</p>
-        <div style="margin-top:8px;">
-          ${group.students.map(s=>{
-            const estado = entrega.estados ? entrega.estados[s.id] : null;
-            const info = estado ? ENTREGA_ESTADOS[estado] : null;
-            return `
-              <span style="display:inline-flex; align-items:center; gap:4px; margin:4px 8px 4px 0;">
-                <button class="btn btn-sm" style="${info ? `background:${info.color.bg}; color:${info.color.text}; border:1px solid ${info.color.border};` : ''}" onclick="toggleEntregaDeliveredInline('${entrega.id}','${s.id}')">
-                  ${escapeHtml(s.name)}${info ? ': ' + info.label : ''}
-                </button>
-                ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaExceptionInline('${entrega.id}','${s.id}')" title="Marcar en plazo por excepción">🔓</button>` : ''}
-              </span>
-            `;
-          }).join('')}
-        </div>
-      </div>
-      `;
-    }).join('')}
-
     ${registrarAttendanceOnly ? '' : `
     <div class="card app-font">
       <div class="flex-between">
@@ -2632,9 +2606,16 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Asistencia por estudiante</h2>
         <button class="btn btn-outline btn-sm" onclick="markAllAttendance(true)">✅ Marcar todos presentes</button>
       </div>
+      ${entregasDelDia.length > 0 ? '<p class="muted" style="font-size:0.78rem;">Las columnas 📥 marcan la entrega de ese día — quedan como un registro independiente del de asistencia.</p>' : ''}
       <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Estudiante</th><th>Presente</th><th style="min-width:180px;">Observaciones</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Estudiante</th><th>Presente</th>
+            ${entregasDelDia.map(entrega=>`<th style="min-width:150px;">📥 ${escapeHtml(entrega.name)}<br><button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="markAllEntregaDeliveredInline('${entrega.id}')">Todos</button></th>`).join('')}
+            <th style="min-width:180px;">Observaciones</th>
+          </tr>
+        </thead>
         <tbody>
           ${group.students.map(s=>{
             const prevEntry = prevByStudent[s.id];
@@ -2643,6 +2624,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
               <tr>
                 <td>${escapeHtml(s.name)}</td>
                 <td><input type="checkbox" data-attendance-student="${s.id}" style="width:auto;" ${wasPresent ? 'checked' : ''}></td>
+                ${entregasDelDia.map(entrega=>`<td>${entregaCellHtml(entrega, s.id)}</td>`).join('')}
                 <td><textarea data-student="${s.id}" data-obs="1" placeholder="Observaciones...">${prevEntry ? escapeHtml(prevEntry.observaciones || '') : ''}</textarea></td>
               </tr>
             `;
@@ -2660,12 +2642,14 @@ function renderRegistrar(group, sessionToEdit, prefill){
           <button class="btn btn-outline btn-sm" onclick="repeatLastClass()">🔁 Repetir última clase</button>
         </div>
       </div>
+      ${entregasDelDia.length > 0 ? '<p class="muted" style="font-size:0.78rem;">Las columnas 📥 marcan la entrega de ese día — quedan como un registro independiente del cotejo.</p>' : ''}
       <div style="overflow-x:auto;">
       <table>
         <thead>
           <tr>
             <th>Estudiante</th>
             ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
+            ${entregasDelDia.map(entrega=>`<th style="min-width:150px;">📥 ${escapeHtml(entrega.name)}<br><button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="markAllEntregaDeliveredInline('${entrega.id}')">Todos</button></th>`).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
         </thead>
@@ -2690,6 +2674,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 </td>
                 `;
               }).join('')}
+              ${entregasDelDia.map(entrega=>`<td>${entregaCellHtml(entrega, s.id)}</td>`).join('')}
               <td>
                 <textarea data-student="${s.id}" data-obs="1" placeholder="Observaciones...">${prevEntry ? escapeHtml(prevEntry.observaciones || '') : ''}</textarea>
               </td>
@@ -2702,6 +2687,19 @@ function renderRegistrar(group, sessionToEdit, prefill){
     `)}
 
     ${saveButtonsRow}
+  `;
+}
+
+function entregaCellHtml(entrega, studentId){
+  const estado = entrega.estados ? entrega.estados[studentId] : null;
+  const info = estado ? ENTREGA_ESTADOS[estado] : null;
+  return `
+    <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+      <button class="btn btn-sm" style="${info ? `background:${info.color.bg}; color:${info.color.text}; border:1px solid ${info.color.border};` : ''}" onclick="toggleEntregaDeliveredInline('${entrega.id}','${studentId}')">
+        ${info ? info.label : '⬜ Marcar'}
+      </button>
+      ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaExceptionInline('${entrega.id}','${studentId}')" title="Marcar en plazo por excepción">🔓</button>` : ''}
+    </div>
   `;
 }
 
