@@ -531,7 +531,6 @@
   <button data-module="trabajo">📝 Trabajo en clases</button>
   <button data-module="calificaciones">🎯 Calificaciones</button>
   <button data-module="bitacora">📓 Bitácora</button>
-  <button data-module="rubricas">📋 Rúbricas</button>
 </nav>
 <nav class="tabs subtabs app-font" id="subTabsNav" style="display:none;"></nav>
 
@@ -926,13 +925,6 @@ function isEntryPresent(entry){
   return Object.values(entry.cotejo).some(v => v !== null && v !== undefined);
 }
 
-function indicatorMaxPoints(ind){
-  if(ind.niveles && ind.niveles.length){
-    return Math.max(...ind.niveles.map(n=>n.puntos));
-  }
-  return ind.levels || 5;
-}
-
 function computeStudentStatsForSessions(group, studentId, sessions){
   let presentCount = 0, absentCount = 0, obtained = 0, maxPossible = 0;
   sessions.forEach(session=>{
@@ -945,7 +937,7 @@ function computeStudentStatsForSessions(group, studentId, sessions){
         const v = entry.cotejo[ind.id];
         if(v !== null && v !== undefined){
           obtained += v;
-          maxPossible += indicatorMaxPoints(ind);
+          maxPossible += (ind.levels || 5);
         }
       });
     } else {
@@ -1018,24 +1010,8 @@ function computeUnitGrade(unit, studentId){
   return Math.round((notas.reduce((a,b)=>a+b,0)/notas.length) * 10) / 10;
 }
 
-function computeRubricaScoreForStudent(evaluation, studentId){
-  if(!evaluation.rubricaSnapshot) return null;
-  const seleccion = evaluation.rubricaScores ? evaluation.rubricaScores[studentId] : null;
-  if(!seleccion) return null;
-  let total = 0, algunaSeleccion = false;
-  evaluation.rubricaSnapshot.criterios.forEach(c=>{
-    const nivelId = seleccion[c.id];
-    if(!nivelId) return;
-    const nivel = c.niveles.find(n=>n.id===nivelId);
-    if(nivel){ total += nivel.puntos; algunaSeleccion = true; }
-  });
-  return algunaSeleccion ? total : null;
-}
-
 function computeStudentEvalGrade(evaluation, studentId){
-  const score = evaluation.rubricaSnapshot
-    ? computeRubricaScoreForStudent(evaluation, studentId)
-    : (evaluation.scores ? evaluation.scores[studentId] : null);
+  const score = evaluation.scores ? evaluation.scores[studentId] : null;
   if(score === null || score === undefined) return null;
   const params = getEvalParamsForStudent(evaluation, studentId);
   return computeChileGrade(score, params.totalScore, params.exigencia);
@@ -1090,7 +1066,7 @@ function totalWeightAssigned(group){
 
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], rubricas: [] };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [] };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -1108,7 +1084,6 @@ function ensureDefaultGroup(){
     if(!g.processes) g.processes = [];
     if(!g.bitacora) g.bitacora = [];
     if(!g.entregas) g.entregas = [];
-    if(!g.rubricas) g.rubricas = [];
     if(g.activeProcessId === undefined) g.activeProcessId = null;
   });
   if(!state.periods) state.periods = [];
@@ -1429,7 +1404,7 @@ document.getElementById('groupSelect').addEventListener('change', e=>{
 document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   const name = prompt('Nombre del nuevo grupo/curso:');
   if(!name) return;
-  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], rubricas: [] };
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [] };
   state.groups.push(g);
   state.activeGroupId = g.id;
   saveState();
@@ -1445,7 +1420,6 @@ const MODULE_TABS = {
   trabajo: ['indicadores','registrar','entregas','historial','decimas'],
   calificaciones: ['calificaciones'],
   bitacora: ['bitacora'],
-  rubricas: ['rubricas'],
 };
 const SUBTAB_LABELS = {
   indicadores: 'Indicadores',
@@ -1454,7 +1428,6 @@ const SUBTAB_LABELS = {
   decimas: 'Décimas',
   entregas: 'Entregas',
   calificaciones: 'Calificaciones',
-  rubricas: 'Rúbricas',
 };
 function moduleForTab(tab){
   for(const m in MODULE_TABS){ if(MODULE_TABS[m].includes(tab)) return m; }
@@ -1527,7 +1500,6 @@ function renderMain(){
   if(currentTab === 'decimas') return renderDecimas(group);
   if(currentTab === 'entregas') return renderEntregas(group);
   if(currentTab === 'calificaciones') return renderCalificaciones(group);
-  if(currentTab === 'rubricas') return renderRubricas(group);
   if(currentTab === 'bitacora') return renderBitacora(group);
 }
 
@@ -1777,37 +1749,27 @@ function renderIndicadores(group){
   const main = document.getElementById('main');
   const themes = [...new Set(group.indicators.map(i=>i.tema).filter(Boolean))];
   const visibleIndicators = indicadoresThemeFilter ? group.indicators.filter(i=> i.tema === indicadoresThemeFilter) : group.indicators;
-  const criterioOptions = (group.rubricas || []).flatMap(r=> r.criterios.filter(c=>c.niveles.length>0).map(c=>
-    `<option value="${r.id}::${c.id}">${escapeHtml(r.name)} → ${escapeHtml(c.name)}</option>`
-  )).join('');
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
       <h2>Agregar indicador de evaluación</h2>
-      <p class="muted">Define cuántos niveles de logro tendrá cada indicador (por ejemplo, 3, 4 o 5 niveles), o usa los niveles de un criterio de una rúbrica ya creada.</p>
+      <p class="muted">Define cuántos niveles de logro tendrá cada indicador (por ejemplo, 3, 4 o 5 niveles).</p>
       <div class="row">
         <div style="flex:1; min-width:200px;">
           <label>Nombre del indicador</label>
           <input type="text" id="newIndicatorName" placeholder="Ej. Participación en clase">
         </div>
         <div style="width:140px;">
-          <label>Niveles de logro (0 a N)</label>
+          <label>Niveles de logro</label>
           <input type="number" id="newIndicatorLevels" min="2" max="10" value="5">
         </div>
         <div style="flex:1; min-width:160px;">
           <label>Unidad / tema (opcional)</label>
           <input type="text" id="newIndicatorTema" placeholder="Ej. Unidad 1">
         </div>
-      </div>
-      ${criterioOptions ? `
-      <label style="margin-top:10px;">O usar niveles de un criterio de rúbrica (opcional)</label>
-      <select id="newIndicatorCriterio">
-        <option value="">Ninguno (usar niveles numéricos de arriba)</option>
-        ${criterioOptions}
-      </select>
-      ` : ''}
-      <div class="row" style="margin-top:12px;">
-        <button class="btn btn-accent" id="addIndicatorBtn">+ Agregar</button>
+        <div style="align-self:flex-end;">
+          <button class="btn btn-accent" id="addIndicatorBtn">+ Agregar</button>
+        </div>
       </div>
     </div>
     <div class="card app-font">
@@ -1824,8 +1786,7 @@ function renderIndicadores(group){
       ` : ''}
       ${visibleIndicators.length === 0 ? '<div class="empty-state">No hay indicadores para mostrar.</div>' :
         `<div style="margin-top:8px;">${visibleIndicators.map(ind=>`
-          <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.niveles ? ind.niveles.length + ' niveles (rúbrica)' : (ind.levels || 5) + ' niveles'}${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
-            ${ind.sourceRubricaId ? `<button onclick="goToRubrica('${ind.sourceRubricaId}')" style="color:var(--primary);" title="Ver rúbrica">📋</button>` : ''}
+          <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.levels || 5} niveles${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
             <button onclick="editIndicator('${ind.id}')" style="color:var(--primary);">✎</button>
             <button onclick="deleteIndicator('${ind.id}')">✕</button>
           </span>
@@ -1837,24 +1798,12 @@ function renderIndicadores(group){
     const input = document.getElementById('newIndicatorName');
     const levelsInput = document.getElementById('newIndicatorLevels');
     const temaInput = document.getElementById('newIndicatorTema');
-    const criterioSelect = document.getElementById('newIndicatorCriterio');
     const name = input.value.trim();
     if(!name) return;
     let levels = parseInt(levelsInput.value, 10);
     if(!levels || levels < 2) levels = 2;
     if(levels > 10) levels = 10;
-    let niveles = null;
-    let sourceRubricaId = null;
-    if(criterioSelect && criterioSelect.value){
-      const [rubricaId, criterioId] = criterioSelect.value.split('::');
-      const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-      const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
-      if(criterio){
-        niveles = criterio.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos}));
-        sourceRubricaId = rubricaId;
-      }
-    }
-    group.indicators.push({id: uid(), name, levels, tema: temaInput.value.trim(), niveles, sourceRubricaId});
+    group.indicators.push({id: uid(), name, levels, tema: temaInput.value.trim()});
     saveState();
     renderIndicadores(group);
     showToast('Indicador agregado');
@@ -1867,9 +1816,6 @@ function openIndicatorForm(id){
   const group = getActiveGroup();
   const ind = group.indicators.find(i=>i.id===id);
   if(!ind) return;
-  const criterioOptions = (group.rubricas || []).flatMap(r=> r.criterios.filter(c=>c.niveles.length>0).map(c=>
-    `<option value="${r.id}::${c.id}">${escapeHtml(r.name)} → ${escapeHtml(c.name)}</option>`
-  )).join('');
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'indicatorFormOverlay';
@@ -1883,14 +1829,6 @@ function openIndicatorForm(id){
       <input type="number" id="indicatorFormLevels" min="2" max="10" value="${ind.levels || 5}">
       <label style="margin-top:10px;">Unidad / tema (opcional)</label>
       <input type="text" id="indicatorFormTema" value="${escapeHtml(ind.tema || '')}">
-      ${criterioOptions ? `
-      <label style="margin-top:10px;">Usar niveles de un criterio de rúbrica</label>
-      <select id="indicatorFormCriterio">
-        <option value="">Ninguno (usar niveles numéricos de arriba)</option>
-        ${criterioOptions}
-      </select>
-      ${ind.niveles ? '<p class="muted" style="font-size:0.74rem; margin-top:4px;">Ya tiene niveles de rúbrica aplicados. Elige "Ninguno" para volver a niveles numéricos.</p>' : ''}
-      ` : ''}
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveIndicatorForm('${id}')">Guardar</button>
       </div>
@@ -1911,19 +1849,6 @@ function saveIndicatorForm(id){
   ind.tema = document.getElementById('indicatorFormTema').value.trim();
   if(name) ind.name = name;
   if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
-  const criterioSelect = document.getElementById('indicatorFormCriterio');
-  if(criterioSelect){
-    if(criterioSelect.value){
-      const [rubricaId, criterioId] = criterioSelect.value.split('::');
-      const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-      const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
-      ind.niveles = criterio ? criterio.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos})) : null;
-      ind.sourceRubricaId = criterio ? rubricaId : null;
-    } else {
-      ind.niveles = null;
-      ind.sourceRubricaId = null;
-    }
-  }
   saveState();
   closeIndicatorForm();
   if(currentTab === 'registrar'){
@@ -2040,13 +1965,6 @@ function findCurrentOrNextClass(){
   if(upcoming[0]) return { entry: upcoming[0], status: 'next' };
 
   return null;
-}
-
-function goToRubrica(rubricaId){
-  const group = getActiveGroup();
-  if(!group || !group.rubricas.find(r=>r.id===rubricaId)){ showToast('Esa rúbrica ya no existe en el banco'); return; }
-  rubricaActiveId = rubricaId;
-  goToTab('rubricas');
 }
 
 function goToBitacoraForGroup(groupId){
@@ -2603,6 +2521,9 @@ function renderRegistrar(group, sessionToEdit, prefill){
     </div>
   `;
 
+  const sessionDateValue = isEdit ? sessionToEdit.date : (prefill && prefill.date ? prefill.date : today);
+  const entregasDelDia = getActiveEntregas(group).filter(e=> e.date === sessionDateValue);
+
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font" style="padding:10px 16px;">
@@ -2621,7 +2542,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
       <div class="grid-2">
         <div>
           <label>Fecha</label>
-          <input type="date" id="sessionDate" value="${isEdit ? sessionToEdit.date : (prefill && prefill.date ? prefill.date : today)}">
+          <input type="date" id="sessionDate" value="${sessionDateValue}">
         </div>
         <div>
           <label>Horario</label>
@@ -2643,6 +2564,32 @@ function renderRegistrar(group, sessionToEdit, prefill){
         Registrar solo asistencia (sin indicadores)
       </label>
     </div>
+
+    ${entregasDelDia.map(entrega=>{
+      return `
+      <div class="card app-font" style="border-left:4px solid var(--primary);">
+        <div class="flex-between">
+          <h2 style="border:none; margin-bottom:0; padding-bottom:0;">📥 Entrega de hoy: ${escapeHtml(entrega.name)}</h2>
+          <button class="btn btn-outline btn-sm" onclick="markAllEntregaDeliveredInline('${entrega.id}')">✅ Todos entregada</button>
+        </div>
+        <p class="muted" style="font-size:0.78rem;">Esto marca la entrega por separado del registro de asistencia/indicadores de arriba — quedan como datos independientes, solo te evita ir a otro módulo para hacerlo.</p>
+        <div style="margin-top:8px;">
+          ${group.students.map(s=>{
+            const estado = entrega.estados ? entrega.estados[s.id] : null;
+            const info = estado ? ENTREGA_ESTADOS[estado] : null;
+            return `
+              <span style="display:inline-flex; align-items:center; gap:4px; margin:4px 8px 4px 0;">
+                <button class="btn btn-sm" style="${info ? `background:${info.color.bg}; color:${info.color.text}; border:1px solid ${info.color.border};` : ''}" onclick="toggleEntregaDeliveredInline('${entrega.id}','${s.id}')">
+                  ${escapeHtml(s.name)}${info ? ': ' + info.label : ''}
+                </button>
+                ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaExceptionInline('${entrega.id}','${s.id}')" title="Marcar en plazo por excepción">🔓</button>` : ''}
+              </span>
+            `;
+          }).join('')}
+        </div>
+      </div>
+      `;
+    }).join('')}
 
     ${registrarAttendanceOnly ? '' : `
     <div class="card app-font">
@@ -2671,7 +2618,6 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 <input type="checkbox" value="${ind.id}" ${registrarIndicatorSelection.includes(ind.id) ? 'checked' : ''} onchange="toggleRegistrarIndicator('${ind.id}', this.checked)">
                 ${escapeHtml(ind.name)}${ind.tema ? ` <span class="muted">(${escapeHtml(ind.tema)})</span>` : ''}
               </label>
-              ${ind.sourceRubricaId ? `<button onclick="goToRubrica('${ind.sourceRubricaId}')" style="background:none; border:none; color:var(--primary); cursor:pointer; padding:0; font-size:0.85rem;" title="Ver rúbrica">📋</button>` : ''}
               <button onclick="openIndicatorForm('${ind.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; padding:0; font-size:0.85rem;">✎</button>
             </span>
           `).join('')
@@ -2719,10 +2665,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${selectedIndicators.map(ind=> ind.niveles
-              ? `<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(rúbrica)</span></th>`
-              : `<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`
-            ).join('')}
+            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
         </thead>
@@ -2733,17 +2676,11 @@ function renderRegistrar(group, sessionToEdit, prefill){
             <tr>
               <td>${escapeHtml(s.name)}</td>
               ${selectedIndicators.map(ind=>{
+                const levels = ind.levels || 5;
                 const prevVal = prevEntry ? prevEntry.cotejo[ind.id] : null;
                 let options = '<option value="">-</option>';
-                if(ind.niveles){
-                  ind.niveles.slice().sort((a,b)=>b.puntos-a.puntos).forEach(n=>{
-                    options += `<option value="${n.puntos}" title="${escapeHtml(n.description||'')}" ${prevVal===n.puntos?'selected':''}>${escapeHtml(n.name)} (${n.puntos})</option>`;
-                  });
-                } else {
-                  const levels = ind.levels || 5;
-                  for(let n=0; n<=levels; n++){
-                    options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
-                  }
+                for(let n=0; n<=levels; n++){
+                  options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
                 }
                 return `
                 <td>
@@ -2857,7 +2794,7 @@ function handleSaveSession(){
       const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
       return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
     });
-    indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5, niveles: i.niveles || null}));
+    indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
   }
 
   // Conservar datos de estudiantes que ya no están en el grupo pero tenían registro previo
@@ -3276,6 +3213,17 @@ function renderEntregas(group){
           </div>
         </div>
       </div>
+      <div style="margin-top:10px;">
+        <label style="display:flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="entAsignaDecimas" style="width:auto;" onchange="document.getElementById('entDecimasWrap').style.display = this.checked ? 'block' : 'none';">
+          Asignar décimas a quien entregue en plazo
+        </label>
+        <div id="entDecimasWrap" style="display:none; margin-top:8px;">
+          <label class="muted" style="font-size:0.74rem;">Cantidad de décimas</label>
+          <input type="number" id="entDecimasValor" step="0.1" value="0.3">
+          <p class="muted" style="font-size:0.74rem; margin-top:4px;">Se sumará automáticamente en Décimas cuando marques a un estudiante como "En plazo" (incluida la excepción). Si lo desmarcas, se quita.</p>
+        </div>
+      </div>
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addEntregaBtn">+ Crear y completar por estudiante</button>
       </div>
@@ -3348,8 +3296,10 @@ function renderEntregas(group){
     const date = document.getElementById('entDate').value || today;
     const plazoFecha = document.getElementById('entPlazoFecha').value || null;
     const plazoHora = document.getElementById('entPlazoHora').value || null;
+    const asignaDecimas = document.getElementById('entAsignaDecimas').checked;
+    const decimasBonus = asignaDecimas ? (Number(document.getElementById('entDecimasValor').value) || 0) : null;
     if(!name){ showToast('Ingresa el nombre de la guía o trabajo'); return; }
-    const entrega = { id: uid(), name, date, plazoFecha, plazoHora, periodId: state.activePeriodId, processId: group.activeProcessId, estados: {} };
+    const entrega = { id: uid(), name, date, plazoFecha, plazoHora, decimasBonus, decimaSessionId: null, periodId: state.activePeriodId, processId: group.activeProcessId, estados: {} };
     group.entregas.push(entrega);
     saveState();
     entregaActiveId = entrega.id;
@@ -3426,7 +3376,25 @@ function renderEntregaValues(group, entrega){
   `;
 }
 
-function toggleEntregaDelivered(entregaId, studentId){
+function ensureEntregaDecimaSession(group, entrega){
+  if(!group.decimas) group.decimas = [];
+  if(entrega.decimaSessionId){
+    const existing = group.decimas.find(d=>d.id===entrega.decimaSessionId);
+    if(existing) return existing;
+  }
+  const session = { id: uid(), date: entrega.date, note: 'Entrega: ' + entrega.name, periodId: entrega.periodId, values: {} };
+  group.decimas.push(session);
+  entrega.decimaSessionId = session.id;
+  return session;
+}
+function syncEntregaDecimaBonus(group, entrega, studentId, awardBonus){
+  if(!entrega.decimasBonus) return;
+  const session = ensureEntregaDecimaSession(group, entrega);
+  if(awardBonus){ session.values[studentId] = entrega.decimasBonus; }
+  else { delete session.values[studentId]; }
+}
+
+function applyEntregaToggle(entregaId, studentId){
   const group = getActiveGroup();
   const entrega = group.entregas.find(e=>e.id===entregaId);
   if(!entrega) return;
@@ -3438,15 +3406,17 @@ function toggleEntregaDelivered(entregaId, studentId){
     delete entrega.estados[studentId];
     delete entrega.fechas[studentId];
     delete entrega.excepciones[studentId];
+    syncEntregaDecimaBonus(group, entrega, studentId, false);
   } else {
     const todayISO = toISODate(new Date());
-    entrega.estados[studentId] = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
+    const estado = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
+    entrega.estados[studentId] = estado;
     entrega.fechas[studentId] = todayISO;
+    syncEntregaDecimaBonus(group, entrega, studentId, estado === 'en_plazo');
   }
   saveState();
-  renderEntregaValues(group, entrega);
 }
-function markEntregaException(entregaId, studentId){
+function applyEntregaException(entregaId, studentId){
   const group = getActiveGroup();
   const entrega = group.entregas.find(e=>e.id===entregaId);
   if(!entrega) return;
@@ -3457,23 +3427,58 @@ function markEntregaException(entregaId, studentId){
   entrega.estados[studentId] = 'en_plazo';
   entrega.fechas[studentId] = entrega.fechas[studentId] || todayISO;
   entrega.excepciones[studentId] = true;
+  syncEntregaDecimaBonus(group, entrega, studentId, true);
   saveState();
-  renderEntregaValues(group, entrega);
-  showToast('Marcado como en plazo (excepción)');
 }
-function markAllEntregaDelivered(entregaId){
+function applyEntregaMarkAll(entregaId){
   const group = getActiveGroup();
   const entrega = group.entregas.find(e=>e.id===entregaId);
-  if(!entrega) return;
+  if(!entrega) return null;
   if(!entrega.estados) entrega.estados = {};
   if(!entrega.fechas) entrega.fechas = {};
   const todayISO = toISODate(new Date());
   const estado = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
-  group.students.forEach(s=>{ entrega.estados[s.id] = estado; entrega.fechas[s.id] = todayISO; });
+  group.students.forEach(s=>{
+    entrega.estados[s.id] = estado;
+    entrega.fechas[s.id] = todayISO;
+    syncEntregaDecimaBonus(group, entrega, s.id, estado === 'en_plazo');
+  });
   saveState();
-  renderEntregaValues(group, entrega);
+  return estado;
+}
+
+function toggleEntregaDelivered(entregaId, studentId){
+  applyEntregaToggle(entregaId, studentId);
+  renderEntregaValues(getActiveGroup(), getActiveGroup().entregas.find(e=>e.id===entregaId));
+}
+function markEntregaException(entregaId, studentId){
+  applyEntregaException(entregaId, studentId);
+  renderEntregaValues(getActiveGroup(), getActiveGroup().entregas.find(e=>e.id===entregaId));
+  showToast('Marcado como en plazo (excepción)');
+}
+function markAllEntregaDelivered(entregaId){
+  const estado = applyEntregaMarkAll(entregaId);
+  if(!estado) return;
+  renderEntregaValues(getActiveGroup(), getActiveGroup().entregas.find(e=>e.id===entregaId));
   showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[estado].label + '"');
 }
+
+function toggleEntregaDeliveredInline(entregaId, studentId){
+  applyEntregaToggle(entregaId, studentId);
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+}
+function markEntregaExceptionInline(entregaId, studentId){
+  applyEntregaException(entregaId, studentId);
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  showToast('Marcado como en plazo (excepción)');
+}
+function markAllEntregaDeliveredInline(entregaId){
+  const estado = applyEntregaMarkAll(entregaId);
+  if(!estado) return;
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[estado].label + '"');
+}
+
 function openEntregasToGradeForm(){
   const group = getActiveGroup();
   const entregas = getActiveProcessEntregas(group);
@@ -3579,6 +3584,14 @@ function openEntregaEditForm(id){
         <option value="">Ninguno (sin proceso)</option>
         ${processes.map(p=>`<option value="${p.id}" ${p.id===entrega.processId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
       </select>
+      <label style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="entEditAsignaDecimas" style="width:auto;" ${entrega.decimasBonus ? 'checked' : ''} onchange="document.getElementById('entEditDecimasWrap').style.display = this.checked ? 'block' : 'none';">
+        Asignar décimas a quien entregue en plazo
+      </label>
+      <div id="entEditDecimasWrap" style="display:${entrega.decimasBonus ? 'block' : 'none'}; margin-top:8px;">
+        <label class="muted" style="font-size:0.74rem;">Cantidad de décimas</label>
+        <input type="number" id="entEditDecimasValor" step="0.1" value="${entrega.decimasBonus || 0.3}">
+      </div>
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveEntregaEditForm('${id}')">Guardar</button>
       </div>
@@ -3597,11 +3610,19 @@ function saveEntregaEditForm(id){
   const name = document.getElementById('entEditName').value.trim();
   const date = document.getElementById('entEditDate').value;
   const processId = document.getElementById('entEditProcess').value || null;
+  const asignaDecimas = document.getElementById('entEditAsignaDecimas').checked;
+  const decimasBonus = asignaDecimas ? (Number(document.getElementById('entEditDecimasValor').value) || 0) : null;
   if(!name){ showToast('El nombre no puede quedar vacío'); return; }
   if(!date){ showToast('Indica la fecha de entrega'); return; }
   entrega.name = name;
   entrega.date = date;
   entrega.processId = processId;
+  entrega.decimasBonus = decimasBonus;
+  if(!decimasBonus && entrega.decimaSessionId){
+    // se desactivaron las décimas: limpiar los valores que había asignado esta entrega
+    const session = group.decimas && group.decimas.find(d=>d.id===entrega.decimaSessionId);
+    if(session) session.values = {};
+  }
   saveState();
   closeEntregaEditForm();
   renderEntregas(group);
@@ -3906,530 +3927,8 @@ function deleteBitacoraEntry(id){
   renderBitacora(group);
 }
 
-/* ============ TAB: RÚBRICAS (banco reutilizable) ============ */
-let rubricaActiveId = null;
-
-function renderRubricas(group){
-  if(!group.rubricas) group.rubricas = [];
-  if(rubricaActiveId){
-    const rubrica = group.rubricas.find(r=>r.id===rubricaActiveId);
-    if(rubrica) return renderRubricaEditor(group, rubrica);
-    rubricaActiveId = null;
-  }
-
-  const main = document.getElementById('main');
-  main.innerHTML = `
-    ${groupHeaderCard(group)}
-    <div class="card app-font">
-      <h2>Banco de rúbricas</h2>
-      <p class="muted">Crea rúbricas reutilizables (criterios con niveles descriptivos) para usarlas en evaluaciones de Calificaciones o en indicadores de Trabajo en clases.</p>
-      <div class="row">
-        <div style="flex:1; min-width:200px;">
-          <label>Nombre de la nueva rúbrica</label>
-          <input type="text" id="newRubricaName" placeholder="Ej. Rúbrica de ensayo">
-        </div>
-        <div style="align-self:flex-end;">
-          <button class="btn btn-accent" id="addRubricaBtn">+ Crear rúbrica</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card app-font">
-      <h2>Importar rúbrica desde archivo</h2>
-      <p class="muted">Sube un Word (.docx) o Excel (.xlsx) con una tabla: los criterios/indicadores en filas, y los niveles en columnas — el mismo formato que exportas desde aquí. Idealmente cada celda de nivel indica el puntaje, por ejemplo "Excelente (4 pts): descripción...".</p>
-      <div class="row">
-        <div style="flex:1; min-width:200px;">
-          <label>Nombre de la rúbrica a crear (opcional)</label>
-          <input type="text" id="rubricaImportName" placeholder="Si lo dejas vacío, se usa el nombre del archivo">
-        </div>
-      </div>
-      <div class="row" style="margin-top:8px;">
-        <input type="file" id="rubricaImportFile" accept=".xlsx,.xls,.docx">
-        <button class="btn btn-accent btn-sm" id="importRubricaBtn">📥 Importar</button>
-      </div>
-    </div>
-
-    <div class="card app-font">
-      <h2>Rúbricas creadas (${group.rubricas.length})</h2>
-      ${group.rubricas.length === 0 ? '<div class="empty-state">Aún no has creado ninguna rúbrica.</div>' :
-        group.rubricas.map(r=>{
-          const maxPuntos = r.criterios.reduce((sum,c)=> sum + (c.niveles.length ? Math.max(...c.niveles.map(n=>n.puntos)) : 0), 0);
-          return `
-            <div class="student-list-item" style="align-items:flex-start;">
-              <div>
-                <strong>${escapeHtml(r.name)}</strong>
-                <div class="muted">${r.criterios.length} criterio(s) · puntaje máximo ${maxPuntos}</div>
-              </div>
-              <div class="row" style="gap:6px;">
-                <button class="btn btn-accent btn-sm" onclick="openRubricaEditor('${r.id}')">Editar</button>
-                <button class="btn btn-outline btn-sm" onclick="exportRubricaToExcel('${r.id}')">⬇️ Excel</button>
-                <button class="btn btn-outline btn-sm" onclick="exportRubricaToWord('${r.id}')">⬇️ Word</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteRubrica('${r.id}')">Eliminar</button>
-              </div>
-            </div>
-          `;
-        }).join('')
-      }
-    </div>
-  `;
-
-  document.getElementById('importRubricaBtn').addEventListener('click', ()=> importRubricaFile());
-
-  document.getElementById('addRubricaBtn').addEventListener('click', ()=>{
-    const name = document.getElementById('newRubricaName').value.trim();
-    if(!name){ showToast('Ingresa un nombre para la rúbrica'); return; }
-    const rubrica = { id: uid(), name, criterios: [] };
-    group.rubricas.push(rubrica);
-    saveState();
-    rubricaActiveId = rubrica.id;
-    renderRubricas(group);
-    showToast('Rúbrica creada, agrégale criterios y niveles');
-  });
-}
-
-function openRubricaEditor(id){
-  rubricaActiveId = id;
-  renderRubricas(getActiveGroup());
-}
-function closeRubricaEditor(){
-  rubricaActiveId = null;
-  renderRubricas(getActiveGroup());
-}
-function deleteRubrica(id){
-  const group = getActiveGroup();
-  if(!confirm('¿Eliminar esta rúbrica? Las evaluaciones o indicadores que ya la usaron conservan su copia, pero no podrás volver a aplicarla.')) return;
-  group.rubricas = group.rubricas.filter(r=>r.id!==id);
-  if(rubricaActiveId === id) rubricaActiveId = null;
-  saveState();
-  renderRubricas(group);
-}
-
-/* ============ IMPORTAR RÚBRICAS DESDE WORD/EXCEL ============ */
-function parseNivelCellText(raw, colIndex, totalCols){
-  let text = String(raw || '').replace(/\r/g,'').trim();
-  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
-  let firstLine = lines[0] || text;
-  let rest = lines.slice(1).join(' ').trim();
-
-  // "Nombre (N pts): descripción" todo en una línea
-  if(!rest){
-    const colonIdx = firstLine.indexOf(':');
-    if(colonIdx > -1 && colonIdx < 60){
-      rest = firstLine.slice(colonIdx + 1).trim();
-      firstLine = firstLine.slice(0, colonIdx).trim();
-    }
-  }
-
-  let puntos = null;
-  const paren = firstLine.match(/\(([\d.,]+)\s*(pts?|puntos?)?\)/i);
-  if(paren){
-    puntos = parseFloat(paren[1].replace(',', '.'));
-    firstLine = firstLine.replace(paren[0], '').trim();
-  } else {
-    const loose = firstLine.match(/([\d.,]+)\s*(pts?|puntos?)\s*$/i);
-    if(loose){
-      puntos = parseFloat(loose[1].replace(',', '.'));
-      firstLine = firstLine.replace(loose[0], '').trim();
-    }
-  }
-  if(puntos === null || isNaN(puntos)){
-    // sin puntaje detectado: se asume descendente según la posición de columna (la primera = mayor puntaje)
-    puntos = Math.max(0, totalCols - colIndex + 1);
-  }
-  return { id: uid(), name: firstLine || `Nivel ${colIndex}`, description: rest, puntos };
-}
-
-async function importRubricaFromExcelFile(file){
-  const buffer = await file.arrayBuffer();
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
-  const ws = workbook.worksheets[0];
-  if(!ws) return [];
-  const criterios = [];
-  ws.eachRow((row, rowNumber)=>{
-    if(rowNumber === 1) return; // fila de encabezado
-    const criterioName = String(row.getCell(1).text || '').trim();
-    if(!criterioName) return;
-    const totalCols = row.actualCellCount - 1;
-    const niveles = [];
-    for(let c = 2; c <= row.cellCount; c++){
-      const raw = String(row.getCell(c).text || '').trim();
-      if(!raw) continue;
-      niveles.push(parseNivelCellText(raw, c - 1, totalCols));
-    }
-    if(niveles.length > 0) criterios.push({ id: uid(), name: criterioName, niveles });
-  });
-  return criterios;
-}
-
-async function importRubricaFromWordFile(file){
-  const buffer = await file.arrayBuffer();
-  const zip = await JSZip.loadAsync(buffer);
-  const docFile = zip.file('word/document.xml');
-  if(!docFile) return [];
-  const xml = await docFile.async('text');
-  const doc = new DOMParser().parseFromString(xml, 'application/xml');
-  const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-  const rows = Array.from(doc.getElementsByTagNameNS(ns, 'tr'));
-  const criterios = [];
-  const getCellText = (tc)=> Array.from(tc.getElementsByTagNameNS(ns, 't')).map(t=>t.textContent).join('');
-  rows.forEach((tr, idx)=>{
-    if(idx === 0) return; // fila de encabezado
-    const cells = Array.from(tr.getElementsByTagNameNS(ns, 'tc'));
-    if(cells.length === 0) return;
-    const criterioName = getCellText(cells[0]).trim();
-    if(!criterioName) return;
-    const totalCols = cells.length - 1;
-    const niveles = [];
-    for(let c = 1; c < cells.length; c++){
-      const raw = getCellText(cells[c]).trim();
-      if(!raw) continue;
-      niveles.push(parseNivelCellText(raw, c, totalCols));
-    }
-    if(niveles.length > 0) criterios.push({ id: uid(), name: criterioName, niveles });
-  });
-  return criterios;
-}
-
-async function importRubricaFile(){
-  const group = getActiveGroup();
-  const input = document.getElementById('rubricaImportFile');
-  const file = input.files[0];
-  if(!file){ showToast('Selecciona un archivo primero'); return; }
-  const nameInput = document.getElementById('rubricaImportName');
-  const rubricaName = (nameInput && nameInput.value.trim()) || file.name.replace(/\.[^.]+$/, '');
-  const ext = file.name.split('.').pop().toLowerCase();
-
-  showToast('Importando rúbrica…');
-  try{
-    let criterios;
-    if(ext === 'xlsx' || ext === 'xls'){
-      if(typeof ExcelJS === 'undefined'){ showToast('Se necesita conexión a internet para importar Excel.'); return; }
-      criterios = await importRubricaFromExcelFile(file);
-    } else if(ext === 'docx'){
-      if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para importar Word.'); return; }
-      criterios = await importRubricaFromWordFile(file);
-    } else {
-      showToast('Formato no soportado. Usa un archivo .xlsx o .docx');
-      return;
-    }
-    if(!criterios || criterios.length === 0){
-      showToast('No se encontraron criterios en el archivo. Revisa que tenga una tabla con criterios en filas y niveles en columnas.');
-      return;
-    }
-    const rubrica = { id: uid(), name: rubricaName, criterios };
-    group.rubricas.push(rubrica);
-    saveState();
-    renderRubricas(group);
-    showToast(`Rúbrica importada con ${criterios.length} criterio(s) — revisa los puntajes antes de usarla.`);
-  }catch(e){
-    console.error('Error importando rúbrica', e);
-    showToast('No se pudo leer el archivo. Revisa que tenga una tabla válida.');
-  }
-}
-
-function renderRubricaEditor(group, rubrica){
-  const main = document.getElementById('main');
-  const maxNiveles = Math.max(1, ...rubrica.criterios.map(c=>c.niveles.length), 0);
-  main.innerHTML = `
-    ${groupHeaderCard(group)}
-    <div class="card app-font">
-      <div class="flex-between">
-        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(rubrica.name)}</h2>
-        <div class="row" style="gap:6px;">
-          <button class="btn btn-outline btn-sm" onclick="renameRubrica('${rubrica.id}')">✎ Renombrar</button>
-          <button class="btn btn-outline btn-sm" onclick="closeRubricaEditor()">← Volver</button>
-        </div>
-      </div>
-      <div class="row" style="margin-top:8px;">
-        <input type="text" id="newCriterioName" placeholder="Nombre del criterio/indicador (fila nueva)" style="flex:1; min-width:180px;">
-        <button class="btn btn-accent btn-sm" onclick="addCriterio('${rubrica.id}')">+ Agregar fila (criterio)</button>
-      </div>
-    </div>
-
-    ${rubrica.criterios.length === 0 ? '<div class="card app-font"><div class="empty-state">Agrega al menos un criterio para empezar a definir niveles.</div></div>' : `
-    <div class="card app-font">
-      <div style="overflow-x:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th style="min-width:140px;">Criterio / Indicador</th>
-            ${Array.from({length:maxNiveles}, (_,i)=>`<th style="min-width:170px;">Nivel ${i+1}</th>`).join('')}
-          </tr>
-        </thead>
-        <tbody>
-          ${rubrica.criterios.map(c=>{
-            const ordenados = c.niveles.slice().sort((a,b)=>b.puntos-a.puntos);
-            return `
-              <tr>
-                <td style="vertical-align:top;">
-                  <strong>${escapeHtml(c.name)}</strong>
-                  <div class="row" style="gap:4px; margin-top:6px;">
-                    <button class="btn btn-outline btn-sm" onclick="renameCriterio('${rubrica.id}','${c.id}')">✎</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteCriterio('${rubrica.id}','${c.id}')">✕</button>
-                  </div>
-                </td>
-                ${Array.from({length:maxNiveles}, (_,i)=>{
-                  const n = ordenados[i];
-                  if(n){
-                    return `<td style="vertical-align:top;">
-                      <strong>${escapeHtml(n.name)}</strong> <span class="muted">(${n.puntos} pts)</span>
-                      <div class="muted" style="font-size:0.78rem; margin-top:2px;">${escapeHtml(n.description || '')}</div>
-                      <div class="row" style="gap:4px; margin-top:6px;">
-                        <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}','${n.id}')">✎</button>
-                        <button class="btn btn-danger btn-sm" onclick="deleteNivel('${rubrica.id}','${c.id}','${n.id}')">✕</button>
-                      </div>
-                    </td>`;
-                  }
-                  return `<td style="vertical-align:top;">
-                    <button class="btn btn-outline btn-sm" onclick="openNivelForm('${rubrica.id}','${c.id}', null)">+ Agregar</button>
-                  </td>`;
-                }).join('')}
-              </tr>
-            `;
-          }).join('')}
-        </tbody>
-      </table>
-      </div>
-    </div>
-    `}
-  `;
-}
-
-function addCriterio(rubricaId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  if(!rubrica) return;
-  const name = document.getElementById('newCriterioName').value.trim();
-  if(!name){ showToast('Ingresa un nombre para el criterio'); return; }
-  rubrica.criterios.push({ id: uid(), name, niveles: [] });
-  saveState();
-  renderRubricaEditor(group, rubrica);
-}
-function renameRubrica(rubricaId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  if(!rubrica) return;
-  const name = prompt('Nombre de la rúbrica:', rubrica.name);
-  if(!name || !name.trim()) return;
-  rubrica.name = name.trim();
-  saveState();
-  renderRubricaEditor(group, rubrica);
-}
-function renameCriterio(rubricaId, criterioId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
-  if(!criterio) return;
-  const name = prompt('Nombre del criterio:', criterio.name);
-  if(!name || !name.trim()) return;
-  criterio.name = name.trim();
-  saveState();
-  renderRubricaEditor(group, rubrica);
-}
-function deleteCriterio(rubricaId, criterioId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  if(!rubrica) return;
-  if(!confirm('¿Eliminar este criterio y todos sus niveles?')) return;
-  rubrica.criterios = rubrica.criterios.filter(c=>c.id!==criterioId);
-  saveState();
-  renderRubricaEditor(group, rubrica);
-}
-
-function openNivelForm(rubricaId, criterioId, nivelId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
-  if(!criterio) return;
-  const nivel = nivelId ? criterio.niveles.find(n=>n.id===nivelId) : null;
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.id = 'nivelFormOverlay';
-  overlay.innerHTML = `
-    <div class="modal-box app-font">
-      <button class="modal-close" onclick="closeNivelForm()">✕</button>
-      <h2 style="border:none; padding-bottom:0;">${nivel ? 'Editar nivel' : 'Nuevo nivel'}</h2>
-      <p class="muted">Criterio: ${escapeHtml(criterio.name)}</p>
-      <label style="margin-top:8px;">Nombre del nivel</label>
-      <input type="text" id="nivelFormName" placeholder="Ej. Excelente" value="${nivel ? escapeHtml(nivel.name) : ''}">
-      <label style="margin-top:10px;">Descripción</label>
-      <textarea id="nivelFormDescription" placeholder="Qué debe cumplir el estudiante para este nivel...">${nivel ? escapeHtml(nivel.description || '') : ''}</textarea>
-      <label style="margin-top:10px;">Puntos</label>
-      <input type="number" id="nivelFormPuntos" min="0" step="0.5" value="${nivel ? nivel.puntos : 0}">
-      <div class="row" style="margin-top:14px;">
-        <button class="btn btn-accent btn-sm" onclick="saveNivelForm('${rubricaId}','${criterioId}','${nivelId || ''}')">Guardar</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-}
-function closeNivelForm(){
-  const overlay = document.getElementById('nivelFormOverlay');
-  if(overlay) overlay.remove();
-}
-function saveNivelForm(rubricaId, criterioId, nivelId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
-  if(!criterio) return;
-  const name = document.getElementById('nivelFormName').value.trim();
-  const description = document.getElementById('nivelFormDescription').value.trim();
-  const puntos = Number(document.getElementById('nivelFormPuntos').value) || 0;
-  if(!name){ showToast('Ingresa un nombre para el nivel'); return; }
-  if(nivelId){
-    const nivel = criterio.niveles.find(n=>n.id===nivelId);
-    if(nivel){ nivel.name = name; nivel.description = description; nivel.puntos = puntos; }
-  } else {
-    criterio.niveles.push({ id: uid(), name, description, puntos });
-  }
-  saveState();
-  closeNivelForm();
-  renderRubricaEditor(group, rubrica);
-}
-function deleteNivel(rubricaId, criterioId, nivelId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  const criterio = rubrica && rubrica.criterios.find(c=>c.id===criterioId);
-  if(!criterio) return;
-  if(!confirm('¿Eliminar este nivel?')) return;
-  criterio.niveles = criterio.niveles.filter(n=>n.id!==nivelId);
-  saveState();
-  renderRubricaEditor(group, rubrica);
-}
-
-function rubricaMaxPoints(rubrica){
-  return rubrica.criterios.reduce((sum,c)=> sum + (c.niveles.length ? Math.max(...c.niveles.map(n=>n.puntos)) : 0), 0);
-}
-
-async function exportRubricaToExcel(rubricaId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  if(!rubrica) return;
-  if(typeof ExcelJS === 'undefined'){ showToast('Se necesita conexión a internet para exportar.'); return; }
-  if(rubrica.criterios.length === 0){ showToast('Esta rúbrica no tiene criterios'); return; }
-
-  const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet('Rúbrica');
-  const maxNiveles = Math.max(...rubrica.criterios.map(c=>c.niveles.length), 1);
-
-  const headerCell = ws.getCell(1,1);
-  headerCell.value = 'Criterio';
-  headerCell.font = { bold:true, color:{argb:'FFFFFFFF'} };
-  headerCell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
-  for(let i=0;i<maxNiveles;i++){
-    const cell = ws.getCell(1, 2+i);
-    cell.value = `Nivel ${i+1}`;
-    cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
-    cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
-  }
-  rubrica.criterios.forEach((c, ci)=>{
-    const row = 2+ci;
-    ws.getCell(row,1).value = c.name;
-    ws.getCell(row,1).font = { bold:true };
-    ws.getCell(row,1).alignment = { wrapText:true, vertical:'top' };
-    c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).forEach((n,ni)=>{
-      const cell = ws.getCell(row, 2+ni);
-      cell.value = `${n.name} (${n.puntos} pts)\n${n.description||''}`;
-      cell.alignment = { wrapText:true, vertical:'top' };
-    });
-  });
-  ws.getColumn(1).width = 22;
-  for(let i=0;i<maxNiveles;i++){ ws.getColumn(2+i).width = 30; }
-  rubrica.criterios.forEach((c,ci)=>{ ws.getRow(2+ci).height = 80; });
-
-  await downloadWorkbook(workbook, `rubrica_${safeFileName(rubrica.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
-  showToast('Rúbrica exportada a Excel');
-}
-
-async function exportRubricaToWord(rubricaId){
-  const group = getActiveGroup();
-  const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-  if(!rubrica) return;
-  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para exportar.'); return; }
-  if(rubrica.criterios.length === 0){ showToast('Esta rúbrica no tiene criterios'); return; }
-
-  const maxNiveles = Math.max(...rubrica.criterios.map(c=>c.niveles.length), 1);
-  const headers = ['Criterio', ...Array.from({length:maxNiveles}, (_,i)=> `Nivel ${i+1}`)];
-  const rows = rubrica.criterios.map(c=>{
-    const ordenados = c.niveles.slice().sort((a,b)=>b.puntos-a.puntos);
-    const celdas = [c.name];
-    for(let i=0;i<maxNiveles;i++){
-      const n = ordenados[i];
-      celdas.push(n ? `${n.name} (${n.puntos} pts): ${n.description||''}` : '');
-    }
-    return celdas;
-  });
-
-  let body = wordHeading(`Rúbrica: ${rubrica.name}`, 32);
-  body += wordTable(headers, rows, [1800, ...Array.from({length:maxNiveles}, ()=>2800)]);
-
-  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>${body}</w:body>
-</w:document>`;
-
-  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-</Types>`;
-
-  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>`;
-
-  const documentRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`;
-
-  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
-  <w:style w:type="table" w:styleId="TableGrid">
-    <w:name w:val="Table Grid"/>
-    <w:tblPr><w:tblBorders>
-      <w:top w:val="single" w:sz="4" w:color="auto"/>
-      <w:left w:val="single" w:sz="4" w:color="auto"/>
-      <w:bottom w:val="single" w:sz="4" w:color="auto"/>
-      <w:right w:val="single" w:sz="4" w:color="auto"/>
-      <w:insideH w:val="single" w:sz="4" w:color="auto"/>
-      <w:insideV w:val="single" w:sz="4" w:color="auto"/>
-    </w:tblBorders></w:tblPr>
-  </w:style>
-</w:styles>`;
-
-  const zip = new JSZip();
-  zip.file('[Content_Types].xml', contentTypesXml);
-  zip.folder('_rels').file('.rels', relsXml);
-  const wordFolder = zip.folder('word');
-  wordFolder.file('document.xml', documentXml);
-  wordFolder.file('styles.xml', stylesXml);
-  wordFolder.folder('_rels').file('document.xml.rels', documentRelsXml);
-
-  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `rubrica_${safeFileName(rubrica.name)}_${new Date().toISOString().slice(0,10)}.docx`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast('Rúbrica exportada a Word');
-}
-
 /* ============ TAB: CALIFICACIONES ============ */
 let calActiveEvalId = null;
-
-function toggleEvalScoreMode(mode){
-  document.getElementById('evalSimpleScoreWrap').style.display = mode === 'rubrica' ? 'none' : 'grid';
-  document.getElementById('evalRubricaWrap').style.display = mode === 'rubrica' ? 'block' : 'none';
-}
 
 function renderCalificaciones(group){
   if(!group.evaluations) group.evaluations = [];
@@ -4501,15 +4000,6 @@ function renderCalificaciones(group){
           <input type="text" id="evalName" placeholder="Ej. Prueba 1">
         </div>
         <div>
-          <label>Modo de puntaje</label>
-          <select id="evalScoreMode" onchange="toggleEvalScoreMode(this.value)">
-            <option value="simple">Puntaje simple</option>
-            <option value="rubrica">Rúbrica${group.rubricas.length===0 ? ' (crea una primero en la pestaña Rúbricas)' : ''}</option>
-          </select>
-        </div>
-      </div>
-      <div id="evalSimpleScoreWrap" class="grid-2" style="margin-top:10px;">
-        <div>
           <label>Puntaje total</label>
           <input type="number" id="evalTotalScore" min="1" value="100">
         </div>
@@ -4517,24 +4007,6 @@ function renderCalificaciones(group){
           <label>% de exigencia (aprobación = 4.0)</label>
           <input type="number" id="evalExigencia" min="1" max="99" value="60">
         </div>
-      </div>
-      <div id="evalRubricaWrap" style="display:none; margin-top:10px;">
-        <div class="grid-2">
-          <div>
-            <label>Rúbrica a usar</label>
-            <select id="evalRubricaSelect">
-              <option value="">Selecciona una rúbrica</option>
-              ${group.rubricas.map(r=>`<option value="${r.id}">${escapeHtml(r.name)} (máx. ${rubricaMaxPoints(r)} pts)</option>`).join('')}
-            </select>
-          </div>
-          <div>
-            <label>% de exigencia (aprobación = 4.0)</label>
-            <input type="number" id="evalRubricaExigencia" min="1" max="99" value="60">
-          </div>
-        </div>
-        <p class="muted" style="font-size:0.76rem; margin-top:6px;">El puntaje total se calcula automáticamente sumando el nivel máximo de cada criterio de la rúbrica.</p>
-      </div>
-      <div class="grid-2" style="margin-top:10px;">
         <div>
           <label>Grupo de notas (opcional)</label>
           <select id="evalGradeGroup">
@@ -4583,7 +4055,6 @@ function renderCalificaciones(group){
               <strong>${escapeHtml(e.name)}</strong>
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
               ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
-              ${e.rubricaSnapshot ? `<button class="pill" style="margin-left:6px; cursor:pointer; border:1px solid var(--primary-border);" onclick="goToRubrica('${e.rubricaSnapshot.id}')">📋 ${escapeHtml(e.rubricaSnapshot.name)}</button>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
                 ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
               </div>
@@ -4677,38 +4148,18 @@ function renderCalificaciones(group){
 
   document.getElementById('addEvalBtn').addEventListener('click', ()=>{
     const name = document.getElementById('evalName').value.trim();
-    const scoreMode = document.getElementById('evalScoreMode').value;
+    const totalScore = Number(document.getElementById('evalTotalScore').value);
+    const exigencia = Number(document.getElementById('evalExigencia').value);
     const gradeGroupId = document.getElementById('evalGradeGroup').value || null;
     const date = document.getElementById('evalDate').value || null;
     const weightType = document.getElementById('evalWeightType').value;
     const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
-    if(!name){ showToast('Ingresa un nombre para la evaluación'); return; }
-
-    let totalScore, exigencia, rubricaSnapshot = null;
-    if(scoreMode === 'rubrica'){
-      const rubricaId = document.getElementById('evalRubricaSelect').value;
-      const rubrica = group.rubricas.find(r=>r.id===rubricaId);
-      if(!rubrica){ showToast('Selecciona una rúbrica'); return; }
-      if(rubrica.criterios.length === 0 || rubrica.criterios.some(c=>c.niveles.length===0)){
-        showToast('Esa rúbrica necesita al menos un criterio con niveles definidos'); return;
-      }
-      rubricaSnapshot = {
-        id: rubrica.id, name: rubrica.name,
-        criterios: rubrica.criterios.map(c=>({ id:c.id, name:c.name, niveles: c.niveles.map(n=>({id:n.id, name:n.name, description:n.description, puntos:n.puntos})) }))
-      };
-      totalScore = rubricaSnapshot.criterios.reduce((sum,c)=> sum + (c.niveles.length ? Math.max(...c.niveles.map(n=>n.puntos)) : 0), 0);
-      exigencia = Number(document.getElementById('evalRubricaExigencia').value) || 60;
-    } else {
-      totalScore = Number(document.getElementById('evalTotalScore').value);
-      exigencia = Number(document.getElementById('evalExigencia').value);
-      if(!totalScore || totalScore <= 0){ showToast('Ingresa un puntaje total válido'); return; }
-    }
-
+    if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
     group.evaluations.push({
       id: uid(), name, totalScore, exigencia: exigencia || 60,
-      gradeGroupId, date, rubricaSnapshot,
+      gradeGroupId, date,
       weightType, weightPercent: weightPercent || 0,
-      scores: {}, overrides: {}, rubricaScores: {}, periodId: state.activePeriodId
+      scores: {}, overrides: {}, periodId: state.activePeriodId
     });
     saveState();
     renderCalificaciones(group);
@@ -4885,67 +4336,6 @@ function openEvalScores(evalId){
 
 function renderEvalScores(group, evaluation){
   const main = document.getElementById('main');
-
-  if(evaluation.rubricaSnapshot){
-    main.innerHTML = `
-      ${groupHeaderCard(group)}
-      <div class="card app-font">
-        <div class="flex-between">
-          <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(evaluation.name)}</h2>
-          <button class="btn btn-outline btn-sm" onclick="closeEvalScores()">← Volver</button>
-        </div>
-        <p class="muted">Rúbrica: ${escapeHtml(evaluation.rubricaSnapshot.name)} · Puntaje total: ${evaluation.totalScore} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)
-          <button class="btn btn-outline btn-sm" style="margin-left:8px;" onclick="goToRubrica('${evaluation.rubricaSnapshot.id}')">📋 Abrir en Rúbricas</button>
-        </p>
-        <details>
-          <summary class="muted" style="cursor:pointer; font-size:0.82rem;">Ver rúbrica completa (criterios y niveles) ▾</summary>
-          ${evaluation.rubricaSnapshot.criterios.map(c=>`
-            <p style="margin-bottom:2px; margin-top:10px;"><strong>${escapeHtml(c.name)}</strong></p>
-            <table>
-              <thead><tr><th>Nivel</th><th>Descripción</th><th>Puntos</th></tr></thead>
-              <tbody>
-                ${c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).map(n=>`
-                  <tr><td>${escapeHtml(n.name)}</td><td>${escapeHtml(n.description||'')}</td><td>${n.puntos}</td></tr>
-                `).join('')}
-              </tbody>
-            </table>
-          `).join('')}
-        </details>
-      </div>
-      ${group.students.map(s=>{
-        const nota = computeStudentEvalGrade(evaluation, s.id);
-        const seleccion = (evaluation.rubricaScores && evaluation.rubricaScores[s.id]) || {};
-        return `
-          <div class="card app-font">
-            <div class="flex-between">
-              <strong>${escapeHtml(s.name)}</strong>
-              <span class="avg-badge">Nota: ${nota !== null ? nota.toFixed(1) : '-'}</span>
-            </div>
-            <div style="overflow-x:auto; margin-top:8px;">
-            <table>
-              <thead><tr><th>Criterio</th><th>Nivel seleccionado</th></tr></thead>
-              <tbody>
-                ${evaluation.rubricaSnapshot.criterios.map(c=>`
-                  <tr>
-                    <td>${escapeHtml(c.name)}</td>
-                    <td>
-                      <select onchange="saveRubricaScore('${evaluation.id}','${s.id}','${c.id}', this.value)" title="${escapeHtml((c.niveles.find(n=>n.id===seleccion[c.id])||{}).description || '')}">
-                        <option value="">-</option>
-                        ${c.niveles.slice().sort((a,b)=>b.puntos-a.puntos).map(n=>`<option value="${n.id}" ${seleccion[c.id]===n.id?'selected':''}>${escapeHtml(n.name)} (${n.puntos} pts)</option>`).join('')}
-                      </select>
-                    </td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-            </div>
-          </div>
-        `;
-      }).join('')}
-    `;
-    return;
-  }
-
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
@@ -4998,18 +4388,6 @@ function saveEvalScore(evalId, studentId, value){
   if(!ev.scores) ev.scores = {};
   const num = value === '' ? null : Number(value);
   ev.scores[studentId] = (num === null || isNaN(num)) ? null : num;
-  saveState();
-  renderEvalScores(group, ev);
-}
-
-function saveRubricaScore(evalId, studentId, criterioId, nivelId){
-  const group = getActiveGroup();
-  const ev = group.evaluations.find(e=>e.id===evalId);
-  if(!ev) return;
-  if(!ev.rubricaScores) ev.rubricaScores = {};
-  if(!ev.rubricaScores[studentId]) ev.rubricaScores[studentId] = {};
-  if(nivelId){ ev.rubricaScores[studentId][criterioId] = nivelId; }
-  else { delete ev.rubricaScores[studentId][criterioId]; }
   saveState();
   renderEvalScores(group, ev);
 }
