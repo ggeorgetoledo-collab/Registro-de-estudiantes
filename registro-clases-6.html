@@ -1014,7 +1014,10 @@ function computeStudentEvalGrade(evaluation, studentId){
   const score = evaluation.scores ? evaluation.scores[studentId] : null;
   if(score === null || score === undefined) return null;
   const params = getEvalParamsForStudent(evaluation, studentId);
-  return computeChileGrade(score, params.totalScore, params.exigencia);
+  let nota = computeChileGrade(score, params.totalScore, params.exigencia);
+  const decimasAplicadas = evaluation.decimasAplicadas ? evaluation.decimasAplicadas[studentId] : null;
+  if(decimasAplicadas){ nota = Math.min(7.0, Math.round((nota + decimasAplicadas / 10) * 10) / 10); }
+  return nota;
 }
 
 function getEvalParamsForStudent(evaluation, studentId){
@@ -1693,6 +1696,8 @@ function openStudentDetail(studentId){
 
   const gradeResult = computeStudentFinalGrade(group, studentId);
   const decimasTotal = computeStudentDecimasTotal(group, studentId);
+  const decimasApplied = computeStudentDecimasApplied(group, studentId);
+  const decimasAvailable = computeStudentDecimasAvailable(group, studentId);
   const entregas = getActiveEntregas(group);
   const entregaStats = computeStudentEntregaStats(group, studentId, entregas);
   const entregaTotal = entregas.length;
@@ -1722,7 +1727,8 @@ function openStudentDetail(studentId){
       ${evals.length === 0 ? '<p class="muted" style="font-size:0.82rem;">Sin evaluaciones registradas.</p>' :
         evals.map(e=>{
           const nota = computeStudentEvalGrade(e, studentId);
-          return `<div class="stat-row"><span>${escapeHtml(e.name)}</span><strong style="${nota!==null && nota<4 ? 'color:var(--danger);' : ''}">${nota !== null ? nota.toFixed(1) : '-'}</strong></div>`;
+          const decimasEnEsta = e.decimasAplicadas ? e.decimasAplicadas[studentId] : null;
+          return `<div class="stat-row"><span>${escapeHtml(e.name)}${decimasEnEsta ? ` <span class="muted" style="font-size:0.74rem;">(+${decimasEnEsta} déc.)</span>` : ''}</span><strong style="${nota!==null && nota<4 ? 'color:var(--danger);' : ''}">${nota !== null ? nota.toFixed(1) : '-'}</strong></div>`;
         }).join('')
       }
       <div class="stat-row"><span>Promedio simple</span><strong>${gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'}</strong></div>
@@ -1734,8 +1740,31 @@ function openStudentDetail(studentId){
       <div class="stat-row"><span>No entregada</span><strong style="color:${ENTREGA_ESTADOS.no_entregada.color.text};">${entregaStats.no_entregada}</strong></div>
       <div class="stat-row"><span>% cumplimiento</span><strong style="${entregaCumplimiento!==null && entregaCumplimiento<60 ? 'color:var(--danger);' : ''}">${entregaCumplimiento !== null ? entregaCumplimiento + '%' : '-'}</strong></div>
       <hr class="divider">
+      <p class="muted" style="margin-bottom:4px; font-weight:600;">Décimas</p>
+      <div class="stat-row"><span>Acumuladas</span><strong style="color:var(--primary);">${decimasTotal}</strong></div>
+      <div class="stat-row"><span>Ya aplicadas a notas</span><strong>${decimasApplied}</strong></div>
+      <div class="stat-row"><span>Disponibles</span><strong style="color:var(--success);">${decimasAvailable}</strong></div>
+      ${evals.length > 0 && decimasAvailable > 0 ? `
+        <div class="row" style="margin-top:8px; gap:6px;">
+          <select id="decimasApplyEval" style="flex:1; min-width:140px;">
+            ${evals.map(e=>`<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}
+          </select>
+          <input type="number" id="decimasApplyAmount" step="1" min="1" max="${decimasAvailable}" value="1" style="width:70px;">
+          <button class="btn btn-accent btn-sm" onclick="applyDecimasToEval('${studentId}')">Aplicar</button>
+        </div>
+        <p class="muted" style="font-size:0.72rem; margin-top:4px;">1 décima = 0,1 en la nota (ej. 3 décimas suman +0,3).</p>
+      ` : (evals.length === 0 ? '<p class="muted" style="font-size:0.78rem;">Crea una evaluación en Calificaciones para poder aplicarle décimas.</p>' : '')}
+      ${evals.filter(e=> e.decimasAplicadas && e.decimasAplicadas[studentId]).length > 0 ? `
+        <p class="muted" style="font-size:0.78rem; margin-top:8px; margin-bottom:2px;">Aplicadas actualmente:</p>
+        ${evals.filter(e=> e.decimasAplicadas && e.decimasAplicadas[studentId]).map(e=>`
+          <div class="stat-row">
+            <span>${escapeHtml(e.name)}: ${e.decimasAplicadas[studentId]} décima(s)</span>
+            <button class="btn btn-outline btn-sm" onclick="removeDecimasFromEval('${studentId}','${e.id}')">↩️ Revertir</button>
+          </div>
+        `).join('')}
+      ` : ''}
+      <hr class="divider">
       <p class="muted" style="margin-bottom:4px; font-weight:600;">Otros</p>
-      <div class="stat-row"><span>Décimas acumuladas</span><strong style="color:var(--primary);">+${decimasTotal.toFixed(1)}</strong></div>
       <div class="stat-row">
         <span>Registros en bitácora</span>
         <strong>${getActiveBitacora(group).filter(e=> (e.studentIds||[]).includes(studentId)).length}</strong>
@@ -2982,6 +3011,46 @@ function computeStudentDecimasTotal(group, studentId){
   return Math.round(total * 10) / 10;
 }
 
+function computeStudentDecimasApplied(group, studentId){
+  let total = 0;
+  getActiveEvaluations(group).forEach(ev=>{
+    const amt = ev.decimasAplicadas ? ev.decimasAplicadas[studentId] : null;
+    if(amt) total += amt;
+  });
+  return Math.round(total * 10) / 10;
+}
+
+function computeStudentDecimasAvailable(group, studentId){
+  return Math.round((computeStudentDecimasTotal(group, studentId) - computeStudentDecimasApplied(group, studentId)) * 10) / 10;
+}
+
+function applyDecimasToEval(studentId){
+  const group = getActiveGroup();
+  const evalId = document.getElementById('decimasApplyEval').value;
+  const amount = Number(document.getElementById('decimasApplyAmount').value);
+  if(!evalId){ showToast('Selecciona una evaluación'); return; }
+  if(!amount || amount <= 0){ showToast('Ingresa una cantidad de décimas válida'); return; }
+  const available = computeStudentDecimasAvailable(group, studentId);
+  if(amount > available + 0.001){ showToast('No tiene suficientes décimas disponibles (dispone de ' + available.toFixed(1) + ')'); return; }
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  if(!ev.decimasAplicadas) ev.decimasAplicadas = {};
+  ev.decimasAplicadas[studentId] = Math.round(((ev.decimasAplicadas[studentId] || 0) + amount) * 10) / 10;
+  saveState();
+  openStudentDetail(studentId);
+  showToast('Décimas aplicadas a "' + ev.name + '"');
+}
+
+function removeDecimasFromEval(studentId, evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev || !ev.decimasAplicadas) return;
+  delete ev.decimasAplicadas[studentId];
+  saveState();
+  openStudentDetail(studentId);
+  showToast('Se revirtió la aplicación de décimas — volvieron a estar disponibles');
+}
+
 let decActiveSessionId = null;
 
 function renderDecimas(group){
@@ -3032,7 +3101,7 @@ function renderDecimas(group){
           ${group.students.map(s=>`
             <tr>
               <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
-              <td class="avg-badge">+${computeStudentDecimasTotal(group, s.id).toFixed(1)}</td>
+              <td class="avg-badge">${computeStudentDecimasTotal(group, s.id)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -3091,9 +3160,9 @@ function renderDecimaValues(group, session){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Décimas · ${formatDate(session.date)}${session.note ? ' · ' + escapeHtml(session.note) : ''}</h2>
         <button class="btn btn-outline btn-sm" onclick="closeDecimaValues()">← Volver</button>
       </div>
-      <p class="muted">Ingresa el valor de décimas para cada estudiante (por ejemplo 0.1, 0.3, -0.2).</p>
+      <p class="muted">Ingresa la cantidad de décimas para cada estudiante (por ejemplo 1, 3, -2). 1 décima equivale a 0,1 en la nota cuando se aplique.</p>
       <div class="row" style="margin-bottom:10px;">
-        <input type="number" id="decimaBulkValue" step="0.1" placeholder="Valor" style="width:100px;">
+        <input type="number" id="decimaBulkValue" step="1" placeholder="Cantidad" style="width:100px;">
         <button class="btn btn-accent btn-sm" onclick="applyDecimaToAll('${session.id}')">✅ Asignar a todo el curso</button>
       </div>
       <div style="overflow-x:auto;">
@@ -3105,7 +3174,7 @@ function renderDecimaValues(group, session){
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
-                <td><input type="number" class="score-select" style="width:90px;" step="0.1"
+                <td><input type="number" class="score-select" style="width:90px;" step="1"
                     value="${val !== null && val !== undefined ? val : ''}"
                     onchange="saveDecimaValue('${session.id}','${s.id}', this.value)"></td>
               </tr>
@@ -3237,7 +3306,7 @@ function renderEntregas(group){
         </label>
         <div id="entDecimasWrap" style="display:none; margin-top:8px;">
           <label class="muted" style="font-size:0.74rem;">Cantidad de décimas</label>
-          <input type="number" id="entDecimasValor" step="0.1" value="0.3">
+          <input type="number" id="entDecimasValor" step="1" value="1">
           <p class="muted" style="font-size:0.74rem; margin-top:4px;">Se sumará automáticamente en Décimas cuando marques a un estudiante como "En plazo" (incluida la excepción). Si lo desmarcas, se quita.</p>
         </div>
       </div>
@@ -3607,7 +3676,7 @@ function openEntregaEditForm(id){
       </label>
       <div id="entEditDecimasWrap" style="display:${entrega.decimasBonus ? 'block' : 'none'}; margin-top:8px;">
         <label class="muted" style="font-size:0.74rem;">Cantidad de décimas</label>
-        <input type="number" id="entEditDecimasValor" step="0.1" value="${entrega.decimasBonus || 0.3}">
+        <input type="number" id="entEditDecimasValor" step="1" value="${entrega.decimasBonus || 1}">
       </div>
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveEntregaEditForm('${id}')">Guardar</button>
@@ -5194,7 +5263,7 @@ async function exportStudentHistoryToWord(studentId){
       ['Ausente', String(stats.absentCount)],
       ['Puntaje obtenido', `${stats.obtained} / ${stats.maxPossible}`],
       ['% de logro', stats.percent !== null ? stats.percent + '%' : '-'],
-      ['Décimas acumuladas', '+' + decimasTotal.toFixed(1)],
+      ['Décimas acumuladas', String(decimasTotal)],
       ['Promedio simple (calificaciones)', gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'],
       ['Nota final', gradeResult.finalGrade !== null ? gradeResult.finalGrade.toFixed(1) : '-'],
     ],
@@ -5244,7 +5313,7 @@ async function exportStudentHistoryToWord(studentId){
   } else {
     body += wordTable(
       ['Fecha','Motivo','Valor'],
-      decimaSessions.map(d=> [formatDate(d.date), d.note || '', '+' + (d.values[studentId]).toFixed(1)]),
+      decimaSessions.map(d=> [formatDate(d.date), d.note || '', String(d.values[studentId])]),
       [1500,2500,1000]
     );
   }
