@@ -1693,6 +1693,11 @@ function openStudentDetail(studentId){
 
   const gradeResult = computeStudentFinalGrade(group, studentId);
   const decimasTotal = computeStudentDecimasTotal(group, studentId);
+  const entregas = getActiveEntregas(group);
+  const entregaStats = computeStudentEntregaStats(group, studentId, entregas);
+  const entregaTotal = entregas.length;
+  const entregaCumplimiento = entregaTotal > 0 ? Math.round(((entregaStats.en_plazo * 1 + entregaStats.fuera_plazo * 0.5) / entregaTotal) * 100) : null;
+  const evals = getActiveEvaluations(group);
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -1701,7 +1706,7 @@ function openStudentDetail(studentId){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="closeStudentDetail()">✕</button>
       <h2 style="border:none; padding-bottom:0; margin-bottom:2px;">${escapeHtml(student.name)}</h2>
-      <div class="muted" style="margin-bottom:6px;">${escapeHtml(group.name)}</div>
+      <div class="muted" style="margin-bottom:6px;">${escapeHtml(group.name)} — Resumen completo</div>
       <div class="pie-chart" style="background:${pieBg};"></div>
       <div style="text-align:center; font-size:1.4rem; font-weight:800; color:var(--primary); font-family:'Poppins',sans-serif;">
         ${percent === null ? 'Sin datos aún' : percent + '% de logro en clases'}
@@ -1712,18 +1717,32 @@ function openStudentDetail(studentId){
       <div class="stat-row"><span>Presente</span><strong style="color:var(--success);">${stats.presentCount}</strong></div>
       <div class="stat-row"><span>Ausente</span><strong style="color:var(--danger);">${stats.absentCount}</strong></div>
       <div class="stat-row"><span>Puntaje obtenido</span><strong>${stats.obtained} / ${stats.maxPossible}</strong></div>
-      <div class="stat-row"><span>Décimas acumuladas</span><strong style="color:var(--primary);">+${decimasTotal.toFixed(1)}</strong></div>
       <hr class="divider">
       <p class="muted" style="margin-bottom:4px; font-weight:600;">Calificaciones</p>
+      ${evals.length === 0 ? '<p class="muted" style="font-size:0.82rem;">Sin evaluaciones registradas.</p>' :
+        evals.map(e=>{
+          const nota = computeStudentEvalGrade(e, studentId);
+          return `<div class="stat-row"><span>${escapeHtml(e.name)}</span><strong style="${nota!==null && nota<4 ? 'color:var(--danger);' : ''}">${nota !== null ? nota.toFixed(1) : '-'}</strong></div>`;
+        }).join('')
+      }
       <div class="stat-row"><span>Promedio simple</span><strong>${gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'}</strong></div>
       <div class="stat-row"><span>Nota final</span><strong style="color:var(--primary); font-size:1.1rem;">${gradeResult.finalGrade !== null ? gradeResult.finalGrade.toFixed(1) : '-'}</strong></div>
       <hr class="divider">
+      <p class="muted" style="margin-bottom:4px; font-weight:600;">Entregas</p>
+      <div class="stat-row"><span>En plazo</span><strong style="color:${ENTREGA_ESTADOS.en_plazo.color.text};">${entregaStats.en_plazo}</strong></div>
+      <div class="stat-row"><span>Fuera de plazo</span><strong style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text};">${entregaStats.fuera_plazo}</strong></div>
+      <div class="stat-row"><span>No entregada</span><strong style="color:${ENTREGA_ESTADOS.no_entregada.color.text};">${entregaStats.no_entregada}</strong></div>
+      <div class="stat-row"><span>% cumplimiento</span><strong style="${entregaCumplimiento!==null && entregaCumplimiento<60 ? 'color:var(--danger);' : ''}">${entregaCumplimiento !== null ? entregaCumplimiento + '%' : '-'}</strong></div>
+      <hr class="divider">
+      <p class="muted" style="margin-bottom:4px; font-weight:600;">Otros</p>
+      <div class="stat-row"><span>Décimas acumuladas</span><strong style="color:var(--primary);">+${decimasTotal.toFixed(1)}</strong></div>
       <div class="stat-row">
         <span>Registros en bitácora</span>
         <strong>${getActiveBitacora(group).filter(e=> (e.studentIds||[]).includes(studentId)).length}</strong>
       </div>
       <div class="row" style="justify-content:center; margin-top:8px;">
         <button class="btn btn-outline btn-sm" onclick="closeStudentDetail(); bitacoraStudentFilter='${studentId}'; goToTab('bitacora');">Ver su bitácora</button>
+        <button class="btn btn-outline btn-sm" onclick="closeStudentDetail(); goToTab('entregas');">Ver entregas</button>
       </div>
       <div class="row" style="justify-content:center; margin-top:8px;">
         <button class="btn btn-ink btn-sm" onclick="exportStudentHistoryToWord('${studentId}')">⬇️ Exportar historial completo (Word)</button>
