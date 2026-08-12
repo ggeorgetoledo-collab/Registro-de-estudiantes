@@ -2700,7 +2700,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
               <tr>
                 <td>${escapeHtml(s.name)}</td>
                 <td><input type="checkbox" data-attendance-student="${s.id}" style="width:auto;" ${wasPresent ? 'checked' : ''}></td>
-                ${entregasDelDia.map(entrega=>`<td>${entregaCellHtml(entrega, s.id)}</td>`).join('')}
+                ${entregasDelDia.map(entrega=>`<td data-entrega-cell="${entrega.id}::${s.id}">${entregaCellHtml(entrega, s.id)}</td>`).join('')}
                 <td><textarea data-student="${s.id}" data-obs="1" placeholder="Observaciones...">${prevEntry ? escapeHtml(prevEntry.observaciones || '') : ''}</textarea></td>
               </tr>
             `;
@@ -2750,7 +2750,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 </td>
                 `;
               }).join('')}
-              ${entregasDelDia.map(entrega=>`<td>${entregaCellHtml(entrega, s.id)}</td>`).join('')}
+              ${entregasDelDia.map(entrega=>`<td data-entrega-cell="${entrega.id}::${s.id}">${entregaCellHtml(entrega, s.id)}</td>`).join('')}
               <td>
                 <textarea data-student="${s.id}" data-obs="1" placeholder="Observaciones...">${prevEntry ? escapeHtml(prevEntry.observaciones || '') : ''}</textarea>
               </td>
@@ -3589,19 +3589,27 @@ function markAllEntregaDelivered(entregaId){
   showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[estado].label + '"');
 }
 
+function refreshEntregaInlineCell(entregaId, studentId){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===entregaId);
+  if(!entrega) return;
+  const cell = document.querySelector(`td[data-entrega-cell="${entregaId}::${studentId}"]`);
+  if(cell) cell.innerHTML = entregaCellHtml(entrega, studentId);
+}
 function toggleEntregaDeliveredInline(entregaId, studentId){
   applyEntregaToggle(entregaId, studentId);
-  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  refreshEntregaInlineCell(entregaId, studentId);
 }
 function markEntregaExceptionInline(entregaId, studentId){
   applyEntregaException(entregaId, studentId);
-  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  refreshEntregaInlineCell(entregaId, studentId);
   showToast('Marcado como en plazo (excepción)');
 }
 function markAllEntregaDeliveredInline(entregaId){
   const estado = applyEntregaMarkAll(entregaId);
   if(!estado) return;
-  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  const group = getActiveGroup();
+  group.students.forEach(s=> refreshEntregaInlineCell(entregaId, s.id));
   showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[estado].label + '"');
 }
 
