@@ -1577,8 +1577,13 @@ function renderEstudiantes(group){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Estudiantes (${group.students.length})</h2>
         <div class="row" style="gap:6px;">
           <button class="btn btn-outline btn-sm" onclick="exportEstudiantesToExcel(getActiveGroup())">⬇️ Exportar lista</button>
-          <button class="btn btn-ink btn-sm" onclick="exportAllToExcel(getActiveGroup())">⬇️ Exportar TODO el curso</button>
         </div>
+      </div>
+      <p class="muted" style="margin-top:6px; margin-bottom:4px;">Exportar todo el curso:</p>
+      <div class="row">
+        <button class="btn btn-ink btn-sm" onclick="exportAllToExcel(getActiveGroup())" title="Una hoja por categoría (asistencia, calificaciones, etc.)">📊 Excel (por categoría)</button>
+        <button class="btn btn-ink btn-sm" onclick="exportAllToExcelPerStudent(getActiveGroup())" title="Una hoja por estudiante, con todos sus datos">📊 Excel (por estudiante)</button>
+        <button class="btn btn-ink btn-sm" onclick="exportAllStudentsToWord(getActiveGroup())" title="Un estudiante por página, para imprimir y entregar">📄 Word (por estudiante)</button>
       </div>
       ${group.students.length === 0 ? '<div class="empty-state">Aún no hay estudiantes en este grupo.</div>' :
         group.students.map(s=>`
@@ -1793,6 +1798,27 @@ function changeIndicadoresThemeFilter(tema){
   renderIndicadores(getActiveGroup());
 }
 
+function temaSelectHtml(selectId, textId, existingTemas, currentValue){
+  const isCustom = currentValue && !existingTemas.includes(currentValue);
+  return `
+    <select id="${selectId}" onchange="document.getElementById('${textId}').style.display = this.value==='__new__' ? 'block' : 'none';">
+      <option value="">Ninguna</option>
+      ${existingTemas.map(t=>`<option value="${escapeHtml(t)}" ${currentValue===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+      <option value="__new__" ${isCustom ? 'selected' : ''}>+ Nueva unidad/tema...</option>
+    </select>
+    <input type="text" id="${textId}" placeholder="Nombre de la nueva unidad/tema" style="margin-top:6px; display:${isCustom ? 'block' : 'none'};" value="${isCustom ? escapeHtml(currentValue) : ''}">
+  `;
+}
+function readTemaSelectValue(selectId, textId){
+  const sel = document.getElementById(selectId);
+  if(!sel) return '';
+  if(sel.value === '__new__'){
+    const txt = document.getElementById(textId);
+    return txt ? txt.value.trim() : '';
+  }
+  return sel.value;
+}
+
 function renderIndicadores(group){
   const main = document.getElementById('main');
   const themes = [...new Set(group.indicators.map(i=>i.tema).filter(Boolean))];
@@ -1813,7 +1839,7 @@ function renderIndicadores(group){
         </div>
         <div style="flex:1; min-width:160px;">
           <label>Unidad / tema (opcional)</label>
-          <input type="text" id="newIndicatorTema" placeholder="Ej. Unidad 1">
+          ${temaSelectHtml('newIndicatorTemaSelect', 'newIndicatorTemaNew', themes, '')}
         </div>
         <div style="align-self:flex-end;">
           <button class="btn btn-accent" id="addIndicatorBtn">+ Agregar</button>
@@ -1845,13 +1871,13 @@ function renderIndicadores(group){
   document.getElementById('addIndicatorBtn').addEventListener('click', ()=>{
     const input = document.getElementById('newIndicatorName');
     const levelsInput = document.getElementById('newIndicatorLevels');
-    const temaInput = document.getElementById('newIndicatorTema');
     const name = input.value.trim();
     if(!name) return;
     let levels = parseInt(levelsInput.value, 10);
     if(!levels || levels < 2) levels = 2;
     if(levels > 10) levels = 10;
-    group.indicators.push({id: uid(), name, levels, tema: temaInput.value.trim()});
+    const tema = readTemaSelectValue('newIndicatorTemaSelect', 'newIndicatorTemaNew');
+    group.indicators.push({id: uid(), name, levels, tema});
     saveState();
     renderIndicadores(group);
     showToast('Indicador agregado');
@@ -1864,6 +1890,7 @@ function openIndicatorForm(id){
   const group = getActiveGroup();
   const ind = group.indicators.find(i=>i.id===id);
   if(!ind) return;
+  const themes = [...new Set(group.indicators.map(i=>i.tema).filter(Boolean))];
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'indicatorFormOverlay';
@@ -1876,7 +1903,7 @@ function openIndicatorForm(id){
       <label style="margin-top:10px;">Niveles de logro (2 a 10)</label>
       <input type="number" id="indicatorFormLevels" min="2" max="10" value="${ind.levels || 5}">
       <label style="margin-top:10px;">Unidad / tema (opcional)</label>
-      <input type="text" id="indicatorFormTema" value="${escapeHtml(ind.tema || '')}">
+      ${temaSelectHtml('indicatorFormTemaSelect', 'indicatorFormTemaNew', themes, ind.tema || '')}
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveIndicatorForm('${id}')">Guardar</button>
       </div>
@@ -1894,7 +1921,7 @@ function saveIndicatorForm(id){
   if(!ind) return;
   const name = document.getElementById('indicatorFormName').value.trim();
   let levels = parseInt(document.getElementById('indicatorFormLevels').value, 10);
-  ind.tema = document.getElementById('indicatorFormTema').value.trim();
+  ind.tema = readTemaSelectValue('indicatorFormTemaSelect', 'indicatorFormTemaNew');
   if(name) ind.name = name;
   if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
   saveState();
@@ -2482,6 +2509,7 @@ function changeRegistrarThemeFilter(tema){
 
 function openQuickIndicatorForm(){
   const group = getActiveGroup();
+  const themes = [...new Set(group.indicators.map(i=>i.tema).filter(Boolean))];
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'quickIndicatorFormOverlay';
@@ -2492,7 +2520,7 @@ function openQuickIndicatorForm(){
       <label style="margin-top:8px;">Nombre</label>
       <input type="text" id="quickIndName" placeholder="Ej. Participación en clase">
       <label style="margin-top:10px;">Unidad / tema (opcional)</label>
-      <input type="text" id="quickIndTema" placeholder="Ej. Unidad 1: Fracciones">
+      ${temaSelectHtml('quickIndTemaSelect', 'quickIndTemaNew', themes, '')}
       <label style="margin-top:10px;">Niveles de logro (2 a 10)</label>
       <input type="number" id="quickIndLevels" min="2" max="10" value="5">
       <div class="row" style="margin-top:14px;">
@@ -2509,7 +2537,7 @@ function closeQuickIndicatorForm(){
 function saveQuickIndicatorForm(){
   const group = getActiveGroup();
   const name = document.getElementById('quickIndName').value.trim();
-  const tema = document.getElementById('quickIndTema').value.trim();
+  const tema = readTemaSelectValue('quickIndTemaSelect', 'quickIndTemaNew');
   let levels = parseInt(document.getElementById('quickIndLevels').value, 10);
   if(!name){ showToast('Ingresa un nombre para el indicador'); return; }
   if(!levels || levels < 2) levels = 2;
@@ -2895,7 +2923,10 @@ function renderHistorial(group){
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Historial de clases (${sessions.length})</h2>
-        <button class="btn btn-ink btn-sm" id="exportBtn" title="Con internet: .xlsx con colores. Sin internet: .csv simple">⬇️ Exportar a Excel</button>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-ink btn-sm" id="exportBtn" title="Con internet: .xlsx con colores. Sin internet: .csv simple">⬇️ Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="exportHistorialToWord(getActiveGroup())">⬇️ Word</button>
+        </div>
       </div>
       ${sinProcesoCount > 0 ? `<p class="muted" style="color:var(--danger); margin-top:6px; margin-bottom:0;">⚠️ ${sinProcesoCount} clase(s) sin proceso asignado</p>` : (sessions.length > 0 ? '<p class="muted" style="color:var(--success); margin-top:6px; margin-bottom:0;">✅ Todas las clases tienen un proceso asignado</p>' : '')}
     </div>
@@ -3093,7 +3124,10 @@ function renderDecimas(group){
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Total de décimas por estudiante</h2>
-        <button class="btn btn-outline btn-sm" onclick="exportDecimasToExcel(getActiveGroup())">⬇️ Exportar</button>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="exportDecimasToExcel(getActiveGroup())">⬇️ Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="exportDecimasToWord(getActiveGroup())">⬇️ Word</button>
+        </div>
       </div>
       <table>
         <thead><tr><th>Estudiante</th><th>Total décimas</th></tr></thead>
@@ -3285,7 +3319,11 @@ function renderEntregas(group){
           <input type="date" id="entDate" value="${today}">
         </div>
       </div>
-      <p class="muted" style="margin-top:6px;">Proceso: <strong style="color:var(--primary);">${group.activeProcessId ? escapeHtml((group.processes.find(p=>p.id===group.activeProcessId)||{}).name || '—') : 'Ninguno (todos los procesos)'}</strong> (cámbialo arriba en "Más opciones")</p>
+      <label style="margin-top:6px;">Proceso</label>
+      <select id="entProcess">
+        <option value="">Ninguno (sin proceso)</option>
+        ${getActiveProcesses(group).map(p=>`<option value="${p.id}" ${p.id===group.activeProcessId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+      </select>
       <div style="margin-top:10px;">
         <label>Plazo y recordatorio (opcional — activa una alarma si quedan pendientes)</label>
         <div class="grid-2">
@@ -3347,7 +3385,8 @@ function renderEntregas(group){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Resumen por estudiante</h2>
         <div class="row" style="gap:6px;">
           <button class="btn btn-ink btn-sm" onclick="openEntregasToGradeForm()">🎯 Convertir en nota</button>
-          <button class="btn btn-outline btn-sm" onclick="exportEntregasToExcel(getActiveGroup())">⬇️ Exportar</button>
+          <button class="btn btn-outline btn-sm" onclick="exportEntregasToExcel(getActiveGroup())">⬇️ Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="exportEntregasToWord(getActiveGroup())">⬇️ Word</button>
         </div>
       </div>
       <table>
@@ -3384,8 +3423,9 @@ function renderEntregas(group){
     const plazoHora = document.getElementById('entPlazoHora').value || null;
     const asignaDecimas = document.getElementById('entAsignaDecimas').checked;
     const decimasBonus = asignaDecimas ? (Number(document.getElementById('entDecimasValor').value) || 0) : null;
+    const processId = document.getElementById('entProcess').value || null;
     if(!name){ showToast('Ingresa el nombre de la guía o trabajo'); return; }
-    const entrega = { id: uid(), name, date, plazoFecha, plazoHora, decimasBonus, decimaSessionId: null, periodId: state.activePeriodId, processId: group.activeProcessId, estados: {} };
+    const entrega = { id: uid(), name, date, plazoFecha, plazoHora, decimasBonus, decimaSessionId: null, periodId: state.activePeriodId, processId, estados: {} };
     group.entregas.push(entrega);
     saveState();
     entregaActiveId = entrega.id;
@@ -4015,6 +4055,11 @@ function deleteBitacoraEntry(id){
 
 /* ============ TAB: CALIFICACIONES ============ */
 let calActiveEvalId = null;
+let calFormTab = null;
+function toggleCalFormTab(tab){
+  calFormTab = (calFormTab === tab) ? null : tab;
+  renderCalificaciones(getActiveGroup());
+}
 
 function renderCalificaciones(group){
   if(!group.evaluations) group.evaluations = [];
@@ -4035,6 +4080,13 @@ function renderCalificaciones(group){
     ${groupHeaderCard(group)}
 
     <div class="card app-font">
+      <div class="row">
+        <button class="btn ${calFormTab==='evaluacion' ? 'btn-accent' : 'btn-outline'} btn-sm" onclick="toggleCalFormTab('evaluacion')">+ Nueva evaluación</button>
+        <button class="btn ${calFormTab==='grupo' ? 'btn-accent' : 'btn-outline'} btn-sm" onclick="toggleCalFormTab('grupo')">+ Nuevo grupo de notas</button>
+      </div>
+
+      ${calFormTab === 'grupo' ? `
+      <hr class="divider">
       <h2>Grupos de notas (para notas sumativas)</h2>
       <p class="muted">Agrupa varias evaluaciones para que su promedio forme una sola "nota sumativa" dentro de la nota final. Cada grupo tiene su propio color.</p>
       <div class="grid-2">
@@ -4057,28 +4109,10 @@ function renderCalificaciones(group){
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addGradeGroupBtn">+ Crear grupo de notas</button>
       </div>
-      <hr class="divider">
-      ${gradeGroups.length === 0 ? '<div class="empty-state">No has creado grupos de notas.</div>' :
-        gradeGroups.map(gg=>{
-          const color = gradeGroupColor(gg.id);
-          const memberCount = evaluations.filter(e=>e.gradeGroupId===gg.id).length;
-          return `
-            <div class="student-list-item" style="align-items:flex-start; border-left:4px solid ${color.text}; padding-left:8px;">
-              <div>
-                <strong style="color:${color.text};">${escapeHtml(gg.name)}</strong>
-                <div class="muted">${memberCount} evaluación(es) · ${gg.weightType === 'weighted' ? 'Pondera ' + gg.weightPercent + '%' : 'Promedio simple'}</div>
-              </div>
-              <div class="row" style="gap:6px;">
-                <button class="btn btn-outline btn-sm" onclick="editGradeGroup('${gg.id}')">Editar</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteGradeGroup('${gg.id}')">Eliminar</button>
-              </div>
-            </div>
-          `;
-        }).join('')
-      }
-    </div>
+      ` : ''}
 
-    <div class="card app-font">
+      ${calFormTab === 'evaluacion' ? `
+      <hr class="divider">
       <h2>Agregar evaluación</h2>
       <div class="grid-2">
         <div>
@@ -4104,6 +4138,13 @@ function renderCalificaciones(group){
           <label>Fecha (opcional — aparece en el resumen semanal)</label>
           <input type="date" id="evalDate">
         </div>
+        <div>
+          <label>Proceso (opcional)</label>
+          <select id="evalProcess">
+            <option value="">Ninguno (sin proceso)</option>
+            ${getActiveProcesses(group).map(p=>`<option value="${p.id}" ${p.id===group.activeProcessId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+          </select>
+        </div>
       </div>
       <div id="evalStandaloneWeight">
         <div class="grid-2" style="margin-top:10px;">
@@ -4124,6 +4165,28 @@ function renderCalificaciones(group){
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addEvalBtn">+ Agregar evaluación</button>
       </div>
+      ` : ''}
+
+      ${gradeGroups.length > 0 ? `
+      <hr class="divider">
+      <p class="muted" style="font-weight:600; margin-bottom:4px;">Grupos de notas existentes</p>
+      ${gradeGroups.map(gg=>{
+          const color = gradeGroupColor(gg.id);
+          const memberCount = evaluations.filter(e=>e.gradeGroupId===gg.id).length;
+          return `
+            <div class="student-list-item" style="align-items:flex-start; border-left:4px solid ${color.text}; padding-left:8px;">
+              <div>
+                <strong style="color:${color.text};">${escapeHtml(gg.name)}</strong>
+                <div class="muted">${memberCount} evaluación(es) · ${gg.weightType === 'weighted' ? 'Pondera ' + gg.weightPercent + '%' : 'Promedio simple'}</div>
+              </div>
+              <div class="row" style="gap:6px;">
+                <button class="btn btn-outline btn-sm" onclick="editGradeGroup('${gg.id}')">Editar</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteGradeGroup('${gg.id}')">Eliminar</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      ` : ''}
     </div>
 
     <div class="card app-font">
@@ -4141,6 +4204,7 @@ function renderCalificaciones(group){
               <strong>${escapeHtml(e.name)}</strong>
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
               ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
+              ${e.processId ? `<span class="pill" style="margin-left:6px;">📂 ${escapeHtml((group.processes.find(p=>p.id===e.processId)||{}).name || '—')}</span>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
                 ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
               </div>
@@ -4159,7 +4223,10 @@ function renderCalificaciones(group){
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Resumen de notas</h2>
-        <button class="btn btn-ink btn-sm" id="exportGradesBtn">⬇️ Exportar a Excel (editable)</button>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-ink btn-sm" id="exportGradesBtn">⬇️ Excel (editable)</button>
+          <button class="btn btn-outline btn-sm" onclick="exportCalificacionesToWord(getActiveGroup())">⬇️ Word</button>
+        </div>
       </div>
       <div style="overflow-x:auto;">
       <table>
@@ -4205,52 +4272,67 @@ function renderCalificaciones(group){
   `;
 
   const weightTypeSelect = document.getElementById('evalWeightType');
-  weightTypeSelect.addEventListener('change', ()=>{
-    document.getElementById('evalWeightPercentWrap').style.display = weightTypeSelect.value === 'weighted' ? 'block' : 'none';
-  });
+  if(weightTypeSelect){
+    weightTypeSelect.addEventListener('change', ()=>{
+      document.getElementById('evalWeightPercentWrap').style.display = weightTypeSelect.value === 'weighted' ? 'block' : 'none';
+    });
+  }
 
   const evalGradeGroupSelect = document.getElementById('evalGradeGroup');
-  evalGradeGroupSelect.addEventListener('change', ()=>{
-    const grouped = !!evalGradeGroupSelect.value;
-    document.getElementById('evalStandaloneWeight').style.display = grouped ? 'none' : 'block';
-    document.getElementById('evalGroupedNotice').style.display = grouped ? 'block' : 'none';
-  });
+  if(evalGradeGroupSelect){
+    evalGradeGroupSelect.addEventListener('change', ()=>{
+      const grouped = !!evalGradeGroupSelect.value;
+      document.getElementById('evalStandaloneWeight').style.display = grouped ? 'none' : 'block';
+      document.getElementById('evalGroupedNotice').style.display = grouped ? 'block' : 'none';
+    });
+  }
 
   const ggWeightTypeSelect = document.getElementById('ggWeightType');
-  ggWeightTypeSelect.addEventListener('change', ()=>{
-    document.getElementById('ggWeightPercentWrap').style.display = ggWeightTypeSelect.value === 'weighted' ? 'block' : 'none';
-  });
-
-  document.getElementById('addGradeGroupBtn').addEventListener('click', ()=>{
-    const name = document.getElementById('ggName').value.trim();
-    const weightType = document.getElementById('ggWeightType').value;
-    const weightPercent = weightType === 'weighted' ? Number(document.getElementById('ggWeightPercent').value) : null;
-    if(!name){ showToast('Ingresa un nombre para el grupo de notas'); return; }
-    group.gradeGroups.push({ id: uid(), name, weightType, weightPercent: weightPercent || 0, periodId: state.activePeriodId });
-    saveState();
-    renderCalificaciones(group);
-    showToast('Grupo de notas creado');
-  });
-
-  document.getElementById('addEvalBtn').addEventListener('click', ()=>{
-    const name = document.getElementById('evalName').value.trim();
-    const totalScore = Number(document.getElementById('evalTotalScore').value);
-    const exigencia = Number(document.getElementById('evalExigencia').value);
-    const gradeGroupId = document.getElementById('evalGradeGroup').value || null;
-    const date = document.getElementById('evalDate').value || null;
-    const weightType = document.getElementById('evalWeightType').value;
-    const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
-    if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
-    group.evaluations.push({
-      id: uid(), name, totalScore, exigencia: exigencia || 60,
-      gradeGroupId, date,
-      weightType, weightPercent: weightPercent || 0,
-      scores: {}, overrides: {}, periodId: state.activePeriodId
+  if(ggWeightTypeSelect){
+    ggWeightTypeSelect.addEventListener('change', ()=>{
+      document.getElementById('ggWeightPercentWrap').style.display = ggWeightTypeSelect.value === 'weighted' ? 'block' : 'none';
     });
-    saveState();
-    renderCalificaciones(group);
-    showToast('Evaluación agregada');
-  });
+  }
+
+  const addGradeGroupBtn = document.getElementById('addGradeGroupBtn');
+  if(addGradeGroupBtn){
+    addGradeGroupBtn.addEventListener('click', ()=>{
+      const name = document.getElementById('ggName').value.trim();
+      const weightType = document.getElementById('ggWeightType').value;
+      const weightPercent = weightType === 'weighted' ? Number(document.getElementById('ggWeightPercent').value) : null;
+      if(!name){ showToast('Ingresa un nombre para el grupo de notas'); return; }
+      group.gradeGroups.push({ id: uid(), name, weightType, weightPercent: weightPercent || 0, periodId: state.activePeriodId });
+      saveState();
+      calFormTab = null;
+      renderCalificaciones(group);
+      showToast('Grupo de notas creado');
+    });
+  }
+
+  const addEvalBtn = document.getElementById('addEvalBtn');
+  if(addEvalBtn){
+    addEvalBtn.addEventListener('click', ()=>{
+      const name = document.getElementById('evalName').value.trim();
+      const totalScore = Number(document.getElementById('evalTotalScore').value);
+      const exigencia = Number(document.getElementById('evalExigencia').value);
+      const gradeGroupId = document.getElementById('evalGradeGroup').value || null;
+      const date = document.getElementById('evalDate').value || null;
+      const processId = document.getElementById('evalProcess').value || null;
+      const weightType = document.getElementById('evalWeightType').value;
+      const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
+      if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
+      group.evaluations.push({
+        id: uid(), name, totalScore, exigencia: exigencia || 60,
+        gradeGroupId, date, processId,
+        weightType, weightPercent: weightPercent || 0,
+        scores: {}, overrides: {}, periodId: state.activePeriodId
+      });
+      saveState();
+      calFormTab = null;
+      renderCalificaciones(group);
+      showToast('Evaluación agregada');
+    });
+  }
 
   const exportGradesBtn = document.getElementById('exportGradesBtn');
   if(exportGradesBtn){
@@ -4350,6 +4432,11 @@ function openEvaluationForm(id){
       </select>
       <label style="margin-top:10px;">Fecha (opcional — aparece en el resumen semanal)</label>
       <input type="date" id="evFormDate" value="${ev.date || ''}">
+      <label style="margin-top:10px;">Proceso (opcional)</label>
+      <select id="evFormProcess">
+        <option value="">Ninguno (sin proceso)</option>
+        ${getActiveProcesses(group).map(p=>`<option value="${p.id}" ${p.id===ev.processId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+      </select>
       <div id="evFormStandaloneWeight" style="display:${ev.gradeGroupId?'none':'block'};">
         <div class="grid-2" style="margin-top:10px;">
           <div>
@@ -4391,11 +4478,13 @@ function saveEvaluationForm(id){
   const exigencia = Number(document.getElementById('evFormExigencia').value);
   const gradeGroupId = document.getElementById('evFormGradeGroup').value || null;
   const date = document.getElementById('evFormDate').value || null;
+  const processId = document.getElementById('evFormProcess').value || null;
   if(name) ev.name = name;
   if(totalScore > 0) ev.totalScore = totalScore;
   if(exigencia > 0) ev.exigencia = exigencia;
   ev.gradeGroupId = gradeGroupId;
   ev.date = date;
+  ev.processId = processId;
   if(!gradeGroupId){
     ev.weightType = document.getElementById('evFormWeightType').value;
     ev.weightPercent = ev.weightType === 'weighted' ? (Number(document.getElementById('evFormWeightPercent').value) || 0) : 0;
@@ -4696,6 +4785,37 @@ async function exportCalificacionesToExcel(group){
   showToast('Excel de calificaciones exportado');
 }
 
+async function exportCalificacionesToWord(group){
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para exportar a Word.'); return; }
+  const evals = getActiveEvaluations(group);
+  if(evals.length === 0 || group.students.length === 0){ showToast('No hay evaluaciones para exportar'); return; }
+
+  const rows = [];
+  group.students.forEach(student=>{
+    evals.forEach(e=>{
+      const nota = computeStudentEvalGrade(e, student.id);
+      const score = e.scores ? e.scores[student.id] : null;
+      rows.push([student.name, e.name, (score !== null && score !== undefined) ? String(score) : '-', nota !== null ? nota.toFixed(1) : '-']);
+    });
+  });
+
+  let body = wordHeading(`Calificaciones - ${group.name}`, 32);
+  body += wordTable(['Estudiante','Evaluación','Puntaje','Nota'], rows, [2500,2500,1200,1200]);
+
+  body += wordHeading('Resumen final', 24);
+  body += wordTable(
+    ['Estudiante','Promedio simple','Nota final'],
+    group.students.map(s=>{
+      const g = computeStudentFinalGrade(group, s.id);
+      return [s.name, g.promedioSimple !== null ? g.promedioSimple.toFixed(1) : '-', g.finalGrade !== null ? g.finalGrade.toFixed(1) : '-'];
+    }),
+    [3500,1900,1900]
+  );
+
+  await buildAndDownloadDocx(body, `calificaciones_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  showToast('Calificaciones exportadas a Word');
+}
+
 /* ============ EXPORTAR A EXCEL (.xlsx con formato, con respaldo CSV sin conexión) ============ */
 function csvEscape(val){
   const s = String(val ?? '');
@@ -4859,6 +4979,31 @@ async function exportGroupToExcel(group){
   showToast('Archivo Excel exportado');
 }
 
+async function exportHistorialToWord(group){
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para exportar a Word.'); return; }
+  const sessions = getActiveSessions(group).sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
+  if(sessions.length === 0){ showToast('No hay registros para exportar'); return; }
+
+  const rows = [];
+  sessions.forEach(session=>{
+    const inds = session.indicatorSnapshot || group.indicators;
+    group.students.forEach(student=>{
+      const entry = session.entries.find(e=> e.studentId === student.id);
+      if(!entry) return;
+      const present = isEntryPresent(entry);
+      const scores = inds.map(i=> entry.cotejo[i.id]).filter(v=> v!==null && v!==undefined);
+      const total = scores.length ? scores.reduce((a,b)=>a+b,0) : 0;
+      rows.push([formatDate(session.date), session.time, student.name, present ? 'Presente' : 'Ausente', present ? String(total) : '-', entry.observaciones || '']);
+    });
+  });
+
+  let body = wordHeading(`Historial de clases - ${group.name}`, 32);
+  body += wordTable(['Fecha','Hora','Estudiante','Asistencia','Puntaje','Observaciones'], rows, [1200,900,2200,1200,900,2100]);
+
+  await buildAndDownloadDocx(body, `historial_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  showToast('Historial exportado a Word');
+}
+
 function safeFileName(name){
   return name.replace(/[^a-zA-Z0-9_\-]+/g,'_');
 }
@@ -5013,6 +5158,27 @@ async function exportDecimasToExcel(group){
   showToast('Décimas exportadas');
 }
 
+async function exportDecimasToWord(group){
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para exportar a Word.'); return; }
+  const sessions = getActiveDecimas(group).filter(d=> d.values).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(sessions.length === 0 || group.students.length === 0){ showToast('No hay registros de décimas para exportar'); return; }
+
+  const rows = [];
+  sessions.forEach(s=>{
+    group.students.forEach(student=>{
+      const val = s.values ? s.values[student.id] : null;
+      if(val === null || val === undefined) return;
+      rows.push([formatDate(s.date), s.note || '', student.name, String(val)]);
+    });
+  });
+
+  let body = wordHeading(`Décimas - ${group.name}`, 32);
+  body += wordTable(['Fecha','Motivo','Estudiante','Décimas'], rows, [1500,2500,2500,1200]);
+
+  await buildAndDownloadDocx(body, `decimas_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  showToast('Décimas exportadas a Word');
+}
+
 /* ============ EXPORTAR: ENTREGAS ============ */
 function addEntregasSheet(workbook, group){
   const entregas = getActiveEntregas(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -5066,6 +5232,26 @@ async function exportEntregasToExcel(group){
   showToast('Entregas exportadas');
 }
 
+async function exportEntregasToWord(group){
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para exportar a Word.'); return; }
+  const entregas = getActiveEntregas(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(entregas.length === 0 || group.students.length === 0){ showToast('No hay entregas para exportar'); return; }
+
+  const rows = [];
+  entregas.forEach(e=>{
+    group.students.forEach(student=>{
+      const estado = e.estados ? e.estados[student.id] : null;
+      rows.push([e.name, formatDate(e.date), student.name, estado ? ENTREGA_ESTADOS[estado].label : 'No entregada']);
+    });
+  });
+
+  let body = wordHeading(`Entregas - ${group.name}`, 32);
+  body += wordTable(['Guía / trabajo','Fecha','Estudiante','Estado'], rows, [2500,1500,2500,1700]);
+
+  await buildAndDownloadDocx(body, `entregas_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  showToast('Entregas exportadas a Word');
+}
+
 /* ============ EXPORTAR: BITÁCORA ============ */
 function addBitacoraSheet(workbook, group){
   const entries = getActiveBitacora(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -5116,53 +5302,56 @@ function xmlEscapeWord(str){
 }
 function wordCell(text, opts={}){
   const bold = opts.bold ? '<w:b/>' : '';
-  const shading = opts.shade ? `<w:shd w:val="clear" w:fill="${opts.shade}"/>` : '';
-  const color = opts.color ? `<w:color w:val="${opts.color}"/>` : '';
-  return `<w:tc><w:tcPr>${shading}</w:tcPr><w:p><w:pPr><w:rPr>${bold}${color}</w:rPr></w:pPr><w:r><w:rPr>${bold}${color}</w:rPr><w:t xml:space="preserve">${xmlEscapeWord(text)}</w:t></w:r></w:p></w:tc>`;
+  return `<w:tc><w:tcPr></w:tcPr><w:p><w:pPr><w:rPr>${bold}</w:rPr></w:pPr><w:r><w:rPr>${bold}</w:rPr><w:t xml:space="preserve">${xmlEscapeWord(text)}</w:t></w:r></w:p></w:tc>`;
 }
 function wordRow(cellsHtml){
   return `<w:tr>${cellsHtml}</w:tr>`;
 }
-
-async function exportBitacoraToWord(group){
-  if(typeof JSZip === 'undefined'){
-    showToast('Se necesita conexión a internet para exportar a Word.');
-    return;
-  }
-  const entries = getActiveBitacora(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
-  if(entries.length === 0){ showToast('No hay registros de bitácora para exportar'); return; }
-
-  const headerRow = wordRow(
-    ['Fecha','Categoría','Alcance','Actividad pedagógica','Observaciones']
-      .map(h=> wordCell(h, { bold:true, shade:'6C4EE3', color:'FFFFFF' })).join('')
-  );
-  const dataRows = entries.map(e=>{
-    const scope = (e.studentIds && e.studentIds.length > 0)
-      ? e.studentIds.map(id=>{ const s=group.students.find(s=>s.id===id); return s ? s.name : ''; }).filter(Boolean).join(', ')
-      : 'Curso completo';
-    return wordRow([
-      wordCell(formatDate(e.date)),
-      wordCell(BITACORA_CATEGORIAS[e.categoria || '']),
-      wordCell(scope),
-      wordCell(e.actividadPedagogica || ''),
-      wordCell(e.observaciones || '')
-    ].join(''));
-  }).join('');
-
-  const tableXml = `<w:tbl>
+function wordHeading(text, size){
+  return `<w:p><w:pPr><w:spacing w:before="240" w:after="120"/><w:rPr><w:b/><w:sz w:val="${size}"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="${size}"/></w:rPr><w:t xml:space="preserve">${xmlEscapeWord(text)}</w:t></w:r></w:p>`;
+}
+function wordParagraph(text){
+  return `<w:p><w:r><w:t xml:space="preserve">${xmlEscapeWord(text)}</w:t></w:r></w:p>`;
+}
+function wordTable(headers, rows, widths){
+  const headerRow = wordRow(headers.map(h=> wordCell(h, { bold:true })).join(''));
+  const dataRows = rows.map(r=> wordRow(r.map(c=> wordCell(c)).join(''))).join('');
+  const grid = widths.map(w=>`<w:gridCol w:w="${w}"/>`).join('');
+  return `<w:tbl>
     <w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/></w:tblPr>
-    <w:tblGrid><w:gridCol w:w="1100"/><w:gridCol w:w="1300"/><w:gridCol w:w="1800"/><w:gridCol w:w="3000"/><w:gridCol w:w="3000"/></w:tblGrid>
+    <w:tblGrid>${grid}</w:tblGrid>
     ${headerRow}
     ${dataRows}
   </w:tbl>`;
+}
+function wordPageBreak(){
+  return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
+}
 
-  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+function buildDocxStylesXml(){
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:docDefaults>
+    <w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri" w:eastAsia="Calibri"/><w:sz w:val="22"/><w:color w:val="000000"/></w:rPr></w:rPrDefault>
+  </w:docDefaults>
+  <w:style w:type="table" w:styleId="TableGrid">
+    <w:name w:val="Table Grid"/>
+    <w:tblPr><w:tblBorders>
+      <w:top w:val="single" w:sz="4" w:color="auto"/>
+      <w:left w:val="single" w:sz="4" w:color="auto"/>
+      <w:bottom w:val="single" w:sz="4" w:color="auto"/>
+      <w:right w:val="single" w:sz="4" w:color="auto"/>
+      <w:insideH w:val="single" w:sz="4" w:color="auto"/>
+      <w:insideV w:val="single" w:sz="4" w:color="auto"/>
+    </w:tblBorders></w:tblPr>
+  </w:style>
+</w:styles>`;
+}
+
+async function buildAndDownloadDocx(documentXml, filename){
+  const fullDocumentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    <w:p><w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">Bitácora - ${xmlEscapeWord(group.name)}</w:t></w:r></w:p>
-    <w:p/>
-    ${tableXml}
-  </w:body>
+  <w:body>${documentXml}</w:body>
 </w:document>`;
 
   const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -5183,73 +5372,53 @@ async function exportBitacoraToWord(group){
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`;
 
-  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
-  <w:style w:type="table" w:styleId="TableGrid">
-    <w:name w:val="Table Grid"/>
-    <w:tblPr><w:tblBorders>
-      <w:top w:val="single" w:sz="4" w:color="auto"/>
-      <w:left w:val="single" w:sz="4" w:color="auto"/>
-      <w:bottom w:val="single" w:sz="4" w:color="auto"/>
-      <w:right w:val="single" w:sz="4" w:color="auto"/>
-      <w:insideH w:val="single" w:sz="4" w:color="auto"/>
-      <w:insideV w:val="single" w:sz="4" w:color="auto"/>
-    </w:tblBorders></w:tblPr>
-  </w:style>
-</w:styles>`;
-
   const zip = new JSZip();
   zip.file('[Content_Types].xml', contentTypesXml);
   zip.folder('_rels').file('.rels', relsXml);
   const wordFolder = zip.folder('word');
-  wordFolder.file('document.xml', documentXml);
-  wordFolder.file('styles.xml', stylesXml);
+  wordFolder.file('document.xml', fullDocumentXml);
+  wordFolder.file('styles.xml', buildDocxStylesXml());
   wordFolder.folder('_rels').file('document.xml.rels', documentRelsXml);
 
   const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `bitacora_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast('Bitácora exportada a Word');
 }
 
-/* ============ EXPORTAR: HISTORIAL COMPLETO DE UN ESTUDIANTE (WORD) ============ */
-function wordHeading(text, size){
-  return `<w:p><w:pPr><w:spacing w:before="240" w:after="120"/><w:rPr><w:b/><w:sz w:val="${size}"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="${size}"/></w:rPr><w:t xml:space="preserve">${xmlEscapeWord(text)}</w:t></w:r></w:p>`;
-}
-function wordParagraph(text){
-  return `<w:p><w:r><w:t xml:space="preserve">${xmlEscapeWord(text)}</w:t></w:r></w:p>`;
-}
-function wordTable(headers, rows, widths){
-  const headerRow = wordRow(headers.map(h=> wordCell(h, { bold:true, shade:'6C4EE3', color:'FFFFFF' })).join(''));
-  const dataRows = rows.map(r=> wordRow(r.map(c=> wordCell(c)).join(''))).join('');
-  const grid = widths.map(w=>`<w:gridCol w:w="${w}"/>`).join('');
-  return `<w:tbl>
-    <w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/></w:tblPr>
-    <w:tblGrid>${grid}</w:tblGrid>
-    ${headerRow}
-    ${dataRows}
-  </w:tbl>`;
-}
-
-async function exportStudentHistoryToWord(studentId){
+async function exportBitacoraToWord(group){
   if(typeof JSZip === 'undefined'){
     showToast('Se necesita conexión a internet para exportar a Word.');
     return;
   }
-  const group = getActiveGroup();
-  const student = group.students.find(s=>s.id===studentId);
-  if(!student) return;
+  const entries = getActiveBitacora(group).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(entries.length === 0){ showToast('No hay registros de bitácora para exportar'); return; }
 
+  const rows = entries.map(e=>{
+    const scope = (e.studentIds && e.studentIds.length > 0)
+      ? e.studentIds.map(id=>{ const s=group.students.find(s=>s.id===id); return s ? s.name : ''; }).filter(Boolean).join(', ')
+      : 'Curso completo';
+    return [formatDate(e.date), BITACORA_CATEGORIAS[e.categoria || ''], scope, e.actividadPedagogica || '', e.observaciones || ''];
+  });
+
+  let body = wordHeading(`Bitácora - ${group.name}`, 32);
+  body += wordTable(['Fecha','Categoría','Alcance','Actividad pedagógica','Observaciones'], rows, [1100,1300,1800,3000,3000]);
+
+  await buildAndDownloadDocx(body, `bitacora_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  showToast('Bitácora exportada a Word');
+}
+
+function buildStudentHistoryBody(group, student){
+  const studentId = student.id;
   const stats = computeStudentStats(group, studentId);
   const gradeResult = computeStudentFinalGrade(group, studentId);
   const decimasTotal = computeStudentDecimasTotal(group, studentId);
+  const decimasApplied = computeStudentDecimasApplied(group, studentId);
 
   let body = '';
   body += wordHeading(`Historial completo - ${student.name}`, 32);
@@ -5263,7 +5432,7 @@ async function exportStudentHistoryToWord(studentId){
       ['Ausente', String(stats.absentCount)],
       ['Puntaje obtenido', `${stats.obtained} / ${stats.maxPossible}`],
       ['% de logro', stats.percent !== null ? stats.percent + '%' : '-'],
-      ['Décimas acumuladas', String(decimasTotal)],
+      ['Décimas (acumuladas / aplicadas)', `${decimasTotal} / ${decimasApplied}`],
       ['Promedio simple (calificaciones)', gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'],
       ['Nota final', gradeResult.finalGrade !== null ? gradeResult.finalGrade.toFixed(1) : '-'],
     ],
@@ -5318,6 +5487,21 @@ async function exportStudentHistoryToWord(studentId){
     );
   }
 
+  const entregas = getActiveEntregas(group);
+  body += wordHeading('Entregas', 24);
+  if(entregas.length === 0){
+    body += wordParagraph('Sin entregas registradas.');
+  } else {
+    body += wordTable(
+      ['Guía / trabajo','Fecha','Estado'],
+      entregas.map(e=>{
+        const estado = e.estados ? e.estados[studentId] : null;
+        return [e.name, formatDate(e.date), estado ? ENTREGA_ESTADOS[estado].label : 'No entregada'];
+      }),
+      [3000,1500,1500]
+    );
+  }
+
   const bitacoraEntries = getActiveBitacora(group)
     .filter(e=> (e.studentIds||[]).length === 0 || e.studentIds.includes(studentId))
     .sort((a,b)=> (a.date||'').localeCompare(b.date||''));
@@ -5332,63 +5516,36 @@ async function exportStudentHistoryToWord(studentId){
     );
   }
 
-  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>${body}</w:body>
-</w:document>`;
+  return body;
+}
 
-  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-</Types>`;
+async function exportStudentHistoryToWord(studentId){
+  if(typeof JSZip === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar a Word.');
+    return;
+  }
+  const group = getActiveGroup();
+  const student = group.students.find(s=>s.id===studentId);
+  if(!student) return;
 
-  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>`;
-
-  const documentRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>`;
-
-  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>
-  <w:style w:type="table" w:styleId="TableGrid">
-    <w:name w:val="Table Grid"/>
-    <w:tblPr><w:tblBorders>
-      <w:top w:val="single" w:sz="4" w:color="auto"/>
-      <w:left w:val="single" w:sz="4" w:color="auto"/>
-      <w:bottom w:val="single" w:sz="4" w:color="auto"/>
-      <w:right w:val="single" w:sz="4" w:color="auto"/>
-      <w:insideH w:val="single" w:sz="4" w:color="auto"/>
-      <w:insideV w:val="single" w:sz="4" w:color="auto"/>
-    </w:tblBorders></w:tblPr>
-  </w:style>
-</w:styles>`;
-
-  const zip = new JSZip();
-  zip.file('[Content_Types].xml', contentTypesXml);
-  zip.folder('_rels').file('.rels', relsXml);
-  const wordFolder = zip.folder('word');
-  wordFolder.file('document.xml', documentXml);
-  wordFolder.file('styles.xml', stylesXml);
-  wordFolder.folder('_rels').file('document.xml.rels', documentRelsXml);
-
-  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `historial_${safeFileName(student.name)}_${new Date().toISOString().slice(0,10)}.docx`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const body = buildStudentHistoryBody(group, student);
+  await buildAndDownloadDocx(body, `historial_${safeFileName(student.name)}_${new Date().toISOString().slice(0,10)}.docx`);
   showToast('Historial del estudiante exportado a Word');
+}
+
+async function exportAllStudentsToWord(group){
+  if(typeof JSZip === 'undefined'){
+    showToast('Se necesita conexión a internet para exportar a Word.');
+    return;
+  }
+  if(group.students.length === 0){ showToast('No hay estudiantes en este curso'); return; }
+  showToast('Generando Word de todo el curso…');
+  const body = group.students.map((s, i)=>{
+    const studentBody = buildStudentHistoryBody(group, s);
+    return i < group.students.length - 1 ? studentBody + wordPageBreak() : studentBody;
+  }).join('');
+  await buildAndDownloadDocx(body, `historial_completo_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  showToast('Word con todo el curso exportado (un estudiante por página)');
 }
 
 /* ============ EXPORTAR TODO EL CURSO ============ */
@@ -5411,6 +5568,132 @@ async function exportAllToExcel(group){
   if(!any){ showToast('Este curso todavía no tiene datos para exportar'); return; }
   await downloadWorkbook(workbook, `curso_completo_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
   showToast('Excel completo del curso exportado');
+}
+
+async function exportAllToExcelPerStudent(group){
+  if(typeof ExcelJS === 'undefined'){
+    showToast('Se necesita conexión a internet para generar el Excel.');
+    return;
+  }
+  if(group.students.length === 0){ showToast('No hay estudiantes en este curso'); return; }
+  showToast('Generando Excel (una hoja por estudiante)…');
+  const workbook = new ExcelJS.Workbook();
+  const usedNames = new Set();
+
+  group.students.forEach(student=>{
+    let base = student.name.replace(/[\\/\?\*\[\]:]/g, '').slice(0, 31).trim() || 'Estudiante';
+    let finalName = base;
+    let i = 2;
+    while(usedNames.has(finalName)){
+      finalName = base.slice(0, 28) + '_' + i;
+      i++;
+    }
+    usedNames.add(finalName);
+    const ws = workbook.addWorksheet(finalName);
+
+    let row = 1;
+    const writeHeading = (text)=>{
+      const cell = ws.getCell(row,1);
+      cell.value = text;
+      cell.font = { bold:true, size:13, color:{argb:'FF6C4EE3'} };
+      row += 1;
+    };
+    const writeTableHeader = (headers)=>{
+      headers.forEach((h,i)=>{
+        const cell = ws.getCell(row, 1+i);
+        cell.value = h;
+        cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
+        cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6C4EE3'} };
+      });
+      row += 1;
+    };
+    const writeRow = (values)=>{
+      values.forEach((v,i)=>{ ws.getCell(row, 1+i).value = v; });
+      row += 1;
+    };
+
+    writeHeading(student.name);
+    row += 1;
+
+    writeHeading('Resumen');
+    const stats = computeStudentStats(group, student.id);
+    const gradeResult = computeStudentFinalGrade(group, student.id);
+    const decimasTotal = computeStudentDecimasTotal(group, student.id);
+    const decimasApplied = computeStudentDecimasApplied(group, student.id);
+    writeTableHeader(['Indicador','Valor']);
+    writeRow(['Clases registradas', stats.total]);
+    writeRow(['Presente', stats.presentCount]);
+    writeRow(['Ausente', stats.absentCount]);
+    writeRow(['Puntaje obtenido', `${stats.obtained} / ${stats.maxPossible}`]);
+    writeRow(['% de logro', stats.percent !== null ? stats.percent + '%' : '-']);
+    writeRow(['Décimas (acumuladas / aplicadas)', `${decimasTotal} / ${decimasApplied}`]);
+    writeRow(['Promedio simple', gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-']);
+    writeRow(['Nota final', gradeResult.finalGrade !== null ? gradeResult.finalGrade.toFixed(1) : '-']);
+    row += 1;
+
+    writeHeading('Historial de clases');
+    const sessions = getActiveSessions(group).filter(s=> s.entries.some(e=>e.studentId===student.id)).sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
+    if(sessions.length === 0){ writeRow(['Sin registros.']); }
+    else {
+      writeTableHeader(['Fecha','Hora','Asistencia','Puntaje','Observaciones']);
+      sessions.forEach(s=>{
+        const entry = s.entries.find(e=>e.studentId===student.id);
+        const present = isEntryPresent(entry);
+        const inds = s.indicatorSnapshot || group.indicators;
+        const scores = inds.map(i=> entry.cotejo[i.id]).filter(v=> v!==null && v!==undefined);
+        const total = scores.length ? scores.reduce((a,b)=>a+b,0) : 0;
+        writeRow([formatDate(s.date), s.time, present ? 'Presente' : 'Ausente', present ? total : '-', entry.observaciones || '']);
+      });
+    }
+    row += 1;
+
+    writeHeading('Calificaciones');
+    const evals = getActiveEvaluations(group);
+    if(evals.length === 0){ writeRow(['Sin evaluaciones registradas.']); }
+    else {
+      writeTableHeader(['Evaluación','Nota']);
+      evals.forEach(e=>{
+        const nota = computeStudentEvalGrade(e, student.id);
+        writeRow([e.name, nota !== null ? nota.toFixed(1) : '-']);
+      });
+    }
+    row += 1;
+
+    writeHeading('Décimas');
+    const decimaSessions = getActiveDecimas(group).filter(d=> d.values && d.values[student.id] !== null && d.values[student.id] !== undefined);
+    if(decimaSessions.length === 0){ writeRow(['Sin décimas registradas.']); }
+    else {
+      writeTableHeader(['Fecha','Motivo','Valor']);
+      decimaSessions.forEach(d=> writeRow([formatDate(d.date), d.note || '', d.values[student.id]]));
+    }
+    row += 1;
+
+    writeHeading('Entregas');
+    const entregas = getActiveEntregas(group);
+    if(entregas.length === 0){ writeRow(['Sin entregas registradas.']); }
+    else {
+      writeTableHeader(['Guía / trabajo','Fecha','Estado']);
+      entregas.forEach(e=>{
+        const estado = e.estados ? e.estados[student.id] : null;
+        writeRow([e.name, formatDate(e.date), estado ? ENTREGA_ESTADOS[estado].label : 'No entregada']);
+      });
+    }
+    row += 1;
+
+    writeHeading('Bitácora');
+    const bitacoraEntries = getActiveBitacora(group).filter(e=> (e.studentIds||[]).length === 0 || e.studentIds.includes(student.id)).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+    if(bitacoraEntries.length === 0){ writeRow(['Sin registros de bitácora.']); }
+    else {
+      writeTableHeader(['Fecha','Categoría','Actividad pedagógica','Observaciones']);
+      bitacoraEntries.forEach(e=> writeRow([formatDate(e.date), BITACORA_CATEGORIAS[e.categoria || ''], e.actividadPedagogica || '', e.observaciones || '']));
+    }
+
+    ws.getColumn(1).width = 26;
+    for(let c=2;c<=5;c++){ ws.getColumn(c).width = 20; }
+  });
+
+  await downloadWorkbook(workbook, `curso_por_estudiante_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Excel exportado (una hoja por estudiante)');
 }
 
 /* ============ EXPORTAR CSV SIMPLE (respaldo sin conexión) ============ */
