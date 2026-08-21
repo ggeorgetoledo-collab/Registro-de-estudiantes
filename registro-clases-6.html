@@ -760,6 +760,19 @@ async function uploadDriveFile(fileId, data){
   return created.id;
 }
 
+// Recuerda, por cuenta conectada, la última versión remota que este dispositivo efectivamente vio.
+// Esto permite detectar "¿cambió el remoto desde la última vez que lo miré?" en vez de comparar
+// solo por hora de reloj (lo cual falla si dos dispositivos editan sin haberse visto entre sí).
+function getSyncTimestampKey(){
+  return currentStorageKey + '::synced_ts';
+}
+function loadLastSyncedRemoteTimestamp(){
+  return Number(localStorage.getItem(getSyncTimestampKey())) || 0;
+}
+function saveLastSyncedRemoteTimestamp(ts){
+  localStorage.setItem(getSyncTimestampKey(), String(ts || 0));
+}
+
 async function syncFromDrive(){
   try{
     setDriveStatus('syncing');
@@ -767,20 +780,28 @@ async function syncFromDrive(){
     if(file){
       driveFileId = file.id;
       const remote = await downloadDriveFile(file.id);
-      const localUpdated = state.updatedAt || 0;
       const remoteUpdated = remote.updatedAt || 0;
-      if(remoteUpdated > localUpdated){
+      const lastSynced = loadLastSyncedRemoteTimestamp();
+      if(remoteUpdated !== lastSynced){
+        // El remoto cambió desde la última vez que este dispositivo lo vio: lo adoptamos siempre,
+        // para no perder cambios hechos desde otro dispositivo aunque nuestro reloj local sea "más nuevo".
         state = remote;
         if(!state.schedule) state.schedule = [];
         ensureDefaultGroup();
         localStorage.setItem(currentStorageKey, JSON.stringify(state));
         renderAll();
-        showToast('Datos actualizados desde Google Drive');
-      } else if(localUpdated > remoteUpdated){
-        await uploadDriveFile(driveFileId, state);
+        saveLastSyncedRemoteTimestamp(remoteUpdated);
+        if(lastSynced !== 0) showToast('Datos actualizados desde Google Drive (otro dispositivo hizo cambios)');
+      } else {
+        const localUpdated = state.updatedAt || 0;
+        if(localUpdated > remoteUpdated){
+          await uploadDriveFile(driveFileId, state);
+          saveLastSyncedRemoteTimestamp(state.updatedAt);
+        }
       }
     } else {
       driveFileId = await uploadDriveFile(null, state);
+      saveLastSyncedRemoteTimestamp(state.updatedAt || Date.now());
     }
     setDriveStatus('connected');
   }catch(e){
@@ -799,21 +820,26 @@ async function pushToDrive(){
       if(file) driveFileId = file.id;
     }
     if(driveFileId){
-      // Antes de sobrescribir, revisamos si otro dispositivo subió algo más nuevo mientras tanto
+      // Antes de sobrescribir, revisamos si el remoto cambió desde la última vez que lo vimos
+      // (no solo si "parece" más antiguo por hora de reloj).
       const remote = await downloadDriveFile(driveFileId);
-      if(remote && remote.updatedAt && remote.updatedAt > (state.updatedAt || 0)){
+      const remoteUpdated = (remote && remote.updatedAt) || 0;
+      const lastSynced = loadLastSyncedRemoteTimestamp();
+      if(remote && remoteUpdated !== lastSynced){
         state = remote;
         if(!state.schedule) state.schedule = [];
         if(!state.periods) state.periods = [];
         ensureDefaultGroup();
         localStorage.setItem(currentStorageKey, JSON.stringify(state));
         renderAll();
-        showToast('⚠️ Otro dispositivo sincronizó cambios más recientes. Se cargaron esos en vez de sobrescribirlos.');
+        saveLastSyncedRemoteTimestamp(remoteUpdated);
+        showToast('⚠️ Otro dispositivo sincronizó cambios que aún no tenías. Se cargaron esos — tus últimos cambios locales no se subieron; revísalos y vuelve a aplicarlos si hace falta.');
         setDriveStatus('connected');
         return;
       }
     }
     driveFileId = await uploadDriveFile(driveFileId, state);
+    saveLastSyncedRemoteTimestamp(state.updatedAt);
     setDriveStatus('connected');
   }catch(e){
     console.error('Error subiendo a Drive', e);
