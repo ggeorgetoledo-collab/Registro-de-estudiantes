@@ -329,7 +329,7 @@
     transform:translateX(-50%);
     background:var(--primary);
     color:#fff;
-    padding:10px 20px;
+    padding:10px 14px 10px 20px;
     border-radius:8px;
     font-family:'Inter', sans-serif;
     font-size:0.85rem;
@@ -339,8 +339,25 @@
     pointer-events:none;
     transition:opacity .25s ease;
     z-index:999;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    max-width:90vw;
   }
-  .toast.show{ opacity:1; }
+  .toast.show{ opacity:1; pointer-events:auto; }
+  .toast-close-btn{
+    background:rgba(255,255,255,0.25);
+    border:none;
+    color:#fff;
+    width:22px;
+    height:22px;
+    min-width:22px;
+    border-radius:50%;
+    cursor:pointer;
+    font-size:0.8rem;
+    line-height:1;
+    flex-shrink:0;
+  }
   .indicator-tag{
     display:inline-flex;
     align-items:center;
@@ -536,7 +553,7 @@
 
 <main id="main"></main>
 
-<div class="toast app-font" id="toast"></div>
+<div class="toast app-font" id="toast"><span id="toastText"></span><button class="toast-close-btn" id="toastCloseBtn" onclick="hideToast()">✕</button></div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
@@ -647,7 +664,7 @@ function updateDriveHeaderBadge(){
     badge.style.color = 'var(--danger)';
   }
   if(driveLastKnownConnected === true && connected === false){
-    showToast('⚠️ Se cerró tu sesión de Google Drive. Tus cambios NO se están respaldando hasta que vuelvas a conectar.');
+    showToastQuick('⚠️ Se cerró tu sesión de Google Drive. Tus cambios NO se están respaldando hasta que vuelvas a conectar.');
   }
   driveLastKnownConnected = connected;
 }
@@ -690,14 +707,14 @@ function connectDrive(){
     scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email',
     callback: async (resp)=>{
       if(resp.error){
-        showToast('No se pudo conectar con Google Drive');
+        showToastQuick('No se pudo conectar con Google Drive');
         setDriveStatus('error');
         return;
       }
       const tok = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000) };
       storeDriveToken(tok);
       setDriveStatus('connected');
-      showToast('Conectado a Google Drive');
+      showToastQuick('Conectado a Google Drive');
       await fetchConnectedEmail();
       syncFromDrive();
     }
@@ -710,7 +727,7 @@ function disconnectDrive(){
   driveFileId = null;
   // Mantenemos gdrive_email para no perder de vista de quién son los datos guardados en este dispositivo
   setDriveStatus('disconnected');
-  showToast('Se desconectó Google Drive (tus datos siguen guardados en este navegador)');
+  showToastQuick('Se desconectó Google Drive (tus datos siguen guardados en este navegador)');
 }
 
 async function driveFetch(url, options={}){
@@ -791,7 +808,7 @@ async function syncFromDrive(){
         localStorage.setItem(currentStorageKey, JSON.stringify(state));
         renderAll();
         saveLastSyncedRemoteTimestamp(remoteUpdated);
-        if(lastSynced !== 0) showToast('Datos actualizados desde Google Drive (otro dispositivo hizo cambios)');
+        if(lastSynced !== 0) showToastQuick('Datos actualizados desde Google Drive (otro dispositivo hizo cambios)');
       } else {
         const localUpdated = state.updatedAt || 0;
         if(localUpdated > remoteUpdated){
@@ -833,7 +850,7 @@ async function pushToDrive(){
         localStorage.setItem(currentStorageKey, JSON.stringify(state));
         renderAll();
         saveLastSyncedRemoteTimestamp(remoteUpdated);
-        showToast('⚠️ Otro dispositivo sincronizó cambios que aún no tenías. Se cargaron esos — tus últimos cambios locales no se subieron; revísalos y vuelve a aplicarlos si hace falta.');
+        showToastQuick('⚠️ Otro dispositivo sincronizó cambios que aún no tenías. Se cargaron esos — tus últimos cambios locales no se subieron; revísalos y vuelve a aplicarlos si hace falta.');
         setDriveStatus('connected');
         return;
       }
@@ -875,6 +892,15 @@ function openDriveSettings(){
       </div>
       <p class="muted" style="font-size:0.74rem; margin-top:8px;">Guarda este archivo de vez en cuando en un lugar seguro. Si algo falla en este dispositivo (se borra el navegador, se pierde la conexión, etc.), puedes restaurar todo desde aquí.</p>
       <hr class="divider">
+      <p class="muted" style="font-weight:600; margin-bottom:4px;">Respaldo de curso(s) específicos</p>
+      <p class="muted" style="font-size:0.74rem; margin-bottom:6px;">Elige uno o más cursos para guardarlos en un archivo aparte — útil para llevarlos a otra sesión o dispositivo sin exportar todo.</p>
+      <div style="max-height:140px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:8px;">
+        ${state.groups.map(g=>`<label style="display:block; margin-bottom:4px; font-family:'Inter',sans-serif; font-size:0.88rem;"><input type="checkbox" class="backup-group-check" value="${g.id}" style="width:auto; margin-right:6px;">${escapeHtml(g.name)}</label>`).join('')}
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="btn btn-outline btn-sm" onclick="exportSelectedGroupsBackup()">⬇️ Descargar seleccionados</button>
+      </div>
+      <hr class="divider">
       <p class="muted" style="font-weight:600; margin-bottom:4px;">Agregar datos de otra sesión (sin sobrescribir)</p>
       <div class="row">
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('mergeBackupInput').click()">📥 Agregar desde un archivo</button>
@@ -905,18 +931,56 @@ function openDriveSettings(){
   });
 }
 
+function backupFileNamePrefix(){
+  const email = localStorage.getItem('gdrive_email');
+  const account = email ? email.split('@')[0].replace(/[^a-zA-Z0-9_\-]/g,'') : 'sin_cuenta';
+  const now = new Date();
+  const date = now.toISOString().slice(0,10);
+  const time = String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
+  return `${account}_${date}_${time}`;
+}
+
 function exportFullBackup(){
   const data = JSON.stringify(state, null, 2);
   const blob = new Blob([data], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `respaldo_registro_clases_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `${backupFileNamePrefix()}_respaldo_registro_clases.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Respaldo completo descargado');
+}
+
+function exportSelectedGroupsBackup(){
+  const checked = [...document.querySelectorAll('.backup-group-check:checked')].map(el=>el.value);
+  if(checked.length === 0){ showToast('Selecciona al menos un curso'); return; }
+  const selectedGroups = state.groups.filter(g=> checked.includes(g.id));
+
+  const periodIds = new Set();
+  selectedGroups.forEach(g=>{
+    [...(g.sessions||[]), ...(g.evaluations||[]), ...(g.decimas||[]), ...(g.gradeGroups||[]), ...(g.processes||[]), ...(g.bitacora||[]), ...(g.entregas||[])]
+      .forEach(item=>{ if(item.periodId) periodIds.add(item.periodId); });
+  });
+  const periods = (state.periods || []).filter(p=> periodIds.has(p.id));
+  const schedule = (state.schedule || []).filter(e=> checked.includes(e.groupId));
+  const data = { groups: selectedGroups, periods, schedule, activeGroupId: null, activePeriodId: null };
+
+  const namesPart = selectedGroups.map(g=> g.name.trim().replace(/[^a-zA-Z0-9_\-]+/g,'_')).join('+');
+  const filename = `${backupFileNamePrefix()}_${namesPart}.json`;
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`Respaldo de ${selectedGroups.length} curso(s) descargado`);
 }
 
 function importFullBackup(file){
@@ -1664,7 +1728,22 @@ function deletePeriod(){
 let toastTimer;
 function showToast(msg){
   const t = document.getElementById('toast');
-  t.textContent = msg;
+  document.getElementById('toastText').textContent = msg;
+  document.getElementById('toastCloseBtn').style.display = 'block';
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), 8000);
+}
+function hideToast(){
+  const t = document.getElementById('toast');
+  t.classList.remove('show');
+  clearTimeout(toastTimer);
+}
+// Para avisos de sincronización con Drive: se mantienen breves y de cierre automático, como antes.
+function showToastQuick(msg){
+  const t = document.getElementById('toast');
+  document.getElementById('toastText').textContent = msg;
+  document.getElementById('toastCloseBtn').style.display = 'none';
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=> t.classList.remove('show'), 2200);
