@@ -875,6 +875,13 @@ function openDriveSettings(){
       </div>
       <p class="muted" style="font-size:0.74rem; margin-top:8px;">Guarda este archivo de vez en cuando en un lugar seguro. Si algo falla en este dispositivo (se borra el navegador, se pierde la conexión, etc.), puedes restaurar todo desde aquí.</p>
       <hr class="divider">
+      <p class="muted" style="font-weight:600; margin-bottom:4px;">Agregar datos de otra sesión (sin sobrescribir)</p>
+      <div class="row">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('mergeBackupInput').click()">📥 Agregar desde un archivo</button>
+        <input type="file" id="mergeBackupInput" accept=".json" style="display:none;">
+      </div>
+      <p class="muted" style="font-size:0.74rem; margin-top:8px;">Usa un respaldo (.json) de otra cuenta, otro dispositivo, o un colega. Los cursos que no tengas se agregan completos. Los cursos que ya existan (mismo nombre) se <strong>fusionan por dentro</strong>: solo se agrega lo que te falta (estudiantes nuevos, clases en fechas/horas que no tenías, puntajes vacíos) — nunca se sobrescribe un dato que ya tenías.</p>
+      <hr class="divider">
       <details>
         <summary class="muted" style="cursor:pointer; font-size:0.8rem;">Configuración avanzada (Client ID)</summary>
         <label style="margin-top:10px;">Client ID de Google (OAuth)</label>
@@ -891,6 +898,10 @@ function openDriveSettings(){
   document.getElementById('restoreBackupInput').addEventListener('change', (e)=>{
     const file = e.target.files[0];
     if(file) importFullBackup(file);
+  });
+  document.getElementById('mergeBackupInput').addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(file) importAdditionalData(file);
   });
 }
 
@@ -926,6 +937,252 @@ function importFullBackup(file){
       showToast('Respaldo restaurado correctamente');
     }catch(e){
       showToast('No se pudo leer el archivo de respaldo');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function mergeGroupData(localGroup, importedGroup, periodIdMap){
+  const remapPeriodIdValue = (pid)=> (pid && periodIdMap.has(pid)) ? periodIdMap.get(pid) : pid;
+
+  // Estudiantes: por nombre. Si ya existe, se reutiliza su id local (no se duplica).
+  const studentIdMap = new Map();
+  (importedGroup.students || []).forEach(s=>{
+    const existing = localGroup.students.find(ls=> ls.name.trim().toLowerCase() === (s.name||'').trim().toLowerCase());
+    if(existing){ studentIdMap.set(s.id, existing.id); }
+    else {
+      const newStudent = { ...s, id: uid() };
+      localGroup.students.push(newStudent);
+      studentIdMap.set(s.id, newStudent.id);
+    }
+  });
+
+  // Indicadores: por nombre
+  const indicatorIdMap = new Map();
+  (importedGroup.indicators || []).forEach(ind=>{
+    const existing = localGroup.indicators.find(li=> li.name.trim().toLowerCase() === (ind.name||'').trim().toLowerCase());
+    if(existing){ indicatorIdMap.set(ind.id, existing.id); }
+    else {
+      const newInd = { ...ind, id: uid() };
+      localGroup.indicators.push(newInd);
+      indicatorIdMap.set(ind.id, newInd.id);
+    }
+  });
+
+  // Procesos: por nombre
+  const processIdMap = new Map();
+  (importedGroup.processes || []).forEach(p=>{
+    const existing = localGroup.processes.find(lp=> lp.name.trim().toLowerCase() === (p.name||'').trim().toLowerCase());
+    if(existing){ processIdMap.set(p.id, existing.id); }
+    else {
+      const newP = { ...p, id: uid(), periodId: remapPeriodIdValue(p.periodId) };
+      localGroup.processes.push(newP);
+      processIdMap.set(p.id, newP.id);
+    }
+  });
+
+  // Grupos de notas: por nombre
+  const gradeGroupIdMap = new Map();
+  (importedGroup.gradeGroups || []).forEach(gg=>{
+    const existing = localGroup.gradeGroups.find(lgg=> lgg.name.trim().toLowerCase() === (gg.name||'').trim().toLowerCase());
+    if(existing){ gradeGroupIdMap.set(gg.id, existing.id); }
+    else {
+      const newGG = { ...gg, id: uid(), periodId: remapPeriodIdValue(gg.periodId) };
+      localGroup.gradeGroups.push(newGG);
+      gradeGroupIdMap.set(gg.id, newGG.id);
+    }
+  });
+
+  const remapCotejo = (cotejo)=>{
+    const out = {};
+    Object.keys(cotejo || {}).forEach(oldId=>{ out[indicatorIdMap.get(oldId) || oldId] = cotejo[oldId]; });
+    return out;
+  };
+  const remapSnapshot = (snap)=> (snap || []).map(item=> ({ ...item, id: indicatorIdMap.get(item.id) || item.id }));
+
+  // Sesiones (Historial): por fecha+hora exacta. Si ya existe una clase en esa fecha/hora, no se toca.
+  let sessionsAdded = 0;
+  (importedGroup.sessions || []).forEach(s=>{
+    const dup = localGroup.sessions.some(ls=> ls.date===s.date && ls.time===s.time);
+    if(dup) return;
+    localGroup.sessions.push({
+      ...s, id: uid(),
+      periodId: remapPeriodIdValue(s.periodId),
+      processId: s.processId ? (processIdMap.get(s.processId) || null) : null,
+      indicatorSnapshot: remapSnapshot(s.indicatorSnapshot),
+      entries: (s.entries || []).map(e=> ({ ...e, studentId: studentIdMap.get(e.studentId) || e.studentId, cotejo: remapCotejo(e.cotejo) }))
+    });
+    sessionsAdded++;
+  });
+
+  // Evaluaciones: por nombre. Si ya existe, solo se completan puntajes de estudiantes que no tenían nota (sin sobrescribir).
+  let evalsAdded = 0, evalsFilled = 0;
+  (importedGroup.evaluations || []).forEach(ev=>{
+    const existing = localGroup.evaluations.find(le=> le.name.trim().toLowerCase() === (ev.name||'').trim().toLowerCase());
+    if(existing){
+      if(!existing.scores) existing.scores = {};
+      Object.keys(ev.scores || {}).forEach(oldSid=>{
+        const newSid = studentIdMap.get(oldSid) || oldSid;
+        if(existing.scores[newSid] === undefined || existing.scores[newSid] === null){
+          existing.scores[newSid] = ev.scores[oldSid];
+          evalsFilled++;
+        }
+      });
+    } else {
+      const newScores = {}, newOverrides = {};
+      Object.keys(ev.scores || {}).forEach(oldSid=>{ newScores[studentIdMap.get(oldSid) || oldSid] = ev.scores[oldSid]; });
+      Object.keys(ev.overrides || {}).forEach(oldSid=>{ newOverrides[studentIdMap.get(oldSid) || oldSid] = ev.overrides[oldSid]; });
+      localGroup.evaluations.push({
+        ...ev, id: uid(),
+        periodId: remapPeriodIdValue(ev.periodId),
+        gradeGroupId: ev.gradeGroupId ? (gradeGroupIdMap.get(ev.gradeGroupId) || null) : null,
+        processId: ev.processId ? (processIdMap.get(ev.processId) || null) : null,
+        scores: newScores, overrides: newOverrides
+      });
+      evalsAdded++;
+    }
+  });
+
+  // Décimas: por fecha+motivo. Si ya existe, se completan valores de estudiantes que no tenían (sin sobrescribir).
+  let decimasAdded = 0;
+  (importedGroup.decimas || []).forEach(d=>{
+    const existing = localGroup.decimas.find(ld=> ld.date===d.date && (ld.note||'')===(d.note||''));
+    if(existing){
+      if(!existing.values) existing.values = {};
+      Object.keys(d.values || {}).forEach(oldSid=>{
+        const newSid = studentIdMap.get(oldSid) || oldSid;
+        if(existing.values[newSid] === undefined || existing.values[newSid] === null) existing.values[newSid] = d.values[oldSid];
+      });
+    } else {
+      const newValues = {};
+      Object.keys(d.values || {}).forEach(oldSid=>{ newValues[studentIdMap.get(oldSid) || oldSid] = d.values[oldSid]; });
+      localGroup.decimas.push({ ...d, id: uid(), periodId: remapPeriodIdValue(d.periodId), values: newValues });
+      decimasAdded++;
+    }
+  });
+
+  // Entregas: por nombre+fecha. Si ya existe, se completan estados de estudiantes que no tenían (sin sobrescribir).
+  let entregasAdded = 0;
+  (importedGroup.entregas || []).forEach(ent=>{
+    const existing = localGroup.entregas.find(le=> le.name.trim().toLowerCase() === (ent.name||'').trim().toLowerCase() && le.date === ent.date);
+    if(existing){
+      if(!existing.estados) existing.estados = {};
+      Object.keys(ent.estados || {}).forEach(oldSid=>{
+        const newSid = studentIdMap.get(oldSid) || oldSid;
+        if(!existing.estados[newSid]) existing.estados[newSid] = ent.estados[oldSid];
+      });
+    } else {
+      const newEstados = {};
+      Object.keys(ent.estados || {}).forEach(oldSid=>{ newEstados[studentIdMap.get(oldSid) || oldSid] = ent.estados[oldSid]; });
+      localGroup.entregas.push({
+        ...ent, id: uid(),
+        periodId: remapPeriodIdValue(ent.periodId),
+        processId: ent.processId ? (processIdMap.get(ent.processId) || null) : null,
+        estados: newEstados
+      });
+      entregasAdded++;
+    }
+  });
+
+  // Bitácora: son eventos discretos difíciles de deduplicar con certeza — se agregan todos como registros nuevos.
+  (importedGroup.bitacora || []).forEach(b=>{
+    localGroup.bitacora.push({
+      ...b, id: uid(),
+      periodId: remapPeriodIdValue(b.periodId),
+      studentIds: (b.studentIds || []).map(oldSid=> studentIdMap.get(oldSid) || oldSid)
+    });
+  });
+
+  return { sessionsAdded, evalsAdded, evalsFilled, decimasAdded, entregasAdded, studentIdMap };
+}
+
+function importAdditionalData(file){
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const data = JSON.parse(ev.target.result);
+      if(!data || !Array.isArray(data.groups)){ showToast('Ese archivo no es un respaldo válido'); return; }
+      if(!state.periods) state.periods = [];
+      if(!state.schedule) state.schedule = [];
+
+      // 1) Emparejar/crear periodos: por nombre, sin duplicar
+      const periodIdMap = new Map();
+      (data.periods || []).forEach(p=>{
+        const existing = state.periods.find(lp=> lp.name.trim().toLowerCase() === (p.name||'').trim().toLowerCase());
+        if(existing){
+          periodIdMap.set(p.id, existing.id);
+        } else {
+          const newPeriod = { ...p, id: uid() };
+          state.periods.push(newPeriod);
+          periodIdMap.set(p.id, newPeriod.id);
+        }
+      });
+      const remapPeriodId = (item)=>{
+        if(item.periodId && periodIdMap.has(item.periodId)) item.periodId = periodIdMap.get(item.periodId);
+      };
+
+      // 2) Cursos: los que YA EXISTEN (por nombre) se fusionan por dentro; los que no existen se agregan completos
+      let added = 0, merged = 0;
+      let sessionsAdded = 0, evalsAdded = 0, evalsFilled = 0, decimasAdded = 0, entregasAdded = 0;
+      const groupIdMap = new Map(); // solo para cursos recién agregados (para remapear su horario)
+      const mergedGroupIdMap = new Map(); // groupId importado -> groupId local existente (para remapear su horario)
+      data.groups.forEach(g=>{
+        const localMatch = state.groups.find(lg=> lg.name.trim().toLowerCase() === (g.name||'').trim().toLowerCase());
+        if(localMatch){
+          const result = mergeGroupData(localMatch, g, periodIdMap);
+          mergedGroupIdMap.set(g.id, localMatch.id);
+          sessionsAdded += result.sessionsAdded;
+          evalsAdded += result.evalsAdded;
+          evalsFilled += result.evalsFilled;
+          decimasAdded += result.decimasAdded;
+          entregasAdded += result.entregasAdded;
+          merged++;
+          return;
+        }
+        const newGroup = JSON.parse(JSON.stringify(g));
+        const oldGroupId = newGroup.id;
+        newGroup.id = uid();
+        groupIdMap.set(oldGroupId, newGroup.id);
+        if(!newGroup.students) newGroup.students = [];
+        if(!newGroup.indicators) newGroup.indicators = [];
+        if(!newGroup.sessions) newGroup.sessions = [];
+        if(!newGroup.evaluations) newGroup.evaluations = [];
+        if(!newGroup.decimas) newGroup.decimas = [];
+        if(!newGroup.gradeGroups) newGroup.gradeGroups = [];
+        if(!newGroup.processes) newGroup.processes = [];
+        if(!newGroup.bitacora) newGroup.bitacora = [];
+        if(!newGroup.entregas) newGroup.entregas = [];
+        [newGroup.sessions, newGroup.evaluations, newGroup.decimas, newGroup.gradeGroups, newGroup.processes, newGroup.bitacora, newGroup.entregas]
+          .forEach(list=> list.forEach(remapPeriodId));
+        state.groups.push(newGroup);
+        added++;
+      });
+
+      // 3) Horario: se agregan las clases de cursos nuevos Y de cursos fusionados, evitando duplicados exactos
+      let scheduleAdded = 0;
+      (data.schedule || []).forEach(e=>{
+        let newGroupId = null;
+        if(groupIdMap.has(e.groupId)) newGroupId = groupIdMap.get(e.groupId);
+        else if(mergedGroupIdMap.has(e.groupId)) newGroupId = mergedGroupIdMap.get(e.groupId);
+        if(!newGroupId) return;
+        const dup = state.schedule.some(le=> le.groupId===newGroupId && le.day===e.day && le.startTime===e.startTime);
+        if(dup) return;
+        state.schedule.push({ ...e, id: uid(), groupId: newGroupId });
+        scheduleAdded++;
+      });
+
+      saveState();
+      closeDriveSettings();
+      renderAll();
+      const parts = [];
+      if(added > 0) parts.push(`${added} curso(s) nuevo(s)`);
+      if(merged > 0) parts.push(`${merged} curso(s) existente(s) fusionado(s) (${sessionsAdded} clase(s), ${evalsAdded} evaluación(es) nueva(s) + ${evalsFilled} puntaje(s) completado(s), ${decimasAdded} décima(s), ${entregasAdded} entrega(s))`);
+      if(scheduleAdded > 0) parts.push(`${scheduleAdded} clase(s) de horario`);
+      showToast(parts.length ? 'Se agregó: ' + parts.join(' · ') : 'No había datos nuevos para agregar.');
+
+    }catch(e){
+      console.error('Error agregando datos', e);
+      showToast('No se pudo leer ese archivo');
     }
   };
   reader.readAsText(file);
