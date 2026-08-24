@@ -4568,6 +4568,12 @@ function renderCalificaciones(group){
         evaluations.map(e=>{
           const color = e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null;
           const gg = e.gradeGroupId ? gradeGroups.find(g=>g.id===e.gradeGroupId) : null;
+          let reprobados = 0, pendientes = 0;
+          group.students.forEach(s=>{
+            const nota = computeStudentEvalGrade(e, s.id);
+            if(nota === null) pendientes++;
+            else if(nota < 4) reprobados++;
+          });
           return `
           <div class="student-list-item" style="align-items:flex-start; ${color ? `border-left:4px solid ${color.text}; padding-left:8px;` : ''}">
             <div>
@@ -4577,6 +4583,10 @@ function renderCalificaciones(group){
               ${e.processId ? `<span class="pill" style="margin-left:6px;">📂 ${escapeHtml((group.processes.find(p=>p.id===e.processId)||{}).name || '—')}</span>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
                 ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
+              </div>
+              <div class="muted" style="margin-top:2px;">
+                ${reprobados > 0 ? `<span style="color:var(--danger); font-weight:700;">🔴 ${reprobados} reprobado(s)</span>` : '<span style="color:var(--success);">✅ Sin reprobados</span>'}
+                ${pendientes > 0 ? ` · <span style="color:var(--text-dim); font-weight:700;">⏳ ${pendientes} pendiente(s)</span>` : ''}
               </div>
             </div>
             <div class="row" style="gap:6px;">
@@ -4598,6 +4608,19 @@ function renderCalificaciones(group){
           <button class="btn btn-outline btn-sm" onclick="exportCalificacionesToWord(getActiveGroup())">⬇️ Word</button>
         </div>
       </div>
+      ${(()=>{
+        let finalReprobados = 0, finalPendientes = 0;
+        group.students.forEach(s=>{
+          const g = computeStudentFinalGrade(group, s.id);
+          if(g.finalGrade === null) finalPendientes++;
+          else if(g.finalGrade < 4) finalReprobados++;
+        });
+        return `<p class="muted" style="margin-top:4px;">
+          Según nota final:
+          ${finalReprobados > 0 ? `<span style="color:var(--danger); font-weight:700;">🔴 ${finalReprobados} reprobado(s)</span>` : '<span style="color:var(--success);">✅ Sin reprobados</span>'}
+          ${finalPendientes > 0 ? ` · <span style="color:var(--text-dim); font-weight:700;">⏳ ${finalPendientes} pendiente(s)</span>` : ''}
+        </p>`;
+      })()}
       <div style="overflow-x:auto;">
       <table>
         <thead>
@@ -4630,7 +4653,7 @@ function renderCalificaciones(group){
                   return `<td style="background:${color.bg}; color:${color.text}; font-weight:700;">${nota !== null ? nota.toFixed(1) : '-'}</td>`;
                 }).join('')}
                 <td>${result.promedioSimple !== null ? result.promedioSimple.toFixed(1) : '-'}</td>
-                <td class="avg-badge">${result.finalGrade !== null ? result.finalGrade.toFixed(1) : '-'}</td>
+                <td class="avg-badge" style="${result.finalGrade !== null && result.finalGrade < 4 ? 'background:var(--danger-light); color:var(--danger);' : ''}">${result.finalGrade !== null ? result.finalGrade.toFixed(1) : '-'}</td>
               </tr>
             `;
           }).join('')}
