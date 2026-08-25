@@ -3487,7 +3487,7 @@ function openDecimasBulkForm(evalId){
       </div>
 
       <div class="row" style="margin:10px 0;">
-        <button class="btn btn-ink btn-sm" onclick="applyDecimasBulkAllAvailable('${evalId}')">✅ Aplicar todas las disponibles a todos</button>
+        <button class="btn btn-ink btn-sm" onclick="applyDecimasBulkAllAvailable('${evalId}')" title="A cada estudiante le aplica solo lo necesario para llegar a la nota 7,0 (o el máximo disponible si no le alcanza) — a quien ya está en 7,0 no se le toca nada, y nunca se desperdician décimas de más">🎯 Aplicar el máximo necesario (tope 7,0)</button>
       </div>
       <div style="max-height:40vh; overflow-y:auto;">
       <table>
@@ -3549,17 +3549,24 @@ function applyDecimasBulkAllAvailable(evalId){
   const ev = group.evaluations.find(e=>e.id===evalId);
   if(!ev) return;
   if(!ev.decimasAplicadas) ev.decimasAplicadas = {};
-  let count = 0;
+  let count = 0, skippedNoNeed = 0, skippedNoDecimas = 0;
   group.students.forEach(s=>{
+    const currentGrade = computeStudentEvalGrade(ev, s.id);
+    if(currentGrade === null) return; // sin puntaje aún: no hay nota que corregir
+    if(currentGrade >= 7.0){ skippedNoNeed++; return; } // ya está en el techo (7.0): no se le aplica nada
     const available = computeStudentDecimasAvailable(group, s.id);
-    if(available > 0){
-      ev.decimasAplicadas[s.id] = Math.round(((ev.decimasAplicadas[s.id] || 0) + available) * 10) / 10;
-      count++;
-    }
+    if(available <= 0){ skippedNoDecimas++; return; } // no tiene décimas: no se le aplica nada
+    const deficit = Math.round((7.0 - currentGrade) * 100) / 100; // lo que le falta para llegar al techo (7.0)
+    const needed = Math.ceil(deficit * 10 - 1e-9); // décimas necesarias para llegar justo a 7.0, sin pasarse ni desperdiciar
+    const toApply = Math.min(needed, available); // nunca más de lo que necesita, ni más de lo disponible
+    ev.decimasAplicadas[s.id] = Math.round(((ev.decimasAplicadas[s.id] || 0) + toApply) * 10) / 10;
+    count++;
   });
   saveState();
   openDecimasBulkForm(evalId);
-  showToast(count > 0 ? `Se aplicaron décimas disponibles a ${count} estudiante(s)` : 'Nadie tenía décimas disponibles');
+  showToast(count > 0
+    ? `Se aplicó el máximo necesario a ${count} estudiante(s), sin pasarse del 7,0 ni desperdiciar décimas`
+    : 'Nadie necesitaba décimas (ya estaban en el 7,0, no tenían puntaje, o no tenían décimas disponibles)');
 }
 
 let decActiveSessionId = null;
