@@ -3478,11 +3478,13 @@ function openDecimasBulkForm(evalId){
         }).join('')}
       </div>
 
-      <p class="muted" style="font-weight:600; margin-top:10px; margin-bottom:4px;">Décimas disponibles por estudiante</p>
-      <div style="display:flex; flex-wrap:wrap; gap:6px; max-height:90px; overflow-y:auto;">
+      <p class="muted" style="font-weight:600; margin-top:10px; margin-bottom:4px;">Décimas por estudiante (total · usadas · restantes)</p>
+      <div style="display:flex; flex-wrap:wrap; gap:6px; max-height:110px; overflow-y:auto;">
         ${group.students.map(s=>{
+          const total = computeStudentDecimasTotal(group, s.id);
+          const usadas = computeStudentDecimasApplied(group, s.id);
           const disponible = computeStudentDecimasAvailable(group, s.id);
-          return `<span class="pill" style="${disponible>0 ? 'color:var(--success); border-color:var(--success-border); background:var(--success-light);' : ''}">${escapeHtml(s.name)}: ${disponible}</span>`;
+          return `<span class="pill" style="${disponible>0 ? 'color:var(--success); border-color:var(--success-border); background:var(--success-light);' : ''}">${escapeHtml(s.name)}: ${total} · ${usadas} · ${disponible}</span>`;
         }).join('')}
       </div>
 
@@ -3619,14 +3621,20 @@ function renderDecimas(group){
         </div>
       </div>
       <table>
-        <thead><tr><th>Estudiante</th><th>Total décimas</th></tr></thead>
+        <thead><tr><th>Estudiante</th><th>Total</th><th>Usadas</th><th>Restantes</th></tr></thead>
         <tbody>
-          ${group.students.map(s=>`
+          ${group.students.map(s=>{
+            const total = computeStudentDecimasTotal(group, s.id);
+            const usadas = computeStudentDecimasApplied(group, s.id);
+            const disponible = computeStudentDecimasAvailable(group, s.id);
+            return `
             <tr>
               <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
-              <td class="avg-badge">${computeStudentDecimasTotal(group, s.id)}</td>
+              <td>${total}</td>
+              <td class="muted">${usadas}</td>
+              <td class="avg-badge" style="color:var(--success);">${disponible}</td>
             </tr>
-          `).join('')}
+          `;}).join('')}
         </tbody>
       </table>
     </div>
