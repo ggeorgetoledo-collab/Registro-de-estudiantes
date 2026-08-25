@@ -3449,6 +3449,7 @@ function openDecimasBulkForm(evalId){
   const group = getActiveGroup();
   const ev = group.evaluations.find(e=>e.id===evalId);
   if(!ev) return;
+  const evaluations = getActiveEvaluations(group);
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'decimasBulkFormOverlay';
@@ -3457,10 +3458,38 @@ function openDecimasBulkForm(evalId){
       <button class="modal-close" onclick="closeDecimasBulkForm()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🎯 Aplicar décimas</h2>
       <p class="muted">"${escapeHtml(ev.name)}" · 1 décima = 0,1 en la nota.</p>
-      <div class="row" style="margin:8px 0;">
+
+      <p class="muted" style="font-weight:600; margin-top:10px; margin-bottom:4px;">¿Qué evaluación necesita décimas?</p>
+      <div style="display:flex; flex-direction:column; gap:4px; max-height:130px; overflow-y:auto;">
+        ${evaluations.map(otherEv=>{
+          let reprobados = 0, pendientes = 0;
+          group.students.forEach(s=>{
+            const nota = computeStudentEvalGrade(otherEv, s.id);
+            if(nota === null) pendientes++;
+            else if(nota < 4) reprobados++;
+          });
+          const isActive = otherEv.id === evalId;
+          return `
+            <button class="btn btn-sm ${isActive ? 'btn-accent' : 'btn-outline'}" style="display:flex; justify-content:space-between; align-items:center;" onclick="openDecimasBulkForm('${otherEv.id}')">
+              <span>${escapeHtml(otherEv.name)}</span>
+              <span>${reprobados > 0 ? `🔴 ${reprobados}` : ''}${pendientes > 0 ? ` ⏳ ${pendientes}` : ''}${reprobados===0 && pendientes===0 ? '✅' : ''}</span>
+            </button>
+          `;
+        }).join('')}
+      </div>
+
+      <p class="muted" style="font-weight:600; margin-top:10px; margin-bottom:4px;">Décimas disponibles por estudiante</p>
+      <div style="display:flex; flex-wrap:wrap; gap:6px; max-height:90px; overflow-y:auto;">
+        ${group.students.map(s=>{
+          const disponible = computeStudentDecimasAvailable(group, s.id);
+          return `<span class="pill" style="${disponible>0 ? 'color:var(--success); border-color:var(--success-border); background:var(--success-light);' : ''}">${escapeHtml(s.name)}: ${disponible}</span>`;
+        }).join('')}
+      </div>
+
+      <div class="row" style="margin:10px 0;">
         <button class="btn btn-ink btn-sm" onclick="applyDecimasBulkAllAvailable('${evalId}')">✅ Aplicar todas las disponibles a todos</button>
       </div>
-      <div style="max-height:50vh; overflow-y:auto;">
+      <div style="max-height:40vh; overflow-y:auto;">
       <table>
         <thead><tr><th>Estudiante</th><th>Disp.</th><th>Aquí</th><th>Aplicar</th></tr></thead>
         <tbody>
