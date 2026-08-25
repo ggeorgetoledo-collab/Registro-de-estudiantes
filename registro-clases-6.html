@@ -3444,6 +3444,95 @@ function removeDecimasFromEval(studentId, evalId){
   showToast('Se revirtió la aplicación de décimas — volvieron a estar disponibles');
 }
 
+/* ============ APLICAR DÉCIMAS A UNA EVALUACIÓN (vista rápida, todos los estudiantes) ============ */
+function openDecimasBulkForm(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'decimasBulkFormOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="max-width:540px;">
+      <button class="modal-close" onclick="closeDecimasBulkForm()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🎯 Aplicar décimas</h2>
+      <p class="muted">"${escapeHtml(ev.name)}" · 1 décima = 0,1 en la nota.</p>
+      <div class="row" style="margin:8px 0;">
+        <button class="btn btn-ink btn-sm" onclick="applyDecimasBulkAllAvailable('${evalId}')">✅ Aplicar todas las disponibles a todos</button>
+      </div>
+      <div style="max-height:50vh; overflow-y:auto;">
+      <table>
+        <thead><tr><th>Estudiante</th><th>Disp.</th><th>Aquí</th><th>Aplicar</th></tr></thead>
+        <tbody>
+          ${group.students.map(s=>{
+            const disponible = computeStudentDecimasAvailable(group, s.id);
+            const aplicadasAqui = (ev.decimasAplicadas && ev.decimasAplicadas[s.id]) || 0;
+            return `
+              <tr>
+                <td>${escapeHtml(s.name)}</td>
+                <td style="color:var(--success); font-weight:700;">${disponible}</td>
+                <td>${aplicadasAqui || '-'}</td>
+                <td>
+                  <div class="row" style="gap:4px; flex-wrap:nowrap;">
+                    <input type="number" id="decBulkAmt-${s.id}" step="1" min="0" max="${disponible}" value="${disponible > 0 ? Math.min(disponible,1) : 0}" style="width:56px;" ${disponible<=0 ? 'disabled' : ''}>
+                    <button class="btn btn-accent btn-sm" onclick="applyDecimasBulkRow('${evalId}','${s.id}')" ${disponible<=0 ? 'disabled' : ''}>+</button>
+                    ${aplicadasAqui ? `<button class="btn btn-outline btn-sm" onclick="removeDecimasBulkRow('${evalId}','${s.id}')">↩️</button>` : ''}
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeDecimasBulkForm(){
+  const overlay = document.getElementById('decimasBulkFormOverlay');
+  if(overlay) overlay.remove();
+}
+function applyDecimasBulkRow(evalId, studentId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  const input = document.getElementById(`decBulkAmt-${studentId}`);
+  const amount = Number(input.value);
+  if(!amount || amount <= 0){ showToast('Ingresa una cantidad válida'); return; }
+  const available = computeStudentDecimasAvailable(group, studentId);
+  if(amount > available + 0.001){ showToast('No tiene suficientes décimas disponibles (dispone de ' + available + ')'); return; }
+  if(!ev.decimasAplicadas) ev.decimasAplicadas = {};
+  ev.decimasAplicadas[studentId] = Math.round(((ev.decimasAplicadas[studentId] || 0) + amount) * 10) / 10;
+  saveState();
+  openDecimasBulkForm(evalId);
+}
+function removeDecimasBulkRow(evalId, studentId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev || !ev.decimasAplicadas) return;
+  delete ev.decimasAplicadas[studentId];
+  saveState();
+  openDecimasBulkForm(evalId);
+}
+function applyDecimasBulkAllAvailable(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  if(!ev.decimasAplicadas) ev.decimasAplicadas = {};
+  let count = 0;
+  group.students.forEach(s=>{
+    const available = computeStudentDecimasAvailable(group, s.id);
+    if(available > 0){
+      ev.decimasAplicadas[s.id] = Math.round(((ev.decimasAplicadas[s.id] || 0) + available) * 10) / 10;
+      count++;
+    }
+  });
+  saveState();
+  openDecimasBulkForm(evalId);
+  showToast(count > 0 ? `Se aplicaron décimas disponibles a ${count} estudiante(s)` : 'Nadie tenía décimas disponibles');
+}
+
 let decActiveSessionId = null;
 
 function renderDecimas(group){
@@ -4591,6 +4680,7 @@ function renderCalificaciones(group){
             </div>
             <div class="row" style="gap:6px;">
               <button class="btn btn-accent btn-sm" onclick="openEvalScores('${e.id}')">Completar puntajes</button>
+              <button class="btn btn-outline btn-sm" onclick="openDecimasBulkForm('${e.id}')">🎯 Décimas</button>
               <button class="btn btn-outline btn-sm" onclick="editEvaluation('${e.id}')">Editar</button>
               <button class="btn btn-danger btn-sm" onclick="deleteEvaluation('${e.id}')">Eliminar</button>
             </div>
