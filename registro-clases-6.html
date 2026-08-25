@@ -4768,13 +4768,17 @@ function renderCalificaciones(group){
         </thead>
         <tbody>
           ${group.students.map(s=>{
-            const notas = evaluations.map(e=> ({ nota: computeStudentEvalGrade(e, s.id), color: e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null }));
+            const notas = evaluations.map(e=> ({
+              nota: computeStudentEvalGrade(e, s.id),
+              color: e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null,
+              decimas: (e.decimasAplicadas && e.decimasAplicadas[s.id]) || 0
+            }));
             const groupUnits = units.filter(u=>u.type==='group');
             const result = computeStudentFinalGrade(group, s.id);
             return `
               <tr>
                 <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
-                ${notas.map(n=> `<td ${n.color ? `style="background:${n.color.bg};"` : ''}>${n.nota !== null ? n.nota.toFixed(1) : '-'}</td>`).join('')}
+                ${notas.map(n=> `<td ${n.color ? `style="background:${n.color.bg};"` : ''}>${n.nota !== null ? n.nota.toFixed(1) : '-'}${n.decimas > 0 ? `<br><span class="muted" style="font-size:0.68rem; color:var(--primary); font-weight:700;" title="${n.decimas} décima(s) aplicada(s) a esta evaluación">+${n.decimas} déc.</span>` : ''}</td>`).join('')}
                 ${groupUnits.map(u=>{
                   const color = gradeGroupColor(u.gradeGroup.id);
                   const nota = computeUnitGrade(u, s.id);
@@ -5043,13 +5047,14 @@ function renderEvalScores(group, evaluation){
       <div style="overflow-x:auto;">
       <table>
         <thead>
-          <tr><th>Estudiante</th><th>Puntaje obtenido</th><th>Nota</th><th>Adecuación</th></tr>
+          <tr><th>Estudiante</th><th>Puntaje obtenido</th><th>Nota</th><th>Décimas aplicadas</th><th>Adecuación</th></tr>
         </thead>
         <tbody>
           ${group.students.map(s=>{
             const score = evaluation.scores ? evaluation.scores[s.id] : null;
             const nota = computeStudentEvalGrade(evaluation, s.id);
             const hasOverride = evaluation.overrides && evaluation.overrides[s.id];
+            const decimasAqui = (evaluation.decimasAplicadas && evaluation.decimasAplicadas[s.id]) || 0;
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
@@ -5057,6 +5062,7 @@ function renderEvalScores(group, evaluation){
                     value="${score !== null && score !== undefined ? score : ''}"
                     onchange="saveEvalScore('${evaluation.id}','${s.id}', this.value)"></td>
                 <td class="avg-badge">${nota !== null ? nota.toFixed(1) : '-'}</td>
+                <td>${decimasAqui > 0 ? `<span style="color:var(--primary); font-weight:700;">+${decimasAqui}</span>` : '<span class="muted">-</span>'}</td>
                 <td>
                   <button class="btn btn-outline btn-sm" onclick="openEvalOverride('${evaluation.id}','${s.id}')">
                     ${hasOverride ? '✎ Editado' : 'Ajustar'}
