@@ -3553,12 +3553,14 @@ function applyDecimasBulkAllAvailable(evalId){
   group.students.forEach(s=>{
     const currentGrade = computeStudentEvalGrade(ev, s.id);
     if(currentGrade === null) return; // sin puntaje aún: no hay nota que corregir
-    if(currentGrade >= 7.0){ skippedNoNeed++; return; } // ya está en el techo (7.0): no se le aplica nada
+    const roundedGrade = Math.round(currentGrade * 10) / 10; // la misma nota que se muestra en pantalla (1 decimal)
+    if(roundedGrade >= 7.0){ skippedNoNeed++; return; } // ya se ve como 7.0: no se le aplica nada
     const available = computeStudentDecimasAvailable(group, s.id);
     if(available <= 0){ skippedNoDecimas++; return; } // no tiene décimas: no se le aplica nada
-    const deficit = Math.round((7.0 - currentGrade) * 100) / 100; // lo que le falta para llegar al techo (7.0)
+    const deficit = Math.round((7.0 - roundedGrade) * 100) / 100; // lo que le falta para llegar al techo (7.0), sobre la nota ya redondeada
     const needed = Math.ceil(deficit * 10 - 1e-9); // décimas necesarias para llegar justo a 7.0, sin pasarse ni desperdiciar
     const toApply = Math.min(needed, available); // nunca más de lo que necesita, ni más de lo disponible
+    if(toApply <= 0) return; // por seguridad: si el cálculo da 0, no se toca nada
     ev.decimasAplicadas[s.id] = Math.round(((ev.decimasAplicadas[s.id] || 0) + toApply) * 10) / 10;
     count++;
   });
