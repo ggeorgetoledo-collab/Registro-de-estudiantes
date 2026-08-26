@@ -2,10 +2,26 @@
 <html lang="es">
 <head>
 <script>
+  window.THEME_COLOR_PRESETS = {
+    purple: { light:{primary:'#6C4EE3',primaryDark:'#5638C4',primaryLight:'#F1ECFC',primaryBorder:'rgba(108,78,227,0.3)'}, dark:{primary:'#A78BFA',primaryDark:'#C4B5FD',primaryLight:'rgba(167,139,250,0.16)',primaryBorder:'rgba(167,139,250,0.4)'} },
+    blue:   { light:{primary:'#2C72C7',primaryDark:'#1F5A9E',primaryLight:'#E7F1FC',primaryBorder:'rgba(44,114,199,0.3)'}, dark:{primary:'#7AB8F5',primaryDark:'#A7D3FA',primaryLight:'rgba(122,184,245,0.16)',primaryBorder:'rgba(122,184,245,0.4)'} },
+    green:  { light:{primary:'#1F9D64',primaryDark:'#187A4E',primaryLight:'#E6F8EF',primaryBorder:'rgba(31,157,100,0.3)'}, dark:{primary:'#4ADE94',primaryDark:'#86EFB8',primaryLight:'rgba(74,222,148,0.16)',primaryBorder:'rgba(74,222,148,0.4)'} },
+    orange: { light:{primary:'#C6871A',primaryDark:'#9E6B14',primaryLight:'#FDF3DE',primaryBorder:'rgba(198,135,26,0.3)'}, dark:{primary:'#F0B429',primaryDark:'#F5C95C',primaryLight:'rgba(240,180,41,0.16)',primaryBorder:'rgba(240,180,41,0.4)'} },
+    pink:   { light:{primary:'#C93E85',primaryDark:'#A32E6B',primaryLight:'#FCEAF3',primaryBorder:'rgba(201,62,133,0.3)'}, dark:{primary:'#F472B6',primaryDark:'#F9A8D4',primaryLight:'rgba(244,114,182,0.16)',primaryBorder:'rgba(244,114,182,0.4)'} },
+    teal:   { light:{primary:'#1B8A8A',primaryDark:'#146868',primaryLight:'#E0F7F7',primaryBorder:'rgba(27,138,138,0.3)'}, dark:{primary:'#5CD6D6',primaryDark:'#8FE6E6',primaryLight:'rgba(92,214,214,0.16)',primaryBorder:'rgba(92,214,214,0.4)'} },
+  };
   (function(){
     try{
       var t = localStorage.getItem('themePreference');
       if(t === 'dark') document.documentElement.setAttribute('data-theme','dark');
+      var colorName = localStorage.getItem('themeColorName') || 'purple';
+      var preset = window.THEME_COLOR_PRESETS[colorName] || window.THEME_COLOR_PRESETS.purple;
+      var vars = (t === 'dark') ? preset.dark : preset.light;
+      var root = document.documentElement.style;
+      root.setProperty('--primary', vars.primary);
+      root.setProperty('--primary-dark', vars.primaryDark);
+      root.setProperty('--primary-light', vars.primaryLight);
+      root.setProperty('--primary-border', vars.primaryBorder);
     }catch(e){}
   })();
 </script>
@@ -521,6 +537,7 @@
     <button class="btn btn-outline btn-sm" id="driveSettingsBtn" onclick="openDriveSettings()" title="Google Drive">☁️ Drive</button>
     <button class="btn btn-outline btn-sm" id="reminderSettingsBtn" onclick="openReminderSettings()" title="Recordatorio de clases">🔔</button>
     <button class="btn btn-outline btn-sm" id="themeToggleBtn" onclick="toggleTheme()" title="Cambiar tema">🌙</button>
+    <button class="btn btn-outline btn-sm" onclick="openThemeColorPicker()" title="Cambiar color del tema">🎨</button>
   </div>
 </header>
 
@@ -1325,6 +1342,12 @@ const GRADE_GROUP_PALETTE = [
   {bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE'},
   {bg:'#E7F1FC', text:'#2C72C7', border:'#BEDBF7'},
   {bg:'#FCEAF3', text:'#C93E85', border:'#F5C1DC'},
+  {bg:'#E0F7F7', text:'#1B8A8A', border:'#B8E8E8'},
+  {bg:'#E8EAFB', text:'#4453C4', border:'#C7CCF5'},
+  {bg:'#F5E6DC', text:'#A85A2E', border:'#E8C9AE'},
+  {bg:'#F0F5DC', text:'#7A8A1F', border:'#DCE8AE'},
+  {bg:'#ECEEF0', text:'#55606B', border:'#D2D8DE'},
+  {bg:'#E0F4FB', text:'#1D8FB8', border:'#B8E4F0'},
 ];
 function gradeGroupColor(groupId){
   const group = getActiveGroup();
@@ -2375,6 +2398,12 @@ const GROUP_PALETTE = [
   {bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE'},
   {bg:'#E7F1FC', text:'#2C72C7', border:'#BEDBF7'},
   {bg:'#FCEAF3', text:'#C93E85', border:'#F5C1DC'},
+  {bg:'#E0F7F7', text:'#1B8A8A', border:'#B8E8E8'},
+  {bg:'#E8EAFB', text:'#4453C4', border:'#C7CCF5'},
+  {bg:'#F5E6DC', text:'#A85A2E', border:'#E8C9AE'},
+  {bg:'#F0F5DC', text:'#7A8A1F', border:'#DCE8AE'},
+  {bg:'#ECEEF0', text:'#55606B', border:'#D2D8DE'},
+  {bg:'#E0F4FB', text:'#1D8FB8', border:'#B8E4F0'},
 ];
 function groupColor(groupId){
   const idx = state.groups.findIndex(g=>g.id===groupId);
@@ -6520,6 +6549,67 @@ function toggleTheme(){
     localStorage.setItem('themePreference', 'dark');
   }
   applyThemeIcon();
+  applyThemeColor(loadThemeColorName());
+}
+
+/* ============ COLOR DEL TEMA ============ */
+const THEME_COLOR_LABELS = {
+  purple: '🟣 Morado (original)',
+  blue: '🔵 Azul',
+  green: '🟢 Verde',
+  orange: '🟠 Naranjo',
+  pink: '🌸 Rosa',
+  teal: '🩵 Teal',
+};
+function loadThemeColorName(){
+  return localStorage.getItem('themeColorName') || 'purple';
+}
+function applyThemeColor(colorName){
+  const preset = THEME_COLOR_PRESETS[colorName] || THEME_COLOR_PRESETS.purple;
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const vars = isDark ? preset.dark : preset.light;
+  const root = document.documentElement.style;
+  root.setProperty('--primary', vars.primary);
+  root.setProperty('--primary-dark', vars.primaryDark);
+  root.setProperty('--primary-light', vars.primaryLight);
+  root.setProperty('--primary-border', vars.primaryBorder);
+}
+function changeThemeColor(colorName){
+  localStorage.setItem('themeColorName', colorName);
+  applyThemeColor(colorName);
+  closeThemeColorPicker();
+  showToast('Color del tema actualizado');
+}
+function openThemeColorPicker(){
+  const current = loadThemeColorName();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'themeColorPickerOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeThemeColorPicker()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🎨 Color del tema</h2>
+      <p class="muted">Elige el color principal de la app (botones, resaltados, etc). Funciona con el modo claro y oscuro.</p>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+        ${Object.keys(THEME_COLOR_PRESETS).map(name=>{
+          const preset = THEME_COLOR_PRESETS[name];
+          const isActive = name === current;
+          return `
+            <button class="btn ${isActive ? 'btn-accent' : 'btn-outline'} btn-sm" style="justify-content:flex-start; gap:10px;" onclick="changeThemeColor('${name}')">
+              <span style="display:inline-block; width:18px; height:18px; border-radius:50%; background:${preset.light.primary}; border:1px solid rgba(0,0,0,0.15); flex-shrink:0;"></span>
+              ${THEME_COLOR_LABELS[name]}${isActive ? ' ✓' : ''}
+            </button>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) closeThemeColorPicker(); });
+  document.body.appendChild(overlay);
+}
+function closeThemeColorPicker(){
+  const overlay = document.getElementById('themeColorPickerOverlay');
+  if(overlay) overlay.remove();
 }
 
 /* ============ INICIO ============ */
