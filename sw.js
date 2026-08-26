@@ -1,4 +1,4 @@
-const CACHE_NAME = 'registro-clases-cache-v67';
+const CACHE_NAME = 'registro-clases-cache-v68';
 const ASSETS_TO_CACHE = [
   './registro-clases-6.html',
   './manifest.json',
