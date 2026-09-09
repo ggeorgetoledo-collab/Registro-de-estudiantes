@@ -3806,6 +3806,42 @@ function getEntregaDeadline(entrega){
   return { fecha, hora };
 }
 
+// Momento en que se considera vencida una entrega: usa el plazo configurado si existe,
+// o el final del día de la fecha de la guía si no se configuró un plazo específico.
+function getEntregaEffectiveDeadlineTimestamp(entrega){
+  const dl = getEntregaDeadline(entrega);
+  if(dl){
+    const [hh, mm] = dl.hora.split(':').map(Number);
+    const d = new Date(dl.fecha + 'T00:00:00');
+    d.setHours(hh, mm, 0, 0);
+    return d.getTime();
+  }
+  return new Date(entrega.date + 'T23:59:59').getTime();
+}
+
+// Marca automáticamente como "No entregada" a quien no tenga ningún estado una vez vencido el plazo.
+// No toca a quien ya tiene un estado (marcado manual o automático previo) — eso se puede seguir editando a mano.
+function autoMarkOverdueEntregas(){
+  const now = Date.now();
+  let changed = false;
+  (state.groups || []).forEach(group=>{
+    (group.entregas || []).forEach(entrega=>{
+      if(getEntregaEffectiveDeadlineTimestamp(entrega) > now) return;
+      if(!entrega.estados) entrega.estados = {};
+      if(!entrega.fechas) entrega.fechas = {};
+      (group.students || []).forEach(s=>{
+        if(!entrega.estados[s.id]){
+          entrega.estados[s.id] = 'no_entregada';
+          entrega.fechas[s.id] = toISODate(new Date());
+          changed = true;
+        }
+      });
+    });
+  });
+  if(changed) saveState();
+  return changed;
+}
+
 // Cruza con el registro de "Trabajo en clases": ¿estuvo el estudiante presente el día indicado?
 // Devuelve true/false si hay clase registrada ese día, o null si no hay ningún registro de clase en esa fecha.
 function wasStudentPresentOnDate(group, studentId, dateISO){
@@ -3826,6 +3862,7 @@ function changeEntregaMatrixFilter(entregaId){
 
 function renderEntregas(group){
   if(!group.entregas) group.entregas = [];
+  autoMarkOverdueEntregas();
   if(entregaActiveId){
     const entrega = group.entregas.find(e=>e.id === entregaActiveId);
     if(entrega) return renderEntregaValues(group, entrega);
@@ -3926,6 +3963,7 @@ function renderEntregas(group){
         <option value="">Todas las entregas</option>
         ${entregas.map(e=>`<option value="${e.id}" ${entregaMatrixFilter===e.id?'selected':''}>${escapeHtml(e.name)} (${formatDate(e.date)})</option>`).join('')}
       </select>
+      <p class="muted" style="font-size:0.76rem; margin-top:4px;">Toca cualquier recuadro para cambiar el estado de ese estudiante en esa entrega.</p>
       ${(()=>{
         const cols = entregaMatrixFilter ? entregas.filter(e=>e.id===entregaMatrixFilter) : entregas;
         return `
@@ -3934,7 +3972,7 @@ function renderEntregas(group){
           <thead>
             <tr>
               <th>Estudiante</th>
-              ${cols.map(e=>`<th style="min-width:120px;">${escapeHtml(e.name)}<br><span class="muted" style="font-weight:400;">${formatDate(e.date)}</span></th>`).join('')}
+              ${cols.map(e=>`<th style="min-width:150px;">${escapeHtml(e.name)}<br><span class="muted" style="font-weight:400;">${formatDate(e.date)}</span></th>`).join('')}
             </tr>
           </thead>
           <tbody>
@@ -3944,7 +3982,14 @@ function renderEntregas(group){
                 ${cols.map(e=>{
                   const estado = e.estados ? e.estados[s.id] : null;
                   const info = estado ? ENTREGA_ESTADOS[estado] : null;
-                  return `<td style="text-align:center; ${info ? `background:${info.color.bg}; color:${info.color.text}; font-weight:700;` : ''}">${info ? info.label : '—'}</td>`;
+                  return `<td style="padding:3px;">
+                    <select onchange="setEntregaEstadoDirect('${e.id}','${s.id}', this.value)" style="width:100%; text-align:center; font-size:0.78rem; padding:5px 4px; ${info ? `background:${info.color.bg}; color:${info.color.text}; font-weight:700; border-color:${info.color.border};` : ''}">
+                      <option value="" ${!estado?'selected':''}>— Sin marcar</option>
+                      <option value="en_plazo" ${estado==='en_plazo'?'selected':''}>✅ En plazo</option>
+                      <option value="fuera_plazo" ${estado==='fuera_plazo'?'selected':''}>🟠 Fuera de plazo</option>
+                      <option value="no_entregada" ${estado==='no_entregada'?'selected':''}>🔴 No entregada</option>
+                    </select>
+                  </td>`;
                 }).join('')}
               </tr>
             `).join('')}
@@ -4117,6 +4162,30 @@ function applyEntregaToggle(entregaId, studentId){
     syncEntregaDecimaBonus(group, entrega, studentId, estado === 'en_plazo');
   }
   saveState();
+}
+// Fija el estado directamente (usado por el desplegable de la Vista general): permite elegir
+// cualquiera de los tres estados, o "" para dejarla sin marcar de nuevo.
+function setEntregaEstadoDirect(entregaId, studentId, estado){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===entregaId);
+  if(!entrega) return;
+  if(!entrega.estados) entrega.estados = {};
+  if(!entrega.fechas) entrega.fechas = {};
+  if(!entrega.excepciones) entrega.excepciones = {};
+
+  if(!estado){
+    delete entrega.estados[studentId];
+    delete entrega.fechas[studentId];
+    delete entrega.excepciones[studentId];
+    syncEntregaDecimaBonus(group, entrega, studentId, false);
+  } else {
+    entrega.estados[studentId] = estado;
+    entrega.fechas[studentId] = entrega.fechas[studentId] || toISODate(new Date());
+    if(estado !== 'en_plazo') delete entrega.excepciones[studentId];
+    syncEntregaDecimaBonus(group, entrega, studentId, estado === 'en_plazo');
+  }
+  saveState();
+  renderEntregas(group);
 }
 function applyEntregaException(entregaId, studentId){
   const group = getActiveGroup();
@@ -6681,7 +6750,12 @@ if(isDriveTokenValid(loadStoredDriveToken())){
 // Revisa cada 20 segundos si toca avisar del fin de alguna clase o del plazo de una entrega
 checkClassReminders();
 checkEntregaReminders();
-setInterval(()=>{ checkClassReminders(); checkEntregaReminders(); }, 20000);
+if(autoMarkOverdueEntregas() && currentTab === 'entregas') renderEntregas(getActiveGroup());
+setInterval(()=>{
+  checkClassReminders();
+  checkEntregaReminders();
+  if(autoMarkOverdueEntregas() && currentTab === 'entregas') renderEntregas(getActiveGroup());
+}, 20000);
 
 // Revisa cambios nuevos en Drive cada 30 segundos (evita interrumpir mientras se registra una clase)
 setInterval(()=>{
