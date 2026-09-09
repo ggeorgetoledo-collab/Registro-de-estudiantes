@@ -3818,6 +3818,11 @@ function wasStudentPresentOnDate(group, studentId, dateISO){
 }
 
 let entregaActiveId = null;
+let entregaMatrixFilter = '';
+function changeEntregaMatrixFilter(entregaId){
+  entregaMatrixFilter = entregaId || '';
+  renderEntregas(getActiveGroup());
+}
 
 function renderEntregas(group){
   if(!group.entregas) group.entregas = [];
@@ -3910,6 +3915,45 @@ function renderEntregas(group){
         }).join('')
       }
     </div>
+
+    ${entregas.length > 0 ? `
+    <div class="card app-font">
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Vista general</h2>
+      </div>
+      <label style="margin-top:4px;">Filtrar por entrega</label>
+      <select onchange="changeEntregaMatrixFilter(this.value)">
+        <option value="">Todas las entregas</option>
+        ${entregas.map(e=>`<option value="${e.id}" ${entregaMatrixFilter===e.id?'selected':''}>${escapeHtml(e.name)} (${formatDate(e.date)})</option>`).join('')}
+      </select>
+      ${(()=>{
+        const cols = entregaMatrixFilter ? entregas.filter(e=>e.id===entregaMatrixFilter) : entregas;
+        return `
+        <div style="overflow-x:auto; margin-top:10px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Estudiante</th>
+              ${cols.map(e=>`<th style="min-width:120px;">${escapeHtml(e.name)}<br><span class="muted" style="font-weight:400;">${formatDate(e.date)}</span></th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${group.students.map(s=>`
+              <tr>
+                <td>${escapeHtml(s.name)}</td>
+                ${cols.map(e=>{
+                  const estado = e.estados ? e.estados[s.id] : null;
+                  const info = estado ? ENTREGA_ESTADOS[estado] : null;
+                  return `<td style="text-align:center; ${info ? `background:${info.color.bg}; color:${info.color.text}; font-weight:700;` : ''}">${info ? info.label : '—'}</td>`;
+                }).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        </div>
+      `;})()}
+    </div>
+    ` : ''}
 
     ${entregas.length > 0 ? `
     <div class="card app-font">
