@@ -4713,6 +4713,12 @@ function toggleCalFormTab(tab){
   calFormTab = (calFormTab === tab) ? null : tab;
   renderCalificaciones(getActiveGroup());
 }
+let collapsedGradeGroups = new Set();
+function toggleGradeGroupCollapse(gradeGroupId){
+  if(collapsedGradeGroups.has(gradeGroupId)) collapsedGradeGroups.delete(gradeGroupId);
+  else collapsedGradeGroups.add(gradeGroupId);
+  renderCalificaciones(getActiveGroup());
+}
 
 function renderCalificaciones(group){
   if(!group.evaluations) group.evaluations = [];
@@ -4910,13 +4916,14 @@ function renderCalificaciones(group){
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${evaluations.map(e=>{
+            ${evaluations.filter(e=> !e.gradeGroupId || !collapsedGradeGroups.has(e.gradeGroupId)).map(e=>{
               const color = e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null;
               return `<th ${color ? `style="background:${color.bg}; color:${color.text};"` : ''}>${escapeHtml(e.name)}</th>`;
             }).join('')}
             ${gradeGroups.map(gg=>{
               const color = gradeGroupColor(gg.id);
-              return `<th style="background:${color.bg}; color:${color.text};">${escapeHtml(gg.name)} (sumativa)</th>`;
+              const isCollapsed = collapsedGradeGroups.has(gg.id);
+              return `<th style="background:${color.bg}; color:${color.text}; cursor:pointer;" onclick="toggleGradeGroupCollapse('${gg.id}')" title="${isCollapsed ? 'Mostrar evaluaciones del grupo' : 'Ocultar evaluaciones del grupo'}">${isCollapsed ? '▸' : '▾'} ${escapeHtml(gg.name)} (sumativa)</th>`;
             }).join('')}
             <th>Promedio simple</th>
             <th>Nota final</th>
@@ -4924,7 +4931,7 @@ function renderCalificaciones(group){
         </thead>
         <tbody>
           ${group.students.map(s=>{
-            const notas = evaluations.map(e=> ({
+            const notas = evaluations.filter(e=> !e.gradeGroupId || !collapsedGradeGroups.has(e.gradeGroupId)).map(e=> ({
               nota: computeStudentEvalGrade(e, s.id),
               color: e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null,
               decimas: (e.decimasAplicadas && e.decimasAplicadas[s.id]) || 0
