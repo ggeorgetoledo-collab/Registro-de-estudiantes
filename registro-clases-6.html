@@ -3882,6 +3882,9 @@ function renderEntregas(group){
   }
 
   const main = document.getElementById('main');
+  // Notas vinculadas a entregas que corresponden al filtro actual (se muestran como columna en el resumen)
+  const linkedGradeEvals = getActiveEvaluations(group).filter(ev=> ev.entregaLink &&
+    (!group.activeProcessId || !ev.entregaLink.processId || ev.entregaLink.processId === group.activeProcessId));
   if(group.students.length === 0){
     main.innerHTML = groupHeaderCard(group) + '<div class="card app-font"><div class="empty-state">Agrega estudiantes antes de registrar entregas.</div></div>';
     return;
@@ -4018,12 +4021,17 @@ function renderEntregas(group){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Resumen por estudiante</h2>
         <div class="row" style="gap:6px;">
           <button class="btn btn-ink btn-sm" onclick="openEntregasToGradeForm()">🎯 Convertir en nota</button>
+          <button class="btn btn-outline btn-sm" onclick="linkEvaluationToEntregas()">🔗 Vincular nota existente</button>
           <button class="btn btn-outline btn-sm" onclick="exportEntregasToExcel(getActiveGroup())">⬇️ Excel</button>
           <button class="btn btn-outline btn-sm" onclick="exportEntregasToWord(getActiveGroup())">⬇️ Word</button>
         </div>
       </div>
+      ${linkedGradeEvals.length === 0
+        ? `<p class="muted" style="background:var(--primary-light); border:1px solid var(--primary-border); border-radius:10px; padding:8px 10px; color:var(--text); margin-top:8px;">ℹ️ Aún no hay una nota conectada a estas entregas. Usa <strong>🎯 Convertir en nota</strong> para crearla, o <strong>🔗 Vincular nota existente</strong> si ya la habías creado antes. Desde ese momento la nota aparecerá aquí y se actualizará sola.</p>`
+        : `<p class="muted" style="margin-top:6px;">🔄 La columna de nota se actualiza sola al editar las entregas. Haz clic en una nota para ver el detalle del estudiante.</p>`}
+      <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Estudiante</th><th>En plazo</th><th>Fuera de plazo</th><th>No entregada</th><th>% cumplimiento</th><th>Clases presente</th></tr></thead>
+        <thead><tr><th>Estudiante</th><th>En plazo</th><th>Fuera de plazo</th><th>No entregada</th><th>% cumplimiento</th>${linkedGradeEvals.map(ev=>`<th>Nota: ${escapeHtml(ev.name)}</th>`).join('')}<th>Clases presente</th></tr></thead>
         <tbody>
           ${group.students.map(s=>{
             const stats = computeStudentEntregaStats(group, s.id, entregas);
@@ -4038,12 +4046,14 @@ function renderEntregas(group){
                 <td style="color:${ENTREGA_ESTADOS.fuera_plazo.color.text}; font-weight:700;">${stats.fuera_plazo}</td>
                 <td style="color:${ENTREGA_ESTADOS.no_entregada.color.text}; font-weight:700;">${stats.no_entregada}</td>
                 <td style="font-weight:700; color:${deficiente ? 'var(--danger)' : 'var(--text)'};">${cumplimiento !== null ? cumplimiento + '%' : '-'}${deficiente ? ' ⚠️' : ''}</td>
+                ${linkedGradeEvals.map(ev=>{ const n = computeStudentEvalGrade(ev, s.id); return `<td>${entregaGradeButtonHtml(ev, s.id, n, n!==null && n<4 ? 'color:var(--danger);' : '')}</td>`; }).join('')}
                 <td style="color:var(--success); font-weight:700;">${asistStats.presentCount} / ${asistStats.total}</td>
               </tr>
             `;
           }).join('')}
         </tbody>
       </table>
+      </div>
       <p class="muted" style="font-size:0.76rem; margin-top:8px;">⚠️ Se marcan en rojo los estudiantes con menos de 60% de cumplimiento (en plazo = 1 punto, fuera de plazo = 0,5 punto).</p>
     </div>
     ` : ''}
@@ -4383,18 +4393,46 @@ function recomputeEntregaLinkedGrades(){
 }
 
 // Vincula una nota antigua (creada antes de esta función) a las entregas del filtro actual
+// Ventana para vincular una nota existente a las entregas (elige evaluación y proceso)
 function linkEvaluationToEntregas(evalId){
   const group = getActiveGroup();
-  const ev = group.evaluations.find(e=>e.id===evalId);
+  const candidatas = getActiveEvaluations(group).filter(e=> !e.entregaLink);
+  if(candidatas.length === 0){ showToast('No hay notas sin vincular. Usa "🎯 Convertir en nota" para crear una.'); return; }
+  const sel = evalId || (candidatas.find(e=> /entrega/i.test(e.name||'')) || candidatas[0]).id;
+  const processes = getActiveProcesses(group);
+  const old = document.getElementById('linkEntregasOverlay'); if(old) old.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'linkEntregasOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="document.getElementById('linkEntregasOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🔗 Vincular nota a las entregas</h2>
+      <p class="muted">La nota elegida pasará a calcularse sola con las entregas (en plazo = 1, fuera de plazo = 0,5, no entregada = 0) y se actualizará cada vez que las edites. Sus puntajes actuales se reemplazan por ese cálculo.</p>
+      <label style="margin-top:8px;">Nota (evaluación)</label>
+      <select id="linkEvalSel">
+        ${candidatas.map(e=>`<option value="${e.id}" ${e.id===sel?'selected':''}>${escapeHtml(e.name)}</option>`).join('')}
+      </select>
+      <label style="margin-top:10px;">Entregas que cuentan</label>
+      <select id="linkProcSel">
+        <option value="">Todas las entregas del período</option>
+        ${processes.map(p=>`<option value="${p.id}" ${p.id===group.activeProcessId?'selected':''}>Solo proceso: ${escapeHtml(p.name)}</option>`).join('')}
+      </select>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn btn-accent btn-sm" onclick="confirmLinkEvaluationToEntregas()">Vincular</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function confirmLinkEvaluationToEntregas(){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === document.getElementById('linkEvalSel').value);
   if(!ev) return;
-  const procName = group.activeProcessId ? ((group.processes.find(p=>p.id===group.activeProcessId)||{}).name) : null;
-  const msg = '¿Vincular "' + ev.name + '" a las entregas' + (procName ? ' del proceso "' + procName + '"' : ' de todos los procesos') +
-    ' de este período?\n\nSus puntajes se reemplazarán por el cálculo de entregas (en plazo = 1, fuera de plazo = 0,5, no entregada = 0) y desde ahora se actualizará sola.';
-  if(!confirm(msg)) return;
-  ev.entregaLink = { periodId: ev.periodId || state.activePeriodId || null, processId: group.activeProcessId || null, totalFixed: null };
+  ev.entregaLink = { periodId: ev.periodId || state.activePeriodId || null, processId: document.getElementById('linkProcSel').value || null, totalFixed: null };
+  document.getElementById('linkEntregasOverlay').remove();
   saveState();
   renderMain();
-  showToast('Nota vinculada a las entregas');
+  showToast('"' + ev.name + '" ahora se actualiza sola con las entregas');
 }
 function unlinkEvaluationFromEntregas(evalId){
   const group = getActiveGroup();
@@ -5064,7 +5102,7 @@ function renderCalificaciones(group){
               <button class="btn btn-outline btn-sm" onclick="openDecimasBulkForm('${e.id}')">🎯 Décimas</button>
               ${e.entregaLink
                 ? `<button class="btn btn-outline btn-sm" onclick="unlinkEvaluationFromEntregas('${e.id}')" title="Dejar de actualizar sola">⛓️‍💥 Desvincular</button>`
-                : (e.totalScore === 100 && /^entregas/i.test(e.name || '') ? `<button class="btn btn-outline btn-sm" onclick="linkEvaluationToEntregas('${e.id}')" title="Hacer que se actualice sola con las entregas">🔗 Vincular a entregas</button>` : '')}
+                : `<button class="btn btn-outline btn-sm" onclick="linkEvaluationToEntregas('${e.id}')" title="Hacer que esta nota se calcule sola con las entregas">🔗 Vincular a entregas</button>`}
               <button class="btn btn-outline btn-sm" onclick="editEvaluation('${e.id}')">Editar</button>
               <button class="btn btn-danger btn-sm" onclick="deleteEvaluation('${e.id}')">Eliminar</button>
             </div>
