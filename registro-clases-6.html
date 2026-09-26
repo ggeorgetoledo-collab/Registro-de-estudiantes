@@ -515,6 +515,11 @@
     display:flex; align-items:center; justify-content:center;
     z-index:1000; padding:16px;
   }
+  .entrega-grade-link{
+    background:none; border:1px dashed var(--primary-border); border-radius:8px;
+    padding:2px 6px; cursor:pointer; font:inherit; font-weight:700; color:var(--primary);
+  }
+  .entrega-grade-link:hover{ background:var(--primary-light); border-style:solid; }
   .modal-box{
     background:var(--card-bg); border-radius:14px; padding:24px;
     max-width:420px; width:100%; max-height:85vh; overflow-y:auto;
@@ -601,6 +606,7 @@ function loadState(){
 let state = loadState();
 
 function saveState(){
+  try{ recomputeEntregaLinkedGrades(); }catch(e){ console.error('Error recalculando notas por entregas', e); }
   state.updatedAt = Date.now();
   try{
     localStorage.setItem(currentStorageKey, JSON.stringify(state));
@@ -1124,6 +1130,11 @@ function mergeGroupData(localGroup, importedGroup, periodIdMap){
         periodId: remapPeriodIdValue(ev.periodId),
         gradeGroupId: ev.gradeGroupId ? (gradeGroupIdMap.get(ev.gradeGroupId) || null) : null,
         processId: ev.processId ? (processIdMap.get(ev.processId) || null) : null,
+        entregaLink: ev.entregaLink ? {
+          ...ev.entregaLink,
+          periodId: ev.entregaLink.periodId ? remapPeriodIdValue(ev.entregaLink.periodId) : null,
+          processId: ev.entregaLink.processId ? (processIdMap.get(ev.entregaLink.processId) || null) : null
+        } : undefined,
         scores: newScores, overrides: newOverrides
       });
       evalsAdded++;
@@ -1885,6 +1896,7 @@ function renderMain(){
   const group = getActiveGroup();
   if(!group){ main.innerHTML = '<div class="empty-state">Crea un grupo para comenzar.</div>'; return; }
 
+  try{ recomputeEntregaLinkedGrades(); }catch(e){}
   if(currentTab === 'inicio') return renderInicio();
   if(currentTab === 'estudiantes') return renderEstudiantes(group);
   if(currentTab === 'indicadores') return renderIndicadores(group);
@@ -2124,7 +2136,7 @@ function openStudentDetail(studentId){
         evals.map(e=>{
           const nota = computeStudentEvalGrade(e, studentId);
           const decimasEnEsta = e.decimasAplicadas ? e.decimasAplicadas[studentId] : null;
-          return `<div class="stat-row"><span>${escapeHtml(e.name)}${decimasEnEsta ? ` <span class="muted" style="font-size:0.74rem;">(+${decimasEnEsta} déc.)</span>` : ''}</span><strong style="${nota!==null && nota<4 ? 'color:var(--danger);' : ''}">${nota !== null ? nota.toFixed(1) : '-'}</strong></div>`;
+          return `<div class="stat-row"><span>${escapeHtml(e.name)}${decimasEnEsta ? ` <span class="muted" style="font-size:0.74rem;">(+${decimasEnEsta} déc.)</span>` : ''}</span>${e.entregaLink ? entregaGradeButtonHtml(e, studentId, nota, 'font-weight:800;' + (nota!==null && nota<4 ? 'color:var(--danger);' : '')) : `<strong style="${nota!==null && nota<4 ? 'color:var(--danger);' : ''}">${nota !== null ? nota.toFixed(1) : '-'}</strong>`}</div>`;
         }).join('')
       }
       <div class="stat-row"><span>Promedio simple</span><strong>${gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'}</strong></div>
@@ -4311,26 +4323,194 @@ function saveEntregasToGradeForm(){
   const weightType = document.getElementById('entGradeWeightType').value;
   const weightPercent = weightType === 'weighted' ? (Number(document.getElementById('entGradeWeightPercent').value) || 0) : 0;
 
-  const ENTREGA_PUNTOS = { en_plazo: 1, fuera_plazo: 0.5, no_entregada: 0 };
-  const scores = {};
-  group.students.forEach(s=>{
-    let obtained = 0;
-    entregas.forEach(e=>{
-      const estado = e.estados ? e.estados[s.id] : null;
-      obtained += ENTREGA_PUNTOS[estado] || 0;
-    });
-    scores[s.id] = totalEntregas > 0 ? Math.round((obtained / totalEntregas) * 100) : 0;
-  });
-
   group.evaluations.push({
     id: uid(), name, totalScore: 100, exigencia,
     gradeGroupId: null, weightType, weightPercent,
-    scores, overrides: {}, periodId: state.activePeriodId
+    scores: {}, overrides: {}, periodId: state.activePeriodId,
+    // Vínculo con las entregas: la nota se recalcula sola cada vez que cambian las entregas
+    entregaLink: {
+      periodId: state.activePeriodId || null,
+      processId: group.activeProcessId || null,
+      totalFixed: totalEntregas !== entregas.length ? totalEntregas : null
+    }
   });
-  saveState();
+  saveState(); // saveState recalcula los puntajes a partir de las entregas
   closeEntregasToGradeForm();
-  showToast('Nota creada a partir de las entregas');
+  showToast('Nota creada: se actualizará sola al editar las entregas');
   goToTab('calificaciones');
+}
+
+/* ---- Nota vinculada a entregas: recálculo automático y detalle por estudiante ---- */
+const ENTREGA_PUNTOS = { en_plazo: 1, fuera_plazo: 0.5, no_entregada: 0 };
+
+// Entregas que alimentan una evaluación vinculada (mismo período y, si corresponde, mismo proceso)
+function getEntregaLinkedEntregas(group, evaluation){
+  const link = evaluation.entregaLink;
+  if(!link) return [];
+  return (group.entregas || [])
+    .filter(e=> !link.periodId || e.periodId === link.periodId)
+    .filter(e=> !link.processId || e.processId === link.processId)
+    .slice()
+    .sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+}
+function getEntregaLinkTotal(group, evaluation){
+  const link = evaluation.entregaLink;
+  if(link && link.totalFixed) return link.totalFixed;
+  return getEntregaLinkedEntregas(group, evaluation).length;
+}
+function computeEntregaLinkPoints(group, evaluation, studentId){
+  let obtained = 0;
+  getEntregaLinkedEntregas(group, evaluation).forEach(e=>{
+    const estado = e.estados ? e.estados[studentId] : null;
+    obtained += ENTREGA_PUNTOS[estado] || 0;
+  });
+  return obtained;
+}
+// Recalcula los puntajes de todas las evaluaciones vinculadas a entregas (se llama en cada guardado)
+function recomputeEntregaLinkedGrades(){
+  (state.groups || []).forEach(group=>{
+    (group.evaluations || []).forEach(ev=>{
+      if(!ev.entregaLink) return;
+      const total = getEntregaLinkTotal(group, ev);
+      if(!ev.scores) ev.scores = {};
+      ev.totalScore = 100;
+      (group.students || []).forEach(s=>{
+        const obtained = computeEntregaLinkPoints(group, ev, s.id);
+        ev.scores[s.id] = total > 0 ? Math.min(100, Math.round((obtained / total) * 100)) : 0;
+      });
+    });
+  });
+}
+
+// Vincula una nota antigua (creada antes de esta función) a las entregas del filtro actual
+function linkEvaluationToEntregas(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev) return;
+  const procName = group.activeProcessId ? ((group.processes.find(p=>p.id===group.activeProcessId)||{}).name) : null;
+  const msg = '¿Vincular "' + ev.name + '" a las entregas' + (procName ? ' del proceso "' + procName + '"' : ' de todos los procesos') +
+    ' de este período?\n\nSus puntajes se reemplazarán por el cálculo de entregas (en plazo = 1, fuera de plazo = 0,5, no entregada = 0) y desde ahora se actualizará sola.';
+  if(!confirm(msg)) return;
+  ev.entregaLink = { periodId: ev.periodId || state.activePeriodId || null, processId: group.activeProcessId || null, totalFixed: null };
+  saveState();
+  renderMain();
+  showToast('Nota vinculada a las entregas');
+}
+function unlinkEvaluationFromEntregas(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  if(!ev || !ev.entregaLink) return;
+  if(!confirm('¿Desvincular "' + ev.name + '" de las entregas?\n\nSe conservan los puntajes actuales, pero ya no se actualizarán solos.')) return;
+  delete ev.entregaLink;
+  saveState();
+  renderMain();
+  showToast('Nota desvinculada (los puntajes quedan fijos)');
+}
+
+// Celda de nota clicable para evaluaciones vinculadas a entregas
+function entregaGradeButtonHtml(evaluation, studentId, nota, extraStyle){
+  const txt = nota !== null ? nota.toFixed(1) : '-';
+  return `<button class="entrega-grade-link" style="${extraStyle||''}" title="Ver entregas del estudiante" onclick="openEntregaGradeDetail('${evaluation.id}','${studentId}')">${txt} 📋</button>`;
+}
+
+let entregaGradeDetailCtx = null;
+function openEntregaGradeDetail(evalId, studentId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=>e.id===evalId);
+  const student = group.students.find(s=>s.id===studentId);
+  if(!ev || !student) return;
+  entregaGradeDetailCtx = { evalId, studentId };
+  const entregas = getEntregaLinkedEntregas(group, ev);
+  const total = getEntregaLinkTotal(group, ev);
+  const obtained = computeEntregaLinkPoints(group, ev, studentId);
+  const nota = computeStudentEvalGrade(ev, studentId);
+  const counts = { en_plazo:0, fuera_plazo:0, no_entregada:0, sin:0 };
+  entregas.forEach(e=>{
+    const est = e.estados ? e.estados[studentId] : null;
+    if(est && counts[est] !== undefined) counts[est]++; else counts.sin++;
+  });
+  const fmtPts = n=> String(Math.round(n*10)/10).replace('.', ',');
+  const procName = ev.entregaLink && ev.entregaLink.processId ? ((group.processes.find(p=>p.id===ev.entregaLink.processId)||{}).name) : null;
+
+  const old = document.getElementById('entregaGradeDetailOverlay');
+  if(old) old.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'entregaGradeDetailOverlay';
+  overlay.addEventListener('click', ev2=>{ if(ev2.target === overlay) closeEntregaGradeDetail(); });
+  overlay.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="closeEntregaGradeDetail()">✕</button>
+      <h2 style="border:none; padding-bottom:0; margin-bottom:2px;">${escapeHtml(student.name)}</h2>
+      <div class="muted" style="margin-bottom:8px;">${escapeHtml(ev.name)}${procName ? ' · 📂 ' + escapeHtml(procName) : ''}</div>
+      <div style="text-align:center; margin:6px 0 10px;">
+        <div style="font-size:2rem; font-weight:800; font-family:'Poppins',sans-serif; color:${nota!==null && nota<4 ? 'var(--danger)' : 'var(--primary)'};">${nota !== null ? nota.toFixed(1) : '-'}</div>
+        <div class="muted">${fmtPts(obtained)} de ${fmtPts(total)} punto(s) · exigencia ${ev.exigencia}%</div>
+      </div>
+      <div class="row" style="gap:6px; justify-content:center; margin-bottom:10px;">
+        ${['en_plazo','fuera_plazo','no_entregada'].map(k=>`<span class="pill" style="background:${ENTREGA_ESTADOS[k].color.bg}; color:${ENTREGA_ESTADOS[k].color.text}; border-color:${ENTREGA_ESTADOS[k].color.border};">${ENTREGA_ESTADOS[k].label}: ${counts[k]}</span>`).join('')}
+        ${counts.sin > 0 ? `<span class="pill">Sin marcar: ${counts.sin}</span>` : ''}
+      </div>
+      ${entregas.length === 0 ? '<p class="muted">No hay entregas registradas para esta nota.</p>' : `
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Entrega</th><th>Fecha</th><th>Estado</th><th>Pts.</th></tr></thead>
+        <tbody>
+          ${entregas.map(e=>{
+            const est = e.estados ? e.estados[studentId] : null;
+            const c = est ? ENTREGA_ESTADOS[est].color : null;
+            const exc = e.excepciones && e.excepciones[studentId];
+            return `<tr>
+              <td>${escapeHtml(e.name)}${exc ? ' <span class="muted" style="font-size:0.7rem;">(excepción)</span>' : ''}</td>
+              <td style="white-space:nowrap;">${e.date ? formatDate(e.date) : '-'}</td>
+              <td>
+                <select class="score-select" style="width:auto; min-width:140px; ${c ? `background:${c.bg}; color:${c.text}; border-color:${c.border}; font-weight:700;` : ''}" onchange="changeEntregaEstadoFromGrade('${e.id}','${studentId}', this.value)">
+                  <option value="" ${!est?'selected':''}>— Sin marcar</option>
+                  ${Object.keys(ENTREGA_ESTADOS).map(k=>`<option value="${k}" ${est===k?'selected':''}>${ENTREGA_ESTADOS[k].label}</option>`).join('')}
+                </select>
+              </td>
+              <td style="text-align:center;">${fmtPts(ENTREGA_PUNTOS[est] || 0)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>`}
+      <p class="muted" style="font-size:0.74rem; margin-top:8px;">En plazo = 1 · Fuera de plazo = 0,5 · No entregada / sin marcar = 0.${ev.entregaLink && ev.entregaLink.totalFixed ? ' Total fijo para el cálculo: ' + fmtPts(ev.entregaLink.totalFixed) + '.' : ''} Puedes cambiar el estado aquí mismo; la nota se actualiza al instante.</p>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeEntregaGradeDetail(){
+  entregaGradeDetailCtx = null;
+  const overlay = document.getElementById('entregaGradeDetailOverlay');
+  if(overlay) overlay.remove();
+}
+// Cambia el estado de una entrega desde la ventana de detalle de la nota
+function changeEntregaEstadoFromGrade(entregaId, studentId, estado){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=>e.id===entregaId);
+  if(!entrega) return;
+  if(!entrega.estados) entrega.estados = {};
+  if(!entrega.fechas) entrega.fechas = {};
+  if(!entrega.excepciones) entrega.excepciones = {};
+  if(!estado){
+    delete entrega.estados[studentId];
+    delete entrega.fechas[studentId];
+    delete entrega.excepciones[studentId];
+    syncEntregaDecimaBonus(group, entrega, studentId, false);
+  } else {
+    entrega.estados[studentId] = estado;
+    entrega.fechas[studentId] = entrega.fechas[studentId] || toISODate(new Date());
+    if(estado !== 'en_plazo') delete entrega.excepciones[studentId];
+    syncEntregaDecimaBonus(group, entrega, studentId, estado === 'en_plazo');
+  }
+  saveState();
+  const ctx = entregaGradeDetailCtx;
+  // Refresca lo que está detrás (tabla de notas, puntajes o ficha del estudiante) y la propia ventana
+  const studentModalOpen = !!document.getElementById('studentModalOverlay');
+  renderMain();
+  if(studentModalOpen){ closeStudentDetail(); openStudentDetail(studentId); }
+  if(ctx) openEntregaGradeDetail(ctx.evalId, ctx.studentId);
 }
 
 function deleteEntrega(id){
@@ -4870,6 +5050,7 @@ function renderCalificaciones(group){
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
               ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
               ${e.processId ? `<span class="pill" style="margin-left:6px;">📂 ${escapeHtml((group.processes.find(p=>p.id===e.processId)||{}).name || '—')}</span>` : ''}
+              ${e.entregaLink ? `<span class="pill" style="margin-left:6px; background:var(--primary-light); color:var(--primary); border-color:var(--primary-border);" title="Se recalcula sola al editar las entregas">🔄 Vinculada a entregas${e.entregaLink.processId ? ' · ' + escapeHtml((group.processes.find(p=>p.id===e.entregaLink.processId)||{}).name || '—') : ''}</span>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
                 ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
               </div>
@@ -4881,6 +5062,9 @@ function renderCalificaciones(group){
             <div class="row" style="gap:6px;">
               <button class="btn btn-accent btn-sm" onclick="openEvalScores('${e.id}')">Completar puntajes</button>
               <button class="btn btn-outline btn-sm" onclick="openDecimasBulkForm('${e.id}')">🎯 Décimas</button>
+              ${e.entregaLink
+                ? `<button class="btn btn-outline btn-sm" onclick="unlinkEvaluationFromEntregas('${e.id}')" title="Dejar de actualizar sola">⛓️‍💥 Desvincular</button>`
+                : (e.totalScore === 100 && /^entregas/i.test(e.name || '') ? `<button class="btn btn-outline btn-sm" onclick="linkEvaluationToEntregas('${e.id}')" title="Hacer que se actualice sola con las entregas">🔗 Vincular a entregas</button>` : '')}
               <button class="btn btn-outline btn-sm" onclick="editEvaluation('${e.id}')">Editar</button>
               <button class="btn btn-danger btn-sm" onclick="deleteEvaluation('${e.id}')">Eliminar</button>
             </div>
@@ -4932,6 +5116,7 @@ function renderCalificaciones(group){
         <tbody>
           ${group.students.map(s=>{
             const notas = evaluations.filter(e=> !e.gradeGroupId || !collapsedGradeGroups.has(e.gradeGroupId)).map(e=> ({
+              ev: e,
               nota: computeStudentEvalGrade(e, s.id),
               color: e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null,
               decimas: (e.decimasAplicadas && e.decimasAplicadas[s.id]) || 0
@@ -4941,7 +5126,7 @@ function renderCalificaciones(group){
             return `
               <tr>
                 <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
-                ${notas.map(n=> `<td ${n.color ? `style="background:${n.color.bg};"` : ''}>${n.nota !== null ? n.nota.toFixed(1) : '-'}${n.decimas > 0 ? `<br><span class="muted" style="font-size:0.68rem; color:var(--primary); font-weight:700;" title="${n.decimas} décima(s) aplicada(s) a esta evaluación">+${n.decimas} déc.</span>` : ''}</td>`).join('')}
+                ${notas.map(n=> `<td ${n.color ? `style="background:${n.color.bg};"` : ''}>${n.ev.entregaLink ? entregaGradeButtonHtml(n.ev, s.id, n.nota, n.nota!==null && n.nota<4 ? 'color:var(--danger);' : '') : (n.nota !== null ? n.nota.toFixed(1) : '-')}${n.decimas > 0 ? `<br><span class="muted" style="font-size:0.68rem; color:var(--primary); font-weight:700;" title="${n.decimas} décima(s) aplicada(s) a esta evaluación">+${n.decimas} déc.</span>` : ''}</td>`).join('')}
                 ${groupUnits.map(u=>{
                   const color = gradeGroupColor(u.gradeGroup.id);
                   const nota = computeUnitGrade(u, s.id);
@@ -5207,6 +5392,7 @@ function renderEvalScores(group, evaluation){
         <button class="btn btn-outline btn-sm" onclick="closeEvalScores()">← Volver</button>
       </div>
       <p class="muted">Puntaje total: ${evaluation.totalScore} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)</p>
+      ${evaluation.entregaLink ? `<p class="muted" style="background:var(--primary-light); border:1px solid var(--primary-border); border-radius:10px; padding:8px 10px; color:var(--text);">🔄 Esta nota está vinculada a las entregas: el puntaje (% de cumplimiento) se calcula solo cada vez que editas las entregas. Haz clic en una nota para ver y editar las entregas del estudiante.</p>` : ''}
       <div style="overflow-x:auto;">
       <table>
         <thead>
@@ -5221,10 +5407,12 @@ function renderEvalScores(group, evaluation){
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
-                <td><input type="number" class="score-select" style="width:80px;" min="0" max="${(hasOverride && hasOverride.totalScore) || evaluation.totalScore}"
+                <td>${evaluation.entregaLink
+                  ? `<span style="font-weight:700;">${score !== null && score !== undefined ? score + '%' : '-'}</span>`
+                  : `<input type="number" class="score-select" style="width:80px;" min="0" max="${(hasOverride && hasOverride.totalScore) || evaluation.totalScore}"
                     value="${score !== null && score !== undefined ? score : ''}"
-                    onchange="saveEvalScore('${evaluation.id}','${s.id}', this.value)"></td>
-                <td class="avg-badge">${nota !== null ? nota.toFixed(1) : '-'}</td>
+                    onchange="saveEvalScore('${evaluation.id}','${s.id}', this.value)">`}</td>
+                <td class="avg-badge">${evaluation.entregaLink ? entregaGradeButtonHtml(evaluation, s.id, nota, '') : (nota !== null ? nota.toFixed(1) : '-')}</td>
                 <td>${decimasAqui > 0 ? `<span style="color:var(--primary); font-weight:700;">+${decimasAqui}</span>` : '<span class="muted">-</span>'}</td>
                 <td>
                   <button class="btn btn-outline btn-sm" onclick="openEvalOverride('${evaluation.id}','${s.id}')">
