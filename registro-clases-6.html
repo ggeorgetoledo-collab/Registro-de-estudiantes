@@ -783,7 +783,7 @@ async function downloadDriveFile(fileId){
 }
 
 async function uploadDriveFile(fileId, data){
-  const body = JSON.stringify(data);
+  const body = typeof data === 'string' ? data : JSON.stringify(data);
   if(fileId){
     await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
       method:'PATCH',
@@ -819,7 +819,45 @@ function saveLastSyncedRemoteTimestamp(ts){
   localStorage.setItem(getSyncTimestampKey(), String(ts || 0));
 }
 
+/* ---- Cola de sincronización ----
+   Todas las operaciones con Drive (subir y revisar cambios) se ejecutan UNA A LA VEZ, en orden.
+   Antes, si hacías dos ediciones seguidas, la segunda subida arrancaba mientras la primera aún
+   estaba en curso, veía en Drive la versión de la primera edición, la confundía con "cambios de
+   otro dispositivo" y cargaba esa versión encima, borrando tu segunda edición. */
+let driveQueue = Promise.resolve();
+let drivePushTimer = null;
+let drivePushPending = false;
+function enqueueDriveTask(task){
+  driveQueue = driveQueue.then(task).catch(e=> console.error('Error en cola de Drive', e));
+  return driveQueue;
+}
+// ¿Hay cambios locales que todavía no llegaron a Drive?
+function hasUnsyncedLocalChanges(){
+  return (state.updatedAt || 0) !== loadLastSyncedRemoteTimestamp();
+}
+function adoptRemoteState(remote){
+  state = remote;
+  if(!state.schedule) state.schedule = [];
+  if(!state.periods) state.periods = [];
+  ensureDefaultGroup();
+  localStorage.setItem(currentStorageKey, JSON.stringify(state));
+  saveLastSyncedRemoteTimestamp(remote.updatedAt || 0);
+  renderAll();
+}
+// Sube una "foto" fija del estado (no el objeto vivo), y registra exactamente esa versión como sincronizada
+async function uploadStateSnapshot(){
+  const snapshotTs = state.updatedAt || Date.now();
+  const snapshotBody = JSON.stringify(state);
+  driveFileId = await uploadDriveFile(driveFileId, snapshotBody);
+  saveLastSyncedRemoteTimestamp(snapshotTs);
+}
+
 async function syncFromDrive(){
+  // Si hay una subida esperando o en curso, no revisamos ahora: primero debe terminar de subir lo tuyo
+  if(drivePushTimer || drivePushPending) return;
+  return enqueueDriveTask(doSyncFromDrive);
+}
+async function doSyncFromDrive(){
   try{
     setDriveStatus('syncing');
     const file = await findDriveFile();
@@ -829,25 +867,22 @@ async function syncFromDrive(){
       const remoteUpdated = remote.updatedAt || 0;
       const lastSynced = loadLastSyncedRemoteTimestamp();
       if(remoteUpdated !== lastSynced){
-        // El remoto cambió desde la última vez que este dispositivo lo vio: lo adoptamos siempre,
-        // para no perder cambios hechos desde otro dispositivo aunque nuestro reloj local sea "más nuevo".
-        state = remote;
-        if(!state.schedule) state.schedule = [];
-        ensureDefaultGroup();
-        localStorage.setItem(currentStorageKey, JSON.stringify(state));
-        renderAll();
-        saveLastSyncedRemoteTimestamp(remoteUpdated);
-        if(lastSynced !== 0) showToastQuick('Datos actualizados desde Google Drive (otro dispositivo hizo cambios)');
-      } else {
-        const localUpdated = state.updatedAt || 0;
-        if(localUpdated > remoteUpdated){
-          await uploadDriveFile(driveFileId, state);
-          saveLastSyncedRemoteTimestamp(state.updatedAt);
+        if(hasUnsyncedLocalChanges() && lastSynced !== 0){
+          // Conflicto real: otro dispositivo subió cambios y aquí también hay cambios sin subir.
+          // Se guarda una copia de respaldo de lo local antes de cargar lo remoto.
+          try{ localStorage.setItem(currentStorageKey + '::respaldo_conflicto', JSON.stringify({ savedAt: Date.now(), state })); }catch(e){}
+          adoptRemoteState(remote);
+          showToastQuick('⚠️ Otro dispositivo había subido cambios distintos. Se cargaron esos (tu versión local quedó respaldada en este equipo).');
+        } else {
+          adoptRemoteState(remote);
+          if(lastSynced !== 0) showToastQuick('Datos actualizados desde Google Drive (otro dispositivo hizo cambios)');
         }
+      } else if(hasUnsyncedLocalChanges()){
+        await uploadStateSnapshot();
       }
     } else {
-      driveFileId = await uploadDriveFile(null, state);
-      saveLastSyncedRemoteTimestamp(state.updatedAt || Date.now());
+      driveFileId = null;
+      await uploadStateSnapshot();
     }
     setDriveStatus('connected');
   }catch(e){
@@ -856,9 +891,25 @@ async function syncFromDrive(){
   }
 }
 
-async function pushToDrive(){
+// Se llama en cada guardado: espera un momento (agrupa ediciones rápidas) y sube en orden
+function pushToDrive(){
   const stored = loadStoredDriveToken();
   if(!isDriveTokenValid(stored)) return;
+  setDriveStatus('syncing');
+  if(drivePushTimer) clearTimeout(drivePushTimer);
+  drivePushTimer = setTimeout(()=>{
+    drivePushTimer = null;
+    if(drivePushPending) return; // ya hay una subida en la cola: esa subirá la versión más reciente
+    drivePushPending = true;
+    enqueueDriveTask(async ()=>{
+      drivePushPending = false;
+      await doPushToDrive();
+    });
+  }, 700);
+}
+async function doPushToDrive(){
+  if(!isDriveTokenValid(loadStoredDriveToken())) return;
+  if(!hasUnsyncedLocalChanges()){ setDriveStatus('connected'); return; }
   try{
     setDriveStatus('syncing');
     if(!driveFileId){
@@ -866,27 +917,20 @@ async function pushToDrive(){
       if(file) driveFileId = file.id;
     }
     if(driveFileId){
-      // Antes de sobrescribir, revisamos si el remoto cambió desde la última vez que lo vimos
-      // (no solo si "parece" más antiguo por hora de reloj).
+      // Solo se considera "cambio de otro dispositivo" si lo que hay en Drive no es la última versión que ESTE equipo subió o vio
       const remote = await downloadDriveFile(driveFileId);
       const remoteUpdated = (remote && remote.updatedAt) || 0;
       const lastSynced = loadLastSyncedRemoteTimestamp();
       if(remote && remoteUpdated !== lastSynced){
-        state = remote;
-        if(!state.schedule) state.schedule = [];
-        if(!state.periods) state.periods = [];
-        ensureDefaultGroup();
-        localStorage.setItem(currentStorageKey, JSON.stringify(state));
-        renderAll();
-        saveLastSyncedRemoteTimestamp(remoteUpdated);
-        showToastQuick('⚠️ Otro dispositivo sincronizó cambios que aún no tenías. Se cargaron esos — tus últimos cambios locales no se subieron; revísalos y vuelve a aplicarlos si hace falta.');
+        try{ localStorage.setItem(currentStorageKey + '::respaldo_conflicto', JSON.stringify({ savedAt: Date.now(), state })); }catch(e){}
+        adoptRemoteState(remote);
+        showToastQuick('⚠️ Otro dispositivo sincronizó cambios que aún no tenías. Se cargaron esos — revisa tus últimos cambios y vuelve a aplicarlos si hace falta (quedó un respaldo en este equipo).');
         setDriveStatus('connected');
         return;
       }
     }
-    driveFileId = await uploadDriveFile(driveFileId, state);
-    saveLastSyncedRemoteTimestamp(state.updatedAt);
-    setDriveStatus('connected');
+    await uploadStateSnapshot();
+    setDriveStatus(drivePushTimer || drivePushPending ? 'syncing' : 'connected');
   }catch(e){
     console.error('Error subiendo a Drive', e);
     setDriveStatus(String(e.message).includes('token-expired') ? 'disconnected' : 'error');
@@ -919,6 +963,7 @@ function openDriveSettings(){
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('restoreBackupInput').click()">📂 Restaurar respaldo</button>
         <input type="file" id="restoreBackupInput" accept=".json" style="display:none;">
       </div>
+      ${(()=>{ try{ const b = JSON.parse(localStorage.getItem(currentStorageKey + '::respaldo_conflicto') || 'null'); return b ? `<p class="muted" style="font-size:0.78rem; margin-top:8px;">🛟 Hay una versión local guardada automáticamente el ${new Date(b.savedAt).toLocaleString('es-CL')} (cuando Drive trajo cambios de otro dispositivo). <button class="btn btn-outline btn-sm" onclick="exportConflictBackup()">⬇️ Descargarla</button> — luego puedes cargarla con "📂 Restaurar respaldo" si la necesitas.</p>` : ''; }catch(e){ return ''; } })()}
       <p class="muted" style="font-size:0.74rem; margin-top:8px;">Guarda este archivo de vez en cuando en un lugar seguro. Si algo falla en este dispositivo (se borra el navegador, se pierde la conexión, etc.), puedes restaurar todo desde aquí.</p>
       <hr class="divider">
       <p class="muted" style="font-weight:600; margin-bottom:4px;">Respaldo de curso(s) específicos</p>
@@ -981,6 +1026,19 @@ function exportFullBackup(){
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Respaldo completo descargado');
+}
+
+function exportConflictBackup(){
+  let b = null;
+  try{ b = JSON.parse(localStorage.getItem(currentStorageKey + '::respaldo_conflicto') || 'null'); }catch(e){}
+  if(!b){ showToast('No hay versión respaldada'); return; }
+  const blob = new Blob([JSON.stringify(b.state, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${backupFileNamePrefix()}_version_local_respaldada.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function exportSelectedGroupsBackup(){
@@ -4428,6 +4486,7 @@ function confirmLinkEvaluationToEntregas(){
   const group = getActiveGroup();
   const ev = group.evaluations.find(e=> e.id === document.getElementById('linkEvalSel').value);
   if(!ev) return;
+  if(!confirm('¿Seguro que quieres vincular "' + ev.name + '" a las entregas?\n\nLos puntajes que tenga ahora se reemplazarán por el cálculo de entregas.')) return;
   ev.entregaLink = { periodId: ev.periodId || state.activePeriodId || null, processId: document.getElementById('linkProcSel').value || null, totalFixed: null };
   document.getElementById('linkEntregasOverlay').remove();
   saveState();
@@ -5102,7 +5161,7 @@ function renderCalificaciones(group){
               <button class="btn btn-outline btn-sm" onclick="openDecimasBulkForm('${e.id}')">🎯 Décimas</button>
               ${e.entregaLink
                 ? `<button class="btn btn-outline btn-sm" onclick="unlinkEvaluationFromEntregas('${e.id}')" title="Dejar de actualizar sola">⛓️‍💥 Desvincular</button>`
-                : `<button class="btn btn-outline btn-sm" onclick="linkEvaluationToEntregas('${e.id}')" title="Hacer que esta nota se calcule sola con las entregas">🔗 Vincular a entregas</button>`}
+                : ''}
               <button class="btn btn-outline btn-sm" onclick="editEvaluation('${e.id}')">Editar</button>
               <button class="btn btn-danger btn-sm" onclick="deleteEvaluation('${e.id}')">Eliminar</button>
             </div>
