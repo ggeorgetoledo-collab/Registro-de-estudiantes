@@ -1543,7 +1543,65 @@ function getActiveSessions(group){
   return (group.sessions || []).filter(s=> !state.activePeriodId || s.periodId === state.activePeriodId);
 }
 function getActiveEvaluations(group){
-  return (group.evaluations || []).filter(e=> !state.activePeriodId || e.periodId === state.activePeriodId);
+  const list = (group.evaluations || []).filter(e=> !state.activePeriodId || e.periodId === state.activePeriodId);
+  return sortEvaluations(group, list);
+}
+
+/* ---- Orden de las notas: 'creacion' (como se agregaron), 'fecha' o 'personalizado' ----
+   Se guarda por curso. Afecta la lista, la tabla de resumen, la ficha del estudiante y las exportaciones. */
+function getEvalSortMode(group){ return group.evalSortMode || 'creacion'; }
+function sortEvaluations(group, list){
+  const mode = getEvalSortMode(group);
+  const creationIndex = new Map((group.evaluations || []).map((e,i)=> [e.id, i]));
+  const byCreation = (a,b)=> creationIndex.get(a.id) - creationIndex.get(b.id);
+  if(mode === 'fecha'){
+    // Las que no tienen fecha van al final, en el orden en que se agregaron
+    return list.slice().sort((a,b)=>{
+      if(a.date && b.date && a.date !== b.date) return a.date.localeCompare(b.date);
+      if(a.date && !b.date) return -1;
+      if(!a.date && b.date) return 1;
+      return byCreation(a,b);
+    });
+  }
+  if(mode === 'personalizado'){
+    const order = group.evalCustomOrder || [];
+    const pos = new Map(order.map((id,i)=> [id, i]));
+    // Las notas nuevas (que aún no tienen posición) quedan al final
+    return list.slice().sort((a,b)=>{
+      const pa = pos.has(a.id) ? pos.get(a.id) : Infinity;
+      const pb = pos.has(b.id) ? pos.get(b.id) : Infinity;
+      if(pa !== pb) return pa - pb;
+      return byCreation(a,b);
+    });
+  }
+  return list.slice().sort(byCreation);
+}
+function changeEvalSortMode(mode){
+  const group = getActiveGroup();
+  if(mode === 'personalizado'){
+    // Al entrar al modo personalizado se parte del orden que se está viendo ahora
+    const current = getActiveEvaluations(group).map(e=> e.id);
+    const others = (group.evalCustomOrder || []).filter(id=> !current.includes(id));
+    group.evalSortMode = 'personalizado';
+    group.evalCustomOrder = current.concat(others);
+  } else {
+    group.evalSortMode = mode;
+  }
+  saveState();
+  renderCalificaciones(group);
+}
+function moveEvaluation(evalId, dir){
+  const group = getActiveGroup();
+  const visible = getActiveEvaluations(group).map(e=> e.id);
+  const i = visible.indexOf(evalId);
+  const j = i + dir;
+  if(i < 0 || j < 0 || j >= visible.length) return;
+  [visible[i], visible[j]] = [visible[j], visible[i]];
+  const others = (group.evalCustomOrder || []).filter(id=> !visible.includes(id));
+  group.evalCustomOrder = visible.concat(others);
+  group.evalSortMode = 'personalizado';
+  saveState();
+  renderCalificaciones(group);
 }
 function getActiveDecimas(group){
   return (group.decimas || []).filter(d=> !state.activePeriodId || d.periodId === state.activePeriodId);
@@ -5130,8 +5188,18 @@ function renderCalificaciones(group){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Evaluaciones (${evaluations.length})</h2>
         <span class="muted">Ponderación asignada: ${weightSum}% ${weightSum > 100 ? '⚠️ supera el 100%' : ''}</span>
       </div>
+      ${evaluations.length > 1 ? `
+      <div class="row" style="gap:8px; align-items:center; margin:8px 0 4px;">
+        <span class="muted" style="font-weight:600;">Ordenar notas:</span>
+        <select onchange="changeEvalSortMode(this.value)" style="width:auto; min-width:200px;">
+          <option value="creacion" ${getEvalSortMode(group)==='creacion'?'selected':''}>Como se agregaron</option>
+          <option value="fecha" ${getEvalSortMode(group)==='fecha'?'selected':''}>Por fecha (más antigua primero)</option>
+          <option value="personalizado" ${getEvalSortMode(group)==='personalizado'?'selected':''}>Personalizado (con flechas ▲▼)</option>
+        </select>
+        ${getEvalSortMode(group)==='fecha' && evaluations.some(e=>!e.date) ? '<span class="muted" style="font-size:0.74rem;">Las notas sin fecha quedan al final (puedes ponerles fecha con "Editar").</span>' : ''}
+      </div>` : ''}
       ${evaluations.length === 0 ? '<div class="empty-state">Aún no has agregado evaluaciones.</div>' :
-        evaluations.map(e=>{
+        evaluations.map((e, evIdx)=>{
           const color = e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null;
           const gg = e.gradeGroupId ? gradeGroups.find(g=>g.id===e.gradeGroupId) : null;
           let reprobados = 0, pendientes = 0;
@@ -5157,6 +5225,9 @@ function renderCalificaciones(group){
               </div>
             </div>
             <div class="row" style="gap:6px;">
+              ${getEvalSortMode(group)==='personalizado' ? `
+                <button class="btn btn-outline btn-sm" title="Subir" ${evIdx===0?'disabled style="opacity:0.35;"':''} onclick="moveEvaluation('${e.id}',-1)">▲</button>
+                <button class="btn btn-outline btn-sm" title="Bajar" ${evIdx===evaluations.length-1?'disabled style="opacity:0.35;"':''} onclick="moveEvaluation('${e.id}',1)">▼</button>` : ''}
               <button class="btn btn-accent btn-sm" onclick="openEvalScores('${e.id}')">Completar puntajes</button>
               <button class="btn btn-outline btn-sm" onclick="openDecimasBulkForm('${e.id}')">🎯 Décimas</button>
               ${e.entregaLink
