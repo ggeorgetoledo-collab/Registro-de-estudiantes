@@ -548,6 +548,10 @@
   .scan-disabled{ opacity:0.45; cursor:not-allowed; }
   .scan-flash{ margin-top:8px; font-weight:700; color:var(--success); min-height:1.2em; opacity:0; }
   .scan-flash.show{ animation: scanFlash 2.4s ease forwards; }
+  .input-invalid{ border-color:var(--danger) !important; background:var(--danger-light) !important; }
+  .mail-setup{ margin-top:10px; border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:var(--primary-light); }
+  .mail-setup summary{ cursor:pointer; font-weight:600; font-size:0.88rem; }
+  .mail-setup ol{ margin:8px 0 0; padding-left:20px; font-size:0.85rem; line-height:1.45; }
   .card-img-slot{ display:flex; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); }
   .card-img-slot:last-child{ border-bottom:none; }
   .card-img-thumb{ width:120px; height:78px; flex:none; border-radius:8px; border:1px solid var(--border-strong); background:var(--primary-light) center/cover no-repeat; display:flex; align-items:center; justify-content:center; font-size:0.75rem; color:var(--text-dim); }
@@ -2157,7 +2161,7 @@ function renderEstudiantes(group){
 
     <div class="card app-font">
       <h2>Importar lista (CSV / texto)</h2>
-      <p class="muted">Pega una lista con un nombre por línea, o abre un archivo .csv exportado desde Excel (una columna con los nombres, o el nombre en la primera columna).</p>
+      <p class="muted">Pega una lista con un nombre por línea, o abre un archivo .csv exportado desde Excel (el nombre en la primera columna). Si alguna columna trae el correo del estudiante, también se guarda (y se actualiza en quienes ya estaban en la lista).</p>
       <textarea id="importText" placeholder="Ana Martínez López&#10;Carlos Pérez&#10;..."></textarea>
       <div class="row" style="margin-top:10px;">
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('csvFileInput').click()">📁 Abrir archivo CSV</button>
@@ -2178,11 +2182,15 @@ function renderEstudiantes(group){
         <button class="btn btn-ink btn-sm" onclick="exportAllToExcel(getActiveGroup())" title="Una hoja por categoría (asistencia, calificaciones, etc.)">📊 Excel (por categoría)</button>
         <button class="btn btn-ink btn-sm" onclick="exportAllToExcelPerStudent(getActiveGroup())" title="Una hoja por estudiante, con todos sus datos">📊 Excel (por estudiante)</button>
         <button class="btn btn-ink btn-sm" onclick="exportAllStudentsToWord(getActiveGroup())" title="Un estudiante por página, para imprimir y entregar">📄 Word (por estudiante)</button>
+        <button class="btn btn-accent btn-sm" onclick="openMailReports()" title="Envía a cada estudiante su propio informe en Word por Gmail">✉️ Enviar informes por correo</button>
       </div>
       ${group.students.length === 0 ? '<div class="empty-state">Aún no hay estudiantes en este grupo.</div>' :
         group.students.map(s=>`
           <div class="student-list-item">
-            <button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button>
+            <div style="min-width:0;">
+              <button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button>
+              ${s.email ? `<div class="muted" style="font-size:0.75rem; overflow-wrap:anywhere;">${escapeHtml(s.email)}</div>` : ''}
+            </div>
             <div class="row" style="gap:6px;">
               <button class="btn btn-outline btn-sm" onclick="editStudentName('${s.id}')">✎ Editar</button>
               <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')">Eliminar</button>
@@ -2221,20 +2229,25 @@ function renderEstudiantes(group){
 function importStudentsFromText(group, text){
   if(!text || !text.trim()){ showToast('No hay texto para importar'); return; }
   const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  let count = 0;
+  let count = 0, emails = 0;
   lines.forEach(line=>{
-    const firstField = line.split(',')[0].trim();
-    const name = firstField.replace(/^"|"$/g,'').trim();
+    const cells = line.split(/[,;\t]/).map(c=> c.replace(/^"|"$/g,'').trim());
+    const email = cells.find(c=> isValidEmail(c)) || '';
+    const name = cells.find(c=> c && !isValidEmail(c)) || '';
     if(!name) return;
-    const exists = group.students.some(s=> s.name.toLowerCase() === name.toLowerCase());
-    if(!exists){
-      group.students.push({id: uid(), name});
+    const existing = group.students.find(s=> normalizePersonName(s.name) === normalizePersonName(name));
+    if(!existing){
+      const st = {id: uid(), name};
+      if(email){ st.email = email; emails++; }
+      group.students.push(st);
       count++;
+    } else if(email && existing.email !== email){
+      existing.email = email; emails++;
     }
   });
   saveState();
   renderEstudiantes(group);
-  showToast(count + ' estudiante(s) importado(s)');
+  showToast(count + ' estudiante(s) importado(s)' + (emails ? ` · ${emails} correo(s) guardado(s)` : ''));
 }
 
 function deleteStudent(id){
@@ -2258,6 +2271,8 @@ function editStudentName(id){
       <h2 style="border:none; padding-bottom:0;">Editar estudiante</h2>
       <label style="margin-top:8px;">Nombre completo</label>
       <input type="text" id="studentNameFormInput" value="${escapeHtml(student.name)}">
+      <label style="margin-top:8px;">Correo electrónico (para enviarle su informe)</label>
+      <input type="email" id="studentEmailFormInput" value="${escapeHtml(student.email || '')}" placeholder="Opcional">
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveStudentNameForm('${id}')">Guardar</button>
       </div>
@@ -2275,7 +2290,10 @@ function saveStudentNameForm(id){
   if(!student) return;
   const name = document.getElementById('studentNameFormInput').value.trim();
   if(!name){ showToast('El nombre no puede quedar vacío'); return; }
+  const email = (document.getElementById('studentEmailFormInput')?.value || '').trim();
+  if(email && !isValidEmail(email)){ showToast('El correo no parece válido'); return; }
   student.name = name;
+  student.email = email;
   saveState();
   closeStudentNameForm();
   renderEstudiantes(group);
@@ -2380,6 +2398,7 @@ function openStudentDetail(studentId){
       </div>
       <div class="row" style="justify-content:center; margin-top:8px;">
         <button class="btn btn-ink btn-sm" onclick="exportStudentHistoryToWord('${studentId}')">⬇️ Exportar historial completo (Word)</button>
+        <button class="btn btn-accent btn-sm" onclick="openMailReports('${studentId}')">✉️ Enviar informe por correo</button>
       </div>
     </div>
   `;
@@ -5659,6 +5678,400 @@ document.addEventListener('visibilitychange', ()=>{
   if(kioskActive && !document.hidden) requestKioskWakeLock();
 });
 
+/* ============ ENVÍO DE INFORMES POR CORREO (Gmail) ============ */
+/* El permiso para enviar correos se pide aparte y solo al momento de enviar (no afecta la conexión con Drive). */
+const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+const DEFAULT_MAIL_TEMPLATE = {
+  subject: 'Informe de {curso} – {nombre}',
+  body: 'Hola {primer_nombre}:\n\nTe envío adjunto tu informe de {curso}, con el registro de tu asistencia, trabajo en clases, calificaciones, entregas, décimas y puntos al {fecha}.\n\nSi tienes dudas sobre algún registro, lo conversamos en clases.\n\nSaludos cordiales.',
+  includeObs: false,
+  includeBitacora: false,
+};
+let gmailToken = null;          // { access_token, expires_at } — solo en memoria
+let mailSendState = null;       // { groupId, selected:Set, status:{studentId:{state,msg}}, sending, confirming }
+
+function ensureMailTemplate(){
+  if(!state.mailTemplate) state.mailTemplate = { ...DEFAULT_MAIL_TEMPLATE };
+  return state.mailTemplate;
+}
+function isValidEmail(email){ return /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(String(email || '').trim()); }
+function normalizePersonName(n){ return String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function fillMailPlaceholders(text, group, student){
+  const first = (student.name || '').trim().split(/\s+/)[0] || '';
+  return String(text || '')
+    .replace(/\{nombre\}/gi, student.name)
+    .replace(/\{primer_nombre\}/gi, first)
+    .replace(/\{curso\}/gi, group.name)
+    .replace(/\{fecha\}/gi, formatDate(toISODate(new Date())));
+}
+
+/* ---- Permiso de Gmail ---- */
+function getGmailToken(){
+  return new Promise((resolve, reject)=>{
+    if(gmailToken && gmailToken.expires_at > Date.now() + 60000){ resolve(gmailToken.access_token); return; }
+    if(typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2){
+      reject(new Error('No se pudo cargar Google. Revisa tu conexión a internet.')); return;
+    }
+    const cfg = {
+      client_id: loadDriveClientId(),
+      scope: GMAIL_SEND_SCOPE,
+      prompt: '',
+      callback: (resp)=>{
+        if(resp.error){ reject(new Error('Google no dio el permiso (' + (resp.error_description || resp.error) + ')')); return; }
+        if(!google.accounts.oauth2.hasGrantedAllScopes(resp, GMAIL_SEND_SCOPE)){
+          reject(new Error('No se marcó el permiso "Enviar correo electrónico en tu nombre" en la ventana de Google')); return;
+        }
+        gmailToken = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000) };
+        resolve(resp.access_token);
+      },
+      error_callback: (err)=>{
+        const t = err && err.type;
+        reject(new Error(t === 'popup_closed' ? 'Se cerró la ventana de Google sin dar el permiso'
+          : t === 'popup_failed_to_open' ? 'El navegador bloqueó la ventana de Google (permite ventanas emergentes)'
+          : 'No se pudo abrir la ventana de Google'));
+      },
+    };
+    const hint = localStorage.getItem('gdrive_email');
+    if(hint) cfg.login_hint = hint;
+    google.accounts.oauth2.initTokenClient(cfg).requestAccessToken();
+  });
+}
+
+/* ---- Construcción del correo (MIME) ---- */
+function b64Utf8(str){ return btoa(unescape(encodeURIComponent(str))); }
+function wrapB64(s){ return s.replace(/.{1,76}/g, '$&\r\n'); }
+function mimeHeaderValue(str){ return /^[\x20-\x7E]*$/.test(str) ? str : '=?UTF-8?B?' + b64Utf8(str) + '?='; }
+function blobToBase64(blob){
+  return new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ()=> resolve(String(r.result).split(',')[1] || '');
+    r.onerror = ()=> reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+async function buildReportMime(to, subject, bodyText, fileName, fileBlob){
+  const boundary = 'rc_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const asciiName = fileName.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_');
+  const attachment = await blobToBase64(fileBlob);
+  return [
+    'MIME-Version: 1.0',
+    'To: ' + to,
+    'Subject: ' + mimeHeaderValue(subject),
+    'Content-Type: multipart/mixed; boundary="' + boundary + '"',
+    '',
+    '--' + boundary,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrapB64(b64Utf8(bodyText.replace(/\r?\n/g, '\r\n'))),
+    '--' + boundary,
+    'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name="' + asciiName + '"',
+    'Content-Disposition: attachment; filename="' + asciiName + '"; filename*=UTF-8\'\'' + encodeURIComponent(fileName),
+    'Content-Transfer-Encoding: base64',
+    '',
+    wrapB64(attachment),
+    '--' + boundary + '--',
+    '',
+  ].join('\r\n');
+}
+async function gmailSendMime(token, mime){
+  const res = await fetch('https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'message/rfc822' },
+    body: mime,
+  });
+  if(res.ok) return;
+  let msg = '';
+  try{ const j = await res.json(); msg = (j.error && j.error.message) || ''; }catch(e){}
+  if(res.status === 401){ gmailToken = null; throw new Error('El permiso de Google expiró. Vuelve a enviar.'); }
+  if(res.status === 403 && /has not been used|is disabled|not enabled/i.test(msg)){
+    const err = new Error('La Gmail API no está habilitada en tu proyecto de Google Cloud (revisa "Primera vez: habilitar el envío").');
+    err.fatal = true; throw err;
+  }
+  if(res.status === 403 && /insufficient|scope/i.test(msg)){ gmailToken = null; const err = new Error('Falta el permiso para enviar correos. Vuelve a intentarlo y acepta el permiso.'); err.fatal = true; throw err; }
+  if(res.status === 400 && /invalid to|recipient|address/i.test(msg)) throw new Error('Google rechazó el correo del destinatario');
+  if(res.status === 429) throw new Error('Google limitó los envíos por ahora (demasiados seguidos). Intenta más tarde.');
+  throw new Error('Error de Gmail (' + res.status + ')' + (msg ? ': ' + msg : ''));
+}
+function sleep(ms){ return new Promise(r=> setTimeout(r, ms)); }
+
+/* ---- Ventana de envío ---- */
+function openMailReports(onlyStudentId){
+  const group = getActiveGroup();
+  if(!group || group.students.length === 0){ showToast('Este curso no tiene estudiantes'); return; }
+  ensureMailTemplate();
+  closeStudentDetail();
+  const selected = new Set();
+  group.students.forEach(s=>{
+    if(onlyStudentId ? s.id === onlyStudentId : isValidEmail(s.email)) selected.add(s.id);
+  });
+  mailSendState = { groupId: group.id, selected, status: {}, sending: false, confirming: false };
+  document.getElementById('mailReportsOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'mailReportsOverlay';
+  overlay.innerHTML = `<div class="modal-box app-font" style="max-width:680px;" id="mailReportsBox"></div>`;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) closeMailReports(); });
+  document.body.appendChild(overlay);
+  renderMailReports();
+}
+function closeMailReports(){
+  if(mailSendState && mailSendState.sending){ showToast('Espera a que termine el envío'); return; }
+  document.getElementById('mailReportsOverlay')?.remove();
+  mailSendState = null;
+  if(currentTab === 'estudiantes') renderEstudiantes(getActiveGroup());
+}
+function mailGroup(){ return mailSendState ? state.groups.find(g=> g.id === mailSendState.groupId) : null; }
+
+function mailStatusHtml(s){
+  const st = mailSendState.status[s.id];
+  if(st){
+    if(st.state === 'sending') return '<span class="muted">⏳ Enviando…</span>';
+    if(st.state === 'ok') return '<span style="color:var(--success); font-weight:600;">✅ Enviado</span>';
+    if(st.state === 'error') return `<span style="color:var(--danger); font-size:0.8rem;">❌ ${escapeHtml(st.msg || 'Error')}</span>`;
+    if(st.state === 'pending') return '<span class="muted">En cola</span>';
+  }
+  if(s.lastReportSent){
+    const d = new Date(s.lastReportSent);
+    return `<span class="muted" style="font-size:0.78rem;">Último envío: ${formatDate(toISODate(d))} ${d.toTimeString().slice(0,5)}</span>`;
+  }
+  return '';
+}
+
+function renderMailReports(){
+  const box = document.getElementById('mailReportsBox');
+  const group = mailGroup();
+  if(!box || !group) return;
+  const tpl = ensureMailTemplate();
+  const ms = mailSendState;
+  const withEmail = group.students.filter(s=> isValidEmail(s.email));
+  const selectedValid = group.students.filter(s=> ms.selected.has(s.id) && isValidEmail(s.email));
+  const allChecked = withEmail.length > 0 && withEmail.every(s=> ms.selected.has(s.id));
+  const dis = ms.sending ? 'disabled' : '';
+  box.innerHTML = `
+    <button class="modal-close" onclick="closeMailReports()">✕</button>
+    <h2 style="border:none; padding-bottom:0;">✉️ Enviar informes por correo</h2>
+    <p class="muted">${escapeHtml(group.name)} · Cada estudiante recibe su propio informe en Word, adjunto a un correo enviado desde tu cuenta de Google (quedará en tu carpeta "Enviados").</p>
+
+    <details class="mail-setup">
+      <summary>Primera vez: habilitar el envío (5 minutos)</summary>
+      <ol>
+        <li>Entra a <strong>console.cloud.google.com</strong> con la cuenta dueña del proyecto de la app y elige ese proyecto.</li>
+        <li>Menú <strong>APIs y servicios → Biblioteca</strong>, busca <strong>Gmail API</strong> y presiona <strong>Habilitar</strong>.</li>
+        <li>Ve a <strong>Google Auth Platform → Acceso a datos</strong> (o "Pantalla de consentimiento de OAuth"), presiona <strong>Agregar o quitar permisos</strong>, marca <strong>…/auth/gmail.send</strong> y guarda.</li>
+        <li>Listo. La primera vez que envíes, Google te pedirá el permiso "Enviar correo electrónico en tu nombre". Si aparece "Google no verificó esta app", presiona <strong>Continuar</strong> (es tu propia app en modo de prueba).</li>
+      </ol>
+      <p class="muted" style="margin:4px 0 0;">Tus colegas que usan la app también podrán enviar desde sus cuentas (siguen como usuarios de prueba).</p>
+    </details>
+
+    <label style="margin-top:10px;">Asunto</label>
+    <input type="text" id="mailSubject" value="${escapeHtml(tpl.subject)}" ${dis} onchange="updateMailTemplate('subject', this.value)">
+    <label style="margin-top:8px;">Mensaje</label>
+    <textarea id="mailBody" rows="7" ${dis} onchange="updateMailTemplate('body', this.value)">${escapeHtml(tpl.body)}</textarea>
+    <p class="muted" style="font-size:0.75rem; margin-top:2px;">Se reemplazan automáticamente: {nombre} · {primer_nombre} · {curso} · {fecha}</p>
+
+    <p class="scan-section-label" style="margin-top:10px;">Contenido del informe</p>
+    <p class="muted" style="font-size:0.78rem; margin:0 0 4px;">Siempre incluye: resumen, asistencia y puntaje por clase, calificaciones, décimas, puntos y entregas.</p>
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+      <input type="checkbox" style="width:auto;" ${tpl.includeObs ? 'checked' : ''} ${dis} onchange="updateMailTemplate('includeObs', this.checked)">
+      Incluir las observaciones escritas en cada clase
+    </label>
+    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;">
+      <input type="checkbox" style="width:auto;" ${tpl.includeBitacora ? 'checked' : ''} ${dis} onchange="updateMailTemplate('includeBitacora', this.checked)">
+      Incluir la bitácora (ojo: los registros generales del curso pueden mencionar a otros estudiantes)
+    </label>
+
+    <div class="flex-between" style="margin-top:14px; gap:8px;">
+      <p class="scan-section-label" style="margin:0;">Destinatarios (${selectedValid.length} de ${group.students.length})</p>
+      <div class="row" style="gap:6px;">
+        <label class="btn btn-outline btn-sm" style="margin:0; cursor:pointer;" title="CSV con el nombre en una columna y el correo en otra">📁 Importar correos (CSV)
+          <input type="file" accept=".csv,.txt" style="display:none;" ${dis} onchange="importMailCsv(this.files[0])">
+        </label>
+        <button class="btn btn-outline btn-sm" ${dis} onclick="downloadMailPreview()">👁️ Ver un informe</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th style="width:30px;"><input type="checkbox" style="width:auto;" ${allChecked ? 'checked' : ''} ${dis} onchange="toggleAllMailRecipients(this.checked)" title="Seleccionar todos los que tienen correo"></th>
+        <th>Estudiante</th><th>Correo y estado</th>
+      </tr></thead>
+      <tbody>
+        ${group.students.map(s=>{
+          const valid = isValidEmail(s.email);
+          return `<tr>
+            <td><input type="checkbox" style="width:auto;" ${ms.selected.has(s.id) && valid ? 'checked' : ''} ${valid && !ms.sending ? '' : 'disabled'} onchange="toggleMailRecipient('${s.id}', this.checked)"></td>
+            <td>${escapeHtml(s.name)}</td>
+            <td style="width:60%;">
+              <input type="email" value="${escapeHtml(s.email || '')}" placeholder="correo@..." ${dis} class="${s.email && !valid ? 'input-invalid' : ''}" style="width:100%;" onchange="updateStudentEmail('${s.id}', this.value)">
+              <div id="mailStatus_${s.id}" style="margin-top:3px;">${mailStatusHtml(s)}</div>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    </div>
+
+    <div id="mailSendFooter" style="margin-top:14px; text-align:center;">${mailFooterHtml(selectedValid.length)}</div>
+  `;
+}
+function mailFooterHtml(count){
+  const ms = mailSendState;
+  if(ms.sending){
+    const done = Object.values(ms.status).filter(x=> x.state === 'ok' || x.state === 'error').length;
+    const total = Object.keys(ms.status).length;
+    return `<div class="muted" style="font-weight:600;">Enviando ${done} de ${total}… no cierres esta ventana.</div>`;
+  }
+  if(count === 0) return '<div class="muted">Selecciona al menos un estudiante con correo válido.</div>';
+  if(ms.confirming){
+    return `
+      <div style="font-weight:600; margin-bottom:8px;">¿Enviar ${count} correo(s) con informe adjunto?</div>
+      <div class="row" style="justify-content:center; gap:6px;">
+        <button class="btn btn-accent" onclick="startMailSend()">✉️ Sí, enviar ahora</button>
+        <button class="btn btn-outline" onclick="mailSendState.confirming=false; renderMailReports();">Cancelar</button>
+      </div>
+      <p class="muted" style="font-size:0.75rem; margin-top:6px;">Se abrirá una ventana de Google para elegir la cuenta desde la que se envía.</p>`;
+  }
+  return `<button class="btn btn-accent" onclick="mailSendState.confirming=true; renderMailReports();">✉️ Enviar a ${count} estudiante(s)</button>`;
+}
+function updateMailTemplate(field, value){
+  const tpl = ensureMailTemplate();
+  tpl[field] = value;
+  saveState();
+}
+function updateStudentEmail(studentId, value){
+  const group = mailGroup() || getActiveGroup();
+  const s = group.students.find(x=> x.id === studentId);
+  if(!s) return;
+  const v = String(value || '').trim();
+  s.email = v;
+  if(isValidEmail(v)) mailSendState && mailSendState.selected.add(studentId);
+  else mailSendState && mailSendState.selected.delete(studentId);
+  saveState();
+  if(v && !isValidEmail(v)) showToast('Ese correo no parece válido: ' + v);
+  if(mailSendState) renderMailReports();
+}
+function toggleMailRecipient(studentId, checked){
+  if(!mailSendState) return;
+  if(checked) mailSendState.selected.add(studentId); else mailSendState.selected.delete(studentId);
+  mailSendState.confirming = false;
+  renderMailReports();
+}
+function toggleAllMailRecipients(checked){
+  const group = mailGroup();
+  if(!group) return;
+  group.students.forEach(s=>{
+    if(checked && isValidEmail(s.email)) mailSendState.selected.add(s.id);
+    if(!checked) mailSendState.selected.delete(s.id);
+  });
+  mailSendState.confirming = false;
+  renderMailReports();
+}
+
+/* Lee un CSV/texto con nombre y correo en cualquier columna, y asigna el correo al estudiante con ese nombre */
+function applyEmailsFromText(group, text){
+  let matched = 0;
+  const unmatched = [];
+  String(text || '').split(/\r?\n/).forEach(line=>{
+    const cells = line.split(/[,;\t]/).map(c=> c.replace(/^"|"$/g, '').trim()).filter(Boolean);
+    const email = cells.find(c=> isValidEmail(c));
+    if(!email) return;
+    const nameCells = cells.filter(c=> c !== email && !/^\d+$/.test(c));
+    if(nameCells.length === 0) return;
+    const candidates = [nameCells.join(' '), ...nameCells, nameCells.slice().reverse().join(' ')].map(normalizePersonName);
+    const s = group.students.find(st=> candidates.includes(normalizePersonName(st.name)));
+    if(s){ s.email = email; matched++; if(mailSendState) mailSendState.selected.add(s.id); }
+    else unmatched.push(nameCells.join(' '));
+  });
+  return { matched, unmatched };
+}
+function importMailCsv(file){
+  if(!file) return;
+  const group = mailGroup();
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    const { matched, unmatched } = applyEmailsFromText(group, ev.target.result);
+    saveState();
+    renderMailReports();
+    showToast(`${matched} correo(s) asignado(s)` + (unmatched.length ? `. Sin coincidencia de nombre: ${unmatched.slice(0,3).join(', ')}${unmatched.length > 3 ? '…' : ''}` : ''));
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function reportOptionsFromTemplate(){
+  const tpl = ensureMailTemplate();
+  return { omitObs: !tpl.includeObs, omitBitacora: !tpl.includeBitacora };
+}
+function reportFileName(student){
+  return `Informe_${student.name.trim().replace(/\s+/g, '_')}_${toISODate(new Date())}.docx`;
+}
+async function downloadMailPreview(){
+  const group = mailGroup();
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para generar el Word.'); return; }
+  const s = group.students.find(x=> mailSendState.selected.has(x.id)) || group.students[0];
+  const blob = await buildDocxBlob(buildStudentHistoryBody(group, s, reportOptionsFromTemplate()));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = reportFileName(s);
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Descargado el informe de ' + s.name + ' (así lo recibirá)');
+}
+
+async function startMailSend(){
+  const ms = mailSendState;
+  const group = mailGroup();
+  if(!ms || !group || ms.sending) return;
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para generar los informes.'); return; }
+  const recipients = group.students.filter(s=> ms.selected.has(s.id) && isValidEmail(s.email));
+  if(recipients.length === 0) return;
+  // Importante: el permiso se pide antes de cualquier espera, para que el navegador no bloquee la ventana de Google
+  let token;
+  try{
+    token = await getGmailToken();
+  }catch(e){
+    showToast(e.message);
+    return;
+  }
+  const tpl = ensureMailTemplate();
+  const opts = reportOptionsFromTemplate();
+  ms.sending = true; ms.confirming = false;
+  ms.status = {};
+  recipients.forEach(s=> ms.status[s.id] = { state: 'pending' });
+  renderMailReports();
+  let ok = 0, fail = 0, fatal = null;
+  for(const s of recipients){
+    if(fatal){ ms.status[s.id] = { state: 'error', msg: 'No enviado' }; fail++; continue; }
+    ms.status[s.id] = { state: 'sending' };
+    refreshMailRow(s);
+    try{
+      const blob = await buildDocxBlob(buildStudentHistoryBody(group, s, opts));
+      const mime = await buildReportMime(s.email.trim(), fillMailPlaceholders(tpl.subject, group, s), fillMailPlaceholders(tpl.body, group, s), reportFileName(s), blob);
+      await gmailSendMime(token, mime);
+      ms.status[s.id] = { state: 'ok' };
+      s.lastReportSent = new Date().toISOString();
+      ok++;
+    }catch(e){
+      ms.status[s.id] = { state: 'error', msg: e.message };
+      fail++;
+      if(e.fatal) fatal = e;
+    }
+    refreshMailRow(s);
+    await sleep(350);
+  }
+  ms.sending = false;
+  saveState();
+  renderMailReports();
+  if(fatal) showToast(fatal.message);
+  else showToast(fail ? `Enviados ${ok}, con error ${fail}. Revisa el estado bajo cada correo.` : `✅ ${ok} informe(s) enviado(s)`);
+}
+function refreshMailRow(s){
+  const cell = document.getElementById('mailStatus_' + s.id);
+  if(cell) cell.innerHTML = mailStatusHtml(s);
+  const footer = document.getElementById('mailSendFooter');
+  if(footer) footer.innerHTML = mailFooterHtml(0);
+}
+
 /* ============ TAB: ENTREGAS (guías/trabajos: en plazo, fuera de plazo, no entregado) ============ */
 const ENTREGA_ESTADOS = {
   en_plazo: { label:'En plazo', color:{bg:'#E6F8EF', text:'#1F9D64', border:'#B9EBD1'} },
@@ -8149,6 +8562,18 @@ function buildDocxStylesXml(){
 }
 
 async function buildAndDownloadDocx(documentXml, filename){
+  const blob = await buildDocxBlob(documentXml);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function buildDocxBlob(documentXml){
   const fullDocumentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>${documentXml}</w:body>
@@ -8180,15 +8605,7 @@ async function buildAndDownloadDocx(documentXml, filename){
   wordFolder.file('styles.xml', buildDocxStylesXml());
   wordFolder.folder('_rels').file('document.xml.rels', documentRelsXml);
 
-  const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 }
 
 async function exportBitacoraToWord(group){
@@ -8213,7 +8630,9 @@ async function exportBitacoraToWord(group){
   showToast('Bitácora exportada a Word');
 }
 
-function buildStudentHistoryBody(group, student){
+/* opts: { omitObs: no incluir observaciones por clase, omitBitacora: no incluir la bitácora } */
+function buildStudentHistoryBody(group, student, opts){
+  opts = opts || {};
   const studentId = student.id;
   const stats = computeStudentStats(group, studentId);
   const gradeResult = computeStudentFinalGrade(group, studentId);
@@ -8233,6 +8652,7 @@ function buildStudentHistoryBody(group, student){
       ['Puntaje obtenido', `${stats.obtained} / ${stats.maxPossible}`],
       ['% de logro', stats.percent !== null ? stats.percent + '%' : '-'],
       ['Décimas (acumuladas / aplicadas)', `${decimasTotal} / ${decimasApplied}`],
+      ['Puntos (ganados / canjeados / disponibles)', `${computeStudentPuntosTotal(group, studentId)} / ${computeStudentPuntosRedeemed(group, studentId)} / ${computeStudentPuntosAvailable(group, studentId)}`],
       ['Promedio simple (calificaciones)', gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'],
       ['Nota final', gradeResult.finalGrade !== null ? gradeResult.finalGrade.toFixed(1) : '-'],
     ],
@@ -8246,18 +8666,19 @@ function buildStudentHistoryBody(group, student){
   if(sessions.length === 0){
     body += wordParagraph('Sin registros.');
   } else {
-    body += wordTable(
-      ['Fecha','Hora','Asistencia','Puntaje','Observaciones'],
-      sessions.map(s=>{
-        const entry = s.entries.find(e=>e.studentId===studentId);
-        const present = isEntryPresent(entry);
-        const inds = s.indicatorSnapshot || group.indicators;
-        const scores = inds.map(i=> entry.cotejo[i.id]).filter(v=> v!==null && v!==undefined);
-        const total = scores.length ? scores.reduce((a,b)=>a+b,0) : 0;
-        return [formatDate(s.date), s.time, present ? 'Presente' : 'Ausente', present ? String(total) : '-', entry.observaciones || ''];
-      }),
-      [1200,1000,1200,1000,2600]
-    );
+    const rows = sessions.map(s=>{
+      const entry = s.entries.find(e=>e.studentId===studentId);
+      const present = isEntryPresent(entry);
+      const inds = s.indicatorSnapshot || group.indicators;
+      const scores = inds.map(i=> (entry.cotejo || {})[i.id]).filter(v=> v!==null && v!==undefined);
+      const total = scores.length ? scores.reduce((a,b)=>a+b,0) : 0;
+      const row = [formatDate(s.date), s.time || '', present ? 'Presente' : 'Ausente', present ? String(total) : '-'];
+      if(!opts.omitObs) row.push(entry.observaciones || '');
+      return row;
+    });
+    body += opts.omitObs
+      ? wordTable(['Fecha','Hora','Asistencia','Puntaje'], rows, [1800,1400,1800,1400])
+      : wordTable(['Fecha','Hora','Asistencia','Puntaje','Observaciones'], rows, [1200,1000,1200,1000,2600]);
   }
 
   const evals = getActiveEvaluations(group);
@@ -8287,6 +8708,19 @@ function buildStudentHistoryBody(group, student){
     );
   }
 
+  const puntosSessions = getActivePuntos(group).filter(d=> d.values && d.values[studentId]);
+  const canjesStudent = getActiveCanjes(group).filter(c=> c.studentId === studentId);
+  body += wordHeading('Puntos', 24);
+  if(puntosSessions.length === 0 && canjesStudent.length === 0){
+    body += wordParagraph('Sin puntos registrados.');
+  } else {
+    const movs = [
+      ...puntosSessions.map(d=> ({ k: (d.date||''), row: [formatDate(d.date), d.note || 'Puntos', '+' + d.values[studentId]] })),
+      ...canjesStudent.map(c=> ({ k: (c.date||'') + (c.time||''), row: [formatDate(c.date), 'Canje: ' + c.name, '-' + c.cost] })),
+    ].sort((a,b)=> a.k.localeCompare(b.k)).map(m=> m.row);
+    body += wordTable(['Fecha','Motivo / canje','Puntos'], movs, [1500,3500,1000]);
+  }
+
   const entregas = getActiveEntregas(group);
   body += wordHeading('Entregas', 24);
   if(entregas.length === 0){
@@ -8302,6 +8736,7 @@ function buildStudentHistoryBody(group, student){
     );
   }
 
+  if(opts.omitBitacora) return body;
   const bitacoraEntries = getActiveBitacora(group)
     .filter(e=> (e.studentIds||[]).length === 0 || e.studentIds.includes(studentId))
     .sort((a,b)=> (a.date||'').localeCompare(b.date||''));
