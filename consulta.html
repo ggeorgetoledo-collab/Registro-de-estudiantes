@@ -66,6 +66,11 @@
   .msg{ text-align:center; padding:36px 20px; }
   .msg .icon{ font-size:2.6rem; }
   .msg h1{ font-size:1.25rem; margin:10px 0 6px; }
+  .course-tabs{ display:flex; flex-wrap:wrap; gap:8px; }
+  .course-tab{ font:inherit; font-weight:600; font-size:0.9rem; padding:8px 12px; border-radius:12px; border:1px solid var(--border); background:var(--bg); color:var(--text); cursor:pointer; display:flex; flex-direction:column; align-items:flex-start; gap:1px; text-align:left; }
+  .course-tab span{ font-size:0.75rem; font-weight:600; color:var(--dim); }
+  .course-tab.active{ background:var(--primary); border-color:var(--primary); color:#fff; }
+  .course-tab.active span{ color:rgba(255,255,255,0.85); }
   .note{ font-size:0.8rem; color:var(--dim); text-align:center; margin-top:18px; line-height:1.5; }
   @media (max-width:360px){ .tile .num{ font-size:1.6rem; } }
 </style>
@@ -102,7 +107,9 @@
     return first + `<details><summary>Ver ${items.length - visible} más</summary>${items.slice(visible).map(renderItem).join('')}</details>`;
   }
 
-  function render(d, generado){
+  /* p = { nombre, cursos: [...] }; idx = asignatura seleccionada */
+  function render(d, generado, p, idx){
+    const cursos = p.cursos;
     const a = d.asistencia || {};
     const totalClases = (a.presentes || 0) + (a.ausentes || 0);
     const asistPct = totalClases ? Math.round(a.presentes / totalClases * 100) : null;
@@ -115,8 +122,12 @@
 
     let html = `<div class="brand">⭐ Mi registro</div>
       <div class="card hero">
-        <h1>${esc(d.nombre)}</h1>
-        <div class="dim">${esc(d.curso)}${d.periodo ? ' · ' + esc(d.periodo) : ''}</div>
+        <h1>${esc(p.nombre || d.nombre)}</h1>
+        ${cursos.length > 1 ? `
+          <div class="dim small" style="margin:6px 0 8px; font-weight:600;">Elige la asignatura</div>
+          <div class="course-tabs">${cursos.map((c, i)=> `<button class="course-tab${i === idx ? ' active' : ''}" data-idx="${i}">${esc(c.curso)}<span>${num((c.puntos || {}).disponibles || 0)} pts</span></button>`).join('')}</div>
+          ${d.periodo ? `<div class="dim small" style="margin-top:8px;">${esc(d.periodo)}</div>` : ''}
+        ` : `<div class="dim">${esc(d.curso)}${d.periodo ? ' · ' + esc(d.periodo) : ''}</div>`}
         <div class="dim small" style="margin-top:6px;">Datos actualizados el ${fdatetime(generado)}</div>
       </div>
       <div class="tiles">
@@ -191,6 +202,13 @@
 
     html += `<p class="note">🔒 Este enlace es personal: no lo compartas ni prestes tu tarjeta.<br>Si la perdiste, avísale a tu profesor para que te entregue una nueva.<br>Si ves algo que no corresponde, conversa con tu profesor.</p>`;
     app.innerHTML = html;
+    app.querySelectorAll('.course-tab').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const i = Number(btn.dataset.idx);
+        try{ sessionStorage.setItem('mi-registro-curso', String(i)); }catch(e){}
+        render(cursos[i], generado, p, i);
+      });
+    });
   }
 
   async function load(){
@@ -225,7 +243,12 @@
       }
       const key = await crypto.subtle.importKey('raw', await sha('rc-key:' + token), 'AES-GCM', false, ['decrypt']);
       const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(enc.iv) }, key, b64ToBytes(enc.ct));
-      render(JSON.parse(new TextDecoder().decode(plain)), data.generado);
+      const payload = JSON.parse(new TextDecoder().decode(plain));
+      // Formato nuevo: { nombre, cursos: [...] } (un estudiante en varios cursos). Formato antiguo: un solo curso.
+      const p = payload.cursos ? { nombre: payload.nombre, cursos: payload.cursos } : { nombre: payload.nombre, cursos: [payload] };
+      let idx = 0;
+      try{ idx = Math.min(p.cursos.length - 1, Math.max(0, Number(sessionStorage.getItem('mi-registro-curso')) || 0)); }catch(e){}
+      render(p.cursos[idx], data.generado, p, idx);
     }catch(e){
       message('⚠️', 'No se pudo abrir tu registro', 'El enlace no es válido. Vuelve a escanear el QR de tu tarjeta o avísale a tu profesor.');
     }

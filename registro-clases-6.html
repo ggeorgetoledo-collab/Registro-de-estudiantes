@@ -569,6 +569,7 @@
   .kiosk-pos{ color:var(--success); white-space:nowrap; }
   .kiosk-neg{ color:var(--danger); white-space:nowrap; }
   .kiosk-video{ max-width:300px; }
+  .kiosk-course-title{ font-family:'Poppins','Inter',sans-serif; font-weight:800; font-size:1.05rem; color:var(--primary-dark); text-align:center; margin-top:4px; }
   .kiosk-timer{ height:4px; background:var(--border); border-radius:2px; overflow:hidden; margin-top:12px; }
   .kiosk-timer > div{ height:100%; width:100%; background:var(--primary); animation-name:kioskTimer; animation-timing-function:linear; animation-fill-mode:forwards; }
   @keyframes kioskTimer{ from{ width:100%; } to{ width:0; } }
@@ -4123,25 +4124,8 @@ function normalizeCardCode(raw){
   return code.replace(/[^A-Z0-9]/g, '');
 }
 function findStudentByCard(raw){
-  // QR del portal: https://…/consulta.html#f=…&t=CLAVE
-  const tm = String(raw || '').match(/[#&?]t=([A-Za-z0-9]{12,})/);
-  if(tm){
-    const tok = tm[1].toUpperCase();
-    for(const g of state.groups){
-      const s = (g.students || []).find(st=> st.webToken === tok);
-      if(s) return { group: g, student: s };
-    }
-    return null;
-  }
-  const code = normalizeCardCode(raw);
-  if(!code) return null;
-  // Primero el curso activo (por si un código se repitiera al importar respaldos), luego el resto
-  const ordered = [...state.groups].sort((a,b)=> (a.id === state.activeGroupId ? -1 : 0) - (b.id === state.activeGroupId ? -1 : 0));
-  for(const g of ordered){
-    const s = (g.students || []).find(st=> st.card === code);
-    if(s) return { group: g, student: s };
-  }
-  return null;
+  // Acepta el QR del portal (https://…/consulta.html#f=…&t=CLAVE) o el código simple; el curso activo tiene prioridad
+  return findAllByCard(raw)[0] || null;
 }
 function qrSvgForCode(code){ return qrSvgForData(QR_PREFIX + code); }
 function qrSvgForData(data){
@@ -4426,10 +4410,14 @@ let cardDesignTarget = null; // { groupIds, onlyStudentId }
 function collectCardsForTarget(target){
   if(ensurePortalConfig().enabled) ensureWebTokens();
   const cards = [];
+  const seenCodes = new Set();
   state.groups.filter(g=> target.groupIds.includes(g.id)).forEach(g=>{
     (g.students || []).forEach(s=>{
       if(target.onlyStudentId && s.id !== target.onlyStudentId) return;
-      cards.push({ studentId: s.id, name: s.name, course: g.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s) });
+      // Un estudiante vinculado en varios cursos lleva una sola tarjeta, con todos sus cursos
+      if(s.card && seenCodes.has(s.card)) return;
+      if(s.card) seenCodes.add(s.card);
+      cards.push({ studentId: s.id, name: s.name, course: s.card ? coursesLabelForCard(s.card) : g.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s) });
     });
   });
   return cards;
@@ -4805,14 +4793,22 @@ function handleScannedCode(raw){
 }
 
 function selectScanStudentByCode(code, fromCamera){
-  const found = findStudentByCard(code);
-  if(!found){
+  const matches = findAllByCard(code);
+  if(matches.length === 0){
     scanFeedback(false);
     setScanStatus(String(code || '').trim() ? `Tarjeta no reconocida (${normalizeCardCode(code) || 'sin código'}). ¿Es de otra cuenta o de un estudiante eliminado?` : 'Escribe un código');
     return;
   }
   scanFeedback(true);
-  selectScanStudent(found.group.id, found.student.id, fromCamera);
+  // Estudiante en varios cursos: si está en el curso activo se usa ese; si no, hay que elegir la asignatura
+  const inActive = matches.find(m=> m.group.id === state.activeGroupId);
+  const pick = inActive || matches[0];
+  const ambiguous = !inActive && matches.length > 1;
+  selectScanStudent(pick.group.id, pick.student.id, fromCamera && !ambiguous);
+  if(ambiguous){
+    flashScanResult('Está en ' + matches.length + ' cursos: elige la asignatura arriba');
+    if(fromCamera && scanAutoAction) showToast('No se sumó automáticamente: este estudiante está en varios cursos. Elige la asignatura.');
+  }
 }
 
 function selectScanStudent(groupId, studentId, fromScan){
@@ -5054,6 +5050,11 @@ function renderScanResult(){
           <div class="muted" style="font-size:0.72rem;">puntos</div>
         </div>
       </div>
+      ${(()=>{ const recs = linkedRecords(student); return recs.length > 1 ? `
+        <div class="scan-chip-row" style="margin-top:8px; align-items:center;">
+          <span class="muted" style="font-size:0.78rem;">Asignatura:</span>
+          ${recs.map(r=> `<button class="btn btn-sm ${r.group.id === group.id ? 'btn-accent' : 'btn-outline'}" onclick="selectScanStudent('${r.group.id}','${r.student.id}', false)">${escapeHtml(r.group.name)} · ${computeStudentPuntosAvailable(r.group, r.student.id)} pts</button>`).join('')}
+        </div>` : ''; })()}
       <div class="muted" style="font-size:0.78rem; margin-top:4px;">Puntos ganados ${total} · canjeados ${canjeados} · décimas disponibles ${decimasDisp}</div>
       <div class="scan-flash" id="scanFlash"></div>
 
@@ -5269,11 +5270,13 @@ function regenerateStudentCard(studentId){
   const group = getActiveGroup();
   const s = group.students.find(x=> x.id === studentId);
   if(!s) return;
-  if(!confirm(`¿Generar un código nuevo para ${s.name}?\n\nLa tarjeta anterior dejará de funcionar (útil si la perdió o se la prestó a otro), también en el portal desde tu próxima publicación. Tendrás que imprimirle una nueva.`)) return;
-  s.card = generateCardCode(allCardCodes());
+  const linked = linkedRecords(s);
+  if(!confirm(`¿Generar un código nuevo para ${s.name}?\n\nLa tarjeta anterior dejará de funcionar (útil si la perdió o se la prestó a otro), también en el portal desde tu próxima publicación.${linked.length > 1 ? ' El cambio aplica a sus ' + linked.length + ' cursos vinculados.' : ''} Tendrás que imprimirle una nueva.`)) return;
+  const newCard = generateCardCode(allCardCodes());
   // También cambia la clave del portal: la tarjeta antigua deja de abrir su registro desde la próxima publicación
   const toks = new Set(); state.groups.forEach(g=> (g.students||[]).forEach(x=>{ if(x.webToken) toks.add(x.webToken); }));
-  s.webToken = generateWebToken(toks);
+  const newToken = generateWebToken(toks);
+  (linked.length ? linked : [{ student: s }]).forEach(({ student })=>{ student.card = newCard; student.webToken = newToken; });
   saveState();
   renderPremios(group);
   showToast('Código nuevo generado: ' + s.card);
@@ -5282,7 +5285,9 @@ function updateStudentAlias(studentId, value){
   const group = getActiveGroup();
   const s = group.students.find(x=> x.id === studentId);
   if(!s) return;
-  s.cardAlias = String(value || '').trim().slice(0, 40);
+  const alias = String(value || '').trim().slice(0, 40);
+  const linked = linkedRecords(s);
+  (linked.length ? linked : [{ student: s }]).forEach(({ student })=>{ student.cardAlias = alias; });
   saveState();
 }
 
@@ -5411,6 +5416,7 @@ function renderPremios(group){
     ${portalCardHtml(group)}
 `,
     tarjetas: `
+    ${linkedCardHtml()}
     <div class="card app-font">
       <h2>Tarjetas QR</h2>
       <p class="muted">Diseña e imprime las tarjetas: tamaño, logo, título, marco de color, espacio para dibujar, apodo e imágenes de fondo de cada estudiante.</p>
@@ -5428,13 +5434,15 @@ function renderPremios(group){
           <tbody>
             ${group.students.map(s=> `
               <tr>
-                <td>${escapeHtml(s.name)}</td>
+                <td>${escapeHtml(s.name)}${(()=>{ const others = linkedRecords(s).filter(r=> r.group.id !== group.id); return others.length ? `<div class="muted" style="font-size:0.72rem;">🔗 También en: ${others.map(r=> escapeHtml(r.group.name)).join(', ')}</div>` : ''; })()}</td>
                 <td style="font-family:monospace; font-weight:700;">${s.card}</td>
                 <td><input type="text" maxlength="40" value="${escapeHtml(s.cardAlias || '')}" placeholder="Opcional" style="min-width:120px;" onchange="updateStudentAlias('${s.id}', this.value)"></td>
                 <td style="white-space:nowrap;">
                   <button class="btn ${studentHasCardImg(s.id) ? 'btn-accent' : 'btn-outline'} btn-sm" title="Imágenes de fondo (frente y reverso)" onclick="openStudentCardImages('${s.id}')">🖼️${studentHasCardImg(s.id) ? ' ✓' : ''}</button>
                   <button class="btn btn-outline btn-sm" title="Imprimir solo esta tarjeta" onclick="openCardDesigner(['${group.id}'], '${s.id}')">🖨️</button>
-                  ${ensurePortalConfig().enabled ? `<button class="btn btn-outline btn-sm" title="Abrir su portal (como lo verá el estudiante)" onclick="openPortalForStudent('${s.id}')">🔗</button>` : ''}
+                  ${ensurePortalConfig().enabled ? `<button class="btn btn-outline btn-sm" title="Abrir su portal (como lo verá el estudiante)" onclick="openPortalForStudent('${s.id}')">🌐</button>` : ''}
+                  <button class="btn btn-outline btn-sm" title="Vincular con su registro en otro curso (misma tarjeta)" onclick="openManualLink('${s.id}')">🔗</button>
+                  ${linkedRecords(s).length > 1 ? `<button class="btn btn-outline btn-sm" title="Separar de la tarjeta compartida" onclick="unlinkStudent('${s.id}')">✂️</button>` : ''}
                   <button class="btn btn-outline btn-sm" title="Código nuevo (tarjeta perdida)" onclick="regenerateStudentCard('${s.id}')">🔄</button>
                 </td>
               </tr>`).join('')}
@@ -5666,11 +5674,41 @@ function kioskMovements(group, studentId){
   return out;
 }
 
+function kioskCourseBlockHtml(group, student, showCourse){
+  const disp = computeStudentPuntosAvailable(group, student.id);
+  const ganados = computeStudentPuntosTotal(group, student.id);
+  const canjeados = computeStudentPuntosRedeemed(group, student.id);
+  const decDisp = computeStudentDecimasAvailable(group, student.id);
+  const movs = kioskMovements(group, student.id);
+  const alcanza = state.premios.filter(p=> p.cost <= disp).sort((a,b)=> a.cost - b.cost);
+  const proximo = state.premios.filter(p=> p.cost > disp).sort((a,b)=> a.cost - b.cost)[0];
+  const premioLabel = p=> (p.type === 'decimas' ? '➕ ' : '🎁 ') + escapeHtml(p.name) + ' · ' + p.cost + ' pts';
+  const nMovs = showCourse ? 4 : 8;
+  return `
+    ${showCourse ? `<div class="kiosk-course-title">${escapeHtml(group.name)}</div>` : ''}
+    <div style="text-align:center;">
+      <div class="kiosk-big">${disp}</div>
+      <div class="muted" style="font-weight:600;">puntos disponibles</div>
+      <div class="muted" style="font-size:0.8rem; margin-top:4px;">Ganados ${ganados} · canjeados ${canjeados}${decDisp > 0 ? ' · décimas por aplicar a una nota: ' + decDisp : ''}</div>
+    </div>
+    <p class="scan-section-label">Te alcanza para</p>
+    ${alcanza.length ? `<div class="scan-chip-row">${alcanza.map(p=> `<span class="kiosk-chip">${premioLabel(p)}</span>`).join('')}</div>` : '<div class="muted" style="font-size:0.85rem;">Todavía nada del catálogo, ¡sigue sumando!</div>'}
+    ${proximo ? `<div class="muted" style="font-size:0.85rem; margin-top:6px;">Te faltan <strong>${Math.round((proximo.cost - disp) * 10) / 10}</strong> punto(s) para: ${premioLabel(proximo)}</div>` : ''}
+    <p class="scan-section-label">Últimos movimientos</p>
+    ${movs.length === 0 ? '<div class="muted" style="font-size:0.85rem;">Aún no tienes movimientos.</div>' :
+      movs.slice(0, nMovs).map(m=> `
+        <div class="kiosk-mov">
+          <span>${formatDate(m.date)}${m.time ? ' ' + m.time : ''} · ${escapeHtml(m.text)}</span>
+          <strong class="${m.amount > 0 ? 'kiosk-pos' : 'kiosk-neg'}">${m.amount > 0 ? '+' : ''}${m.amount}</strong>
+        </div>`).join('')}
+    ${movs.length > nMovs ? `<div class="muted" style="font-size:0.78rem; margin-top:4px;">y ${movs.length - nMovs} movimiento(s) más antiguos</div>` : ''}`;
+}
+
 function showKioskStudent(raw){
   const box = document.getElementById('kioskResult');
   if(!box) return;
-  const found = findStudentByCard(raw);
-  if(!found){
+  const matches = findAllByCard(raw);
+  if(matches.length === 0){
     scanFeedback(false);
     box.innerHTML = `
       <div class="kiosk-card kiosk-idle">
@@ -5684,45 +5722,25 @@ function showKioskStudent(raw){
   }
   scanFeedback(true);
   ensureRewardsConfig();
-  const { group, student } = found;
-  const disp = computeStudentPuntosAvailable(group, student.id);
-  const ganados = computeStudentPuntosTotal(group, student.id);
-  const canjeados = computeStudentPuntosRedeemed(group, student.id);
-  const decDisp = computeStudentDecimasAvailable(group, student.id);
-  const movs = kioskMovements(group, student.id);
-  const alcanza = state.premios.filter(p=> p.cost <= disp).sort((a,b)=> a.cost - b.cost);
-  const proximo = state.premios.filter(p=> p.cost > disp).sort((a,b)=> a.cost - b.cost)[0];
-  const premioLabel = p=> (p.type === 'decimas' ? '➕ ' : '🎁 ') + escapeHtml(p.name) + ' · ' + p.cost + ' pts';
+  // En el orden de los cursos (no del curso activo)
+  const order = state.groups.map(g=> g.id);
+  matches.sort((a,b)=> order.indexOf(a.group.id) - order.indexOf(b.group.id));
+  const student = matches[0].student;
+  const multi = matches.length > 1;
   box.innerHTML = `
     <div class="kiosk-card">
       <div style="text-align:center;">
         <div class="kiosk-name">${escapeHtml(student.name)}</div>
-        <div class="muted">${escapeHtml(group.name)}${student.cardAlias ? ' · “' + escapeHtml(student.cardAlias) + '”' : ''}</div>
-        <div class="kiosk-big">${disp}</div>
-        <div class="muted" style="font-weight:600;">puntos disponibles</div>
-        <div class="muted" style="font-size:0.8rem; margin-top:4px;">Ganados ${ganados} · canjeados ${canjeados}${decDisp > 0 ? ' · décimas por aplicar a una nota: ' + decDisp : ''}</div>
+        <div class="muted">${multi ? matches.length + ' asignaturas' : escapeHtml(matches[0].group.name)}${student.cardAlias ? ' · “' + escapeHtml(student.cardAlias) + '”' : ''}</div>
       </div>
-
-      <p class="scan-section-label">Te alcanza para</p>
-      ${alcanza.length ? `<div class="scan-chip-row">${alcanza.map(p=> `<span class="kiosk-chip">${premioLabel(p)}</span>`).join('')}</div>` : '<div class="muted" style="font-size:0.85rem;">Todavía nada del catálogo, ¡sigue sumando!</div>'}
-      ${proximo ? `<div class="muted" style="font-size:0.85rem; margin-top:6px;">Te faltan <strong>${Math.round((proximo.cost - disp) * 10) / 10}</strong> punto(s) para: ${premioLabel(proximo)}</div>` : ''}
-
-      <p class="scan-section-label">Últimos movimientos</p>
-      ${movs.length === 0 ? '<div class="muted" style="font-size:0.85rem;">Aún no tienes movimientos.</div>' :
-        movs.slice(0, 8).map(m=> `
-          <div class="kiosk-mov">
-            <span>${formatDate(m.date)}${m.time ? ' ' + m.time : ''} · ${escapeHtml(m.text)}</span>
-            <strong class="${m.amount > 0 ? 'kiosk-pos' : 'kiosk-neg'}">${m.amount > 0 ? '+' : ''}${m.amount}</strong>
-          </div>`).join('')}
-      ${movs.length > 8 ? `<div class="muted" style="font-size:0.78rem; margin-top:4px;">y ${movs.length - 8} movimiento(s) más antiguos</div>` : ''}
-
+      ${matches.map(m=> kioskCourseBlockHtml(m.group, m.student, multi)).join(multi ? '<hr class="divider">' : '')}
       <div class="row" style="justify-content:center; margin-top:12px;">
         <button class="btn btn-accent" onclick="showKioskIdle()">Listo ✓</button>
       </div>
       <div class="kiosk-timer"><div id="kioskTimerBar"></div></div>
     </div>`;
   document.getElementById('kioskOverlay')?.scrollTo({ top: 0, behavior: 'smooth' });
-  scheduleKioskClear(15);
+  scheduleKioskClear(multi ? 25 : 15);
 }
 
 function submitKioskManualCode(){
@@ -6571,14 +6589,22 @@ async function generatePortalFile(){
     showToastQuick('Generando y cifrando los registros…');
     const entries = {};
     let count = 0;
+    // Un registro por tarjeta: si el estudiante está vinculado en varios cursos, lleva todas sus asignaturas
+    const byToken = new Map();
     for(const g of state.groups){
       for(const s of (g.students || [])){
-        const [id, enc] = await encryptForToken(s.webToken, buildPortalPayload(g, s));
-        entries[id] = enc;
-        count++;
+        if(!byToken.has(s.webToken)) byToken.set(s.webToken, []);
+        byToken.get(s.webToken).push({ g, s });
       }
     }
-    const data = { v: 1, generado: new Date().toISOString(), estudiantes: count, entries };
+    for(const [token, recs] of byToken){
+      const cursos = recs.map(({ g, s })=> buildPortalPayload(g, s));
+      const payload = { v: 2, nombre: recs[0].s.name, generado: new Date().toISOString(), cursos };
+      const [id, enc] = await encryptForToken(token, payload);
+      entries[id] = enc;
+      count++;
+    }
+    const data = { v: 2, generado: new Date().toISOString(), estudiantes: count, entries };
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -6676,6 +6702,200 @@ function portalCardHtml(group){
           <p class="muted" style="font-size:0.75rem; margin:4px 0 0;">Déjalo vacío para usar la dirección de esta app (${escapeHtml(portalDefaultUrl() || 'no disponible')}). Si la cambias, hay que reimprimir las tarjetas.</p>
         </details>
       ` : ''}
+    </div>`;
+}
+
+/* ============ ESTUDIANTES EN VARIOS CURSOS (una sola tarjeta) ============ */
+/* Los registros "vinculados" de un mismo estudiante en distintos cursos comparten código de tarjeta y clave del portal.
+   Cada curso sigue teniendo sus propios puntos, notas y registros. */
+
+/* Todas las coincidencias de una tarjeta, con el curso activo primero */
+function findAllByCard(raw){
+  const out = [];
+  const ordered = [...state.groups].sort((a,b)=> (a.id === state.activeGroupId ? -1 : 0) - (b.id === state.activeGroupId ? -1 : 0));
+  const tm = String(raw || '').match(/[#&?]t=([A-Za-z0-9]{12,})/);
+  if(tm){
+    const tok = tm[1].toUpperCase();
+    ordered.forEach(g=> (g.students || []).forEach(st=>{ if(st.webToken === tok) out.push({ group: g, student: st }); }));
+    return out;
+  }
+  const code = normalizeCardCode(raw);
+  if(!code) return out;
+  ordered.forEach(g=> (g.students || []).forEach(st=>{ if(st.card === code) out.push({ group: g, student: st }); }));
+  return out;
+}
+/* Registros que comparten tarjeta con este estudiante (incluido él mismo), en el orden de los cursos */
+function linkedRecords(student){
+  if(!student || !student.card) return [];
+  const out = [];
+  state.groups.forEach(g=> (g.students || []).forEach(st=>{ if(st.card === student.card) out.push({ group: g, student: st }); }));
+  return out;
+}
+function coursesLabelForCard(code){
+  const names = [];
+  state.groups.forEach(g=>{ if((g.students || []).some(st=> st.card === code)) names.push(g.name); });
+  return names.join(' / ');
+}
+
+/* Une varios registros en una sola tarjeta: todos toman el código y la clave del primero */
+function linkRecordSet(records){
+  if(records.length < 2) return;
+  ensureAllCards();
+  ensureWebTokens();
+  const keeper = records[0].student;
+  records.forEach(({ student })=>{
+    // Si ya estaba vinculado con otros, esos también pasan a la nueva tarjeta
+    const prevCard = student.card;
+    state.groups.forEach(g=> (g.students || []).forEach(st=>{
+      if(st.card === prevCard){ st.card = keeper.card; st.webToken = keeper.webToken; }
+    }));
+    if(!keeper.cardAlias && student.cardAlias) keeper.cardAlias = student.cardAlias;
+  });
+  const all = linkedRecords(keeper);
+  all.forEach(({ student })=>{ if(!student.cardAlias && keeper.cardAlias) student.cardAlias = keeper.cardAlias; });
+}
+
+function proposeLinks(){
+  const byName = new Map();
+  state.groups.forEach(g=> (g.students || []).forEach(st=>{
+    const key = normalizePersonName(st.name);
+    if(!key) return;
+    if(!byName.has(key)) byName.set(key, []);
+    byName.get(key).push({ group: g, student: st });
+  }));
+  const proposals = [];
+  byName.forEach(records=>{
+    const groupsSet = new Set(records.map(r=> r.group.id));
+    if(groupsSet.size < 2) return;
+    const cards = new Set(records.map(r=> r.student.card));
+    if(cards.size === 1 && records[0].student.card) return; // ya vinculados
+    proposals.push(records);
+  });
+  return proposals;
+}
+
+let linkProposals = [];
+function openLinkWizard(){
+  ensureAllCards();
+  ensureWebTokens();
+  linkProposals = proposeLinks();
+  document.getElementById('linkWizardOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'linkWizardOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="max-width:560px;">
+      <button class="modal-close" onclick="document.getElementById('linkWizardOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🔗 Vincular por nombre</h2>
+      ${linkProposals.length === 0 ? `
+        <div class="empty-state">No encontré estudiantes con exactamente el mismo nombre en distintos cursos que falten por vincular.<br><br>Si un nombre está escrito distinto en cada curso, usa el botón 🔗 de ese estudiante en la tabla para vincularlo a mano.</div>
+      ` : `
+        <p class="muted">Encontré ${linkProposals.length} estudiante(s) con el mismo nombre en más de un curso. Cada uno quedará con <strong>una sola tarjeta</strong>: se conserva el código del primer curso, y las tarjetas de los otros cursos dejan de funcionar (hay que imprimirle la nueva).</p>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:6px 0;">
+          <input type="checkbox" style="width:auto;" checked onchange="document.querySelectorAll('.link-prop-check').forEach(c=> c.checked = this.checked)"> <strong>Seleccionar todos</strong>
+        </label>
+        <div style="max-height:50vh; overflow-y:auto;">
+          ${linkProposals.map((recs, i)=> `
+            <label class="student-list-item" style="cursor:pointer; align-items:flex-start; gap:10px; justify-content:flex-start;">
+              <input type="checkbox" class="link-prop-check" data-idx="${i}" checked style="width:auto; margin-top:4px;">
+              <div>
+                <strong>${escapeHtml(recs[0].student.name)}</strong>
+                <div class="muted" style="font-size:0.8rem;">${recs.map(r=> escapeHtml(r.group.name)).join(' · ')}</div>
+                <div class="muted" style="font-size:0.75rem;">Queda el código <strong>${recs[0].student.card}</strong> (de ${escapeHtml(recs[0].group.name)})</div>
+              </div>
+            </label>`).join('')}
+        </div>
+        <div class="row" style="justify-content:center; margin-top:12px;">
+          <button class="btn btn-accent" onclick="applyLinkWizard()">🔗 Vincular seleccionados</button>
+        </div>
+      `}
+    </div>`;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+function applyLinkWizard(){
+  const idxs = [...document.querySelectorAll('.link-prop-check:checked')].map(c=> Number(c.dataset.idx));
+  if(idxs.length === 0){ showToast('No seleccionaste ninguno'); return; }
+  idxs.forEach(i=> linkRecordSet(linkProposals[i]));
+  saveState();
+  document.getElementById('linkWizardOverlay')?.remove();
+  renderPremios(getActiveGroup());
+  showToast(`${idxs.length} estudiante(s) vinculado(s). Imprime sus tarjetas nuevas y vuelve a publicar el portal.`);
+}
+
+/* Vincular a mano (cuando el nombre está escrito distinto en cada curso) */
+function openManualLink(studentId){
+  const group = getActiveGroup();
+  const s = group.students.find(x=> x.id === studentId);
+  if(!s) return;
+  const others = [];
+  state.groups.forEach(g=>{
+    if(g.id === group.id) return;
+    (g.students || []).forEach(st=>{ if(!s.card || st.card !== s.card) others.push({ group: g, student: st }); });
+  });
+  if(others.length === 0){ showToast('No hay estudiantes en otros cursos para vincular'); return; }
+  const key = normalizePersonName(s.name).split(' ');
+  // Los más parecidos primero (cuántas palabras del nombre comparten)
+  const score = st=> normalizePersonName(st.name).split(' ').filter(w=> key.includes(w)).length;
+  others.sort((a,b)=> score(b.student) - score(a.student) || a.group.name.localeCompare(b.group.name) || a.student.name.localeCompare(b.student.name));
+  document.getElementById('linkWizardOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'linkWizardOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="max-width:480px;">
+      <button class="modal-close" onclick="document.getElementById('linkWizardOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🔗 Vincular a ${escapeHtml(s.name)}</h2>
+      <p class="muted">Elige su registro en otro curso. Ambos quedarán con la tarjeta de <strong>${escapeHtml(group.name)}</strong> (código ${s.card || 'nuevo'}).</p>
+      <select id="manualLinkSelect" style="width:100%;">
+        ${others.map((o, i)=> `<option value="${i}">${escapeHtml(o.group.name)} · ${escapeHtml(o.student.name)}</option>`).join('')}
+      </select>
+      <div class="row" style="justify-content:center; margin-top:12px;">
+        <button class="btn btn-accent" id="manualLinkBtn">🔗 Vincular</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  document.getElementById('manualLinkBtn').onclick = ()=>{
+    const o = others[Number(document.getElementById('manualLinkSelect').value)];
+    linkRecordSet([{ group, student: s }, o]);
+    saveState();
+    overlay.remove();
+    renderPremios(getActiveGroup());
+    showToast(`Vinculado con ${o.group.name}. Imprímele la tarjeta nueva y vuelve a publicar el portal.`);
+  };
+}
+
+/* Separa a un estudiante de su tarjeta compartida: queda con tarjeta propia */
+function unlinkStudent(studentId){
+  const group = getActiveGroup();
+  const s = group.students.find(x=> x.id === studentId);
+  if(!s) return;
+  if(!confirm(`¿Separar a ${s.name} de ${group.name} de su tarjeta compartida?\n\nEn este curso quedará con un código y QR propios (hay que imprimirle una tarjeta para este curso). Su tarjeta actual seguirá funcionando para los otros cursos.`)) return;
+  s.card = generateCardCode(allCardCodes());
+  const toks = new Set(); state.groups.forEach(g=> (g.students||[]).forEach(x=>{ if(x.webToken) toks.add(x.webToken); }));
+  s.webToken = generateWebToken(toks);
+  saveState();
+  renderPremios(group);
+  showToast('Separado. Nuevo código: ' + s.card);
+}
+
+function linkedCardHtml(){
+  let persons = 0;
+  const seen = new Set();
+  state.groups.forEach(g=> (g.students || []).forEach(st=>{
+    if(!st.card || seen.has(st.card)) return;
+    seen.add(st.card);
+    if(linkedRecords(st).length > 1) persons++;
+  }));
+  return `
+    <div class="card app-font">
+      <h2>Estudiantes en varios cursos</h2>
+      <p class="muted">Si un estudiante está en más de un curso (distintas asignaturas), vincúlalo para que use <strong>una sola tarjeta</strong>: en el portal verá todas sus asignaturas, y al escanearlo podrás elegir en qué asignatura suman los puntos. Los puntos, notas y registros siguen separados por curso.</p>
+      <div class="row" style="gap:6px; align-items:center;">
+        <button class="btn btn-accent btn-sm" onclick="openLinkWizard()">🔎 Buscar y vincular por nombre</button>
+        <span class="muted" style="font-size:0.82rem;">${persons} estudiante(s) con tarjeta compartida</span>
+      </div>
     </div>`;
 }
 
