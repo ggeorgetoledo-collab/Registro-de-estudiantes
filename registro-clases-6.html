@@ -614,6 +614,8 @@
   <button data-module="cursos">👥 Cursos</button>
   <button data-module="trabajo">📝 Trabajo en clases</button>
   <button data-module="calificaciones">🎯 Calificaciones</button>
+  <button data-module="puntos">⭐ Puntos</button>
+  <button data-module="tarjetas">🪪 Tarjetas y portal</button>
   <button data-module="bitacora">📓 Bitácora</button>
 </nav>
 <nav class="tabs subtabs app-font" id="subTabsNav" style="display:none;"></nav>
@@ -2012,7 +2014,9 @@ const MODULE_TABS = {
   inicio: ['inicio'],
   horario: ['horario'],
   cursos: ['estudiantes'],
-  trabajo: ['indicadores','registrar','entregas','historial','decimas','escanear','premios'],
+  trabajo: ['indicadores','registrar','entregas','historial','decimas'],
+  puntos: ['escanear','premios','catalogo'],
+  tarjetas: ['tarjetas','portal','consulta'],
   calificaciones: ['calificaciones'],
   bitacora: ['bitacora'],
 };
@@ -2022,7 +2026,11 @@ const SUBTAB_LABELS = {
   historial: 'Historial',
   decimas: 'Décimas',
   escanear: '📷 Escanear',
-  premios: '⭐ Puntos',
+  premios: '⭐ Saldos y canjes',
+  catalogo: '🎁 Premios y motivos',
+  tarjetas: '🪪 Tarjetas',
+  portal: '🌐 Portal',
+  consulta: '🔒 Modo consulta',
   entregas: 'Entregas',
   calificaciones: 'Calificaciones',
 };
@@ -2098,7 +2106,7 @@ function renderMain(){
   if(currentTab === 'historial') return renderHistorial(group);
   if(currentTab === 'decimas') return renderDecimas(group);
   if(currentTab === 'escanear') return renderEscanear(group);
-  if(currentTab === 'premios') return renderPremios(group);
+  if(PUNTOS_TABS.includes(currentTab)) return renderPremios(group);
   if(currentTab === 'entregas') return renderEntregas(group);
   if(currentTab === 'calificaciones') return renderCalificaciones(group);
   if(currentTab === 'bitacora') return renderBitacora(group);
@@ -2833,6 +2841,7 @@ function renderInicio(){
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('decimas')">➕<span>Décimas</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('escanear')">📷<span>Escanear tarjeta</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('premios')">⭐<span>Puntos</span></button>
+        <button class="btn btn-outline quick-link-btn" onclick="goToTab('tarjetas')">🪪<span>Tarjetas y portal</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('entregas')">📥<span>Entregas</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('calificaciones')">🎯<span>Calificaciones</span></button>
       </div>
@@ -4490,7 +4499,7 @@ function renderCardDesignerForm(){
     </label>
     <label style="display:flex; align-items:center; gap:8px; margin-top:6px; cursor:pointer;">
       <input type="checkbox" style="width:auto;" ${cfg.showAlias ? 'checked' : ''} onchange="updateCardConfig('showAlias', this.checked)">
-      Mostrar apodo o frase (se escribe por estudiante en ⭐ Puntos)
+      Mostrar apodo o frase (se escribe por estudiante en 🪪 Tarjetas)
     </label>
     <label style="display:flex; align-items:center; gap:8px; margin-top:6px; cursor:pointer;">
       <input type="checkbox" style="width:auto;" ${cfg.backside !== false ? 'checked' : ''} onchange="updateCardConfig('backside', this.checked)">
@@ -4591,7 +4600,7 @@ function openStudentCardImages(studentId){
 function closeStudentCardImages(){
   document.getElementById('cardImgOverlay')?.remove();
   cardImgStudent = null;
-  if(currentTab === 'premios') renderPremios(getActiveGroup());
+  if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
 }
 function stepStudentCardImages(dir){
   if(!cardImgStudent) return;
@@ -5067,17 +5076,17 @@ function renderScanResult(){
       </div>
       <p class="scan-section-label">Por motivo</p>
       <div class="scan-chip-row">
-        ${state.decimaMotivos.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin motivos. Agrégalos en ⭐ Puntos.</span>' :
+        ${state.decimaMotivos.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin motivos. Agrégalos en ⭐ Puntos → Premios y motivos.</span>' :
           state.decimaMotivos.map(m=> `<button class="btn btn-outline btn-sm" onclick="assignScanPuntosMotivo('${m.id}')">${escapeHtml(m.name)} <strong>${m.value > 0 ? '+' : ''}${m.value}</strong></button>`).join('')}
       </div>
 
       <p class="scan-section-label">Canjear por décimas</p>
       <div class="scan-chip-row">
-        ${premiosDec.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin opciones de décimas. Agrégalas en ⭐ Puntos.</span>' : premiosDec.map(p=> premioButtonHtml(p, disponible)).join('')}
+        ${premiosDec.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin opciones de décimas. Agrégalas en ⭐ Puntos → Premios y motivos.</span>' : premiosDec.map(p=> premioButtonHtml(p, disponible)).join('')}
       </div>
       <p class="scan-section-label">Canjear por premios</p>
       <div class="scan-chip-row">
-        ${premiosOtros.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin premios en el catálogo. Agrégalos en ⭐ Puntos.</span>' : premiosOtros.map(p=> premioButtonHtml(p, disponible)).join('')}
+        ${premiosOtros.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin premios en el catálogo. Agrégalos en ⭐ Puntos → Premios y motivos.</span>' : premiosOtros.map(p=> premioButtonHtml(p, disponible)).join('')}
       </div>
       <div class="scan-chip-row" style="margin-top:10px;">
         <button class="btn btn-ink btn-sm" onclick="openStudentDetail('${student.id}')">🎯 Aplicar décimas a una nota / ver ficha</button>
@@ -5320,7 +5329,11 @@ async function exportPuntosToWord(group){
   showToast('Puntos exportados a Word');
 }
 
+/* Dibuja la pestaña actual de los módulos ⭐ Puntos y 🪪 Tarjetas y portal
+   (premios = Saldos y canjes, catalogo, tarjetas, portal, consulta). Desde cualquier otra pestaña, redibuja la actual. */
+const PUNTOS_TABS = ['premios','catalogo','tarjetas','portal','consulta'];
 function renderPremios(group){
+  if(!PUNTOS_TABS.includes(currentTab)){ renderMain(); return; }
   ensureRewardsConfig();
   ensureAllCards();
   const main = document.getElementById('main');
@@ -5328,8 +5341,8 @@ function renderPremios(group){
   const studentName = id=> (group.students.find(s=> s.id === id) || {}).name || '(estudiante eliminado)';
   const premiosDec = state.premios.filter(p=> p.type === 'decimas');
   const premiosOtros = state.premios.filter(p=> p.type !== 'decimas');
-  main.innerHTML = `
-    ${groupHeaderCard(group)}
+  const sec = {
+    saldos: `
     <div class="card app-font">
       <div class="flex-between">
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Puntos por estudiante</h2>
@@ -5359,6 +5372,26 @@ function renderPremios(group){
     </div>
 
     <div class="card app-font">
+      <h2>Canjes realizados (${canjes.length})</h2>
+      ${canjes.length === 0 ? '<div class="empty-state">Aún no hay canjes en este curso.</div>' : `
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Fecha</th><th>Estudiante</th><th>Canje</th><th>Puntos</th><th></th></tr></thead>
+        <tbody>
+          ${canjes.map(c=> `
+            <tr>
+              <td style="white-space:nowrap;">${formatDate(c.date)}${c.time ? ' ' + c.time : ''}</td>
+              <td>${escapeHtml(studentName(c.studentId))}</td>
+              <td>${c.type === 'decimas' ? '➕ ' : '🎁 '}${escapeHtml(c.name)}</td>
+              <td>−${c.cost}</td>
+              <td><button class="btn btn-outline btn-sm" onclick="revertCanje('${c.id}')">↩️</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>`}
+    </div>`,
+    consulta: `
+    <div class="card app-font">
       <h2>Modo consulta para estudiantes</h2>
       <p class="muted">Deja un celular o tablet en la sala: cada estudiante escanea su tarjeta y ve sus puntos, lo que le alcanza y sus últimos movimientos. La pantalla se limpia sola a los 15 segundos y para salir se pide tu PIN.</p>
       <div class="row" style="gap:6px; align-items:center;">
@@ -5373,9 +5406,11 @@ function renderPremios(group){
         <button class="btn btn-outline btn-sm" onclick="changeKioskPin()">Cambiar PIN</button>
       </div>` : ''}
     </div>
-
+`,
+    portal: `
     ${portalCardHtml(group)}
-
+`,
+    tarjetas: `
     <div class="card app-font">
       <h2>Tarjetas QR</h2>
       <p class="muted">Diseña e imprime las tarjetas: tamaño, logo, título, marco de color, espacio para dibujar, apodo e imágenes de fondo de cada estudiante.</p>
@@ -5408,7 +5443,8 @@ function renderPremios(group){
         </div>
       </details>`}
     </div>
-
+`,
+    catalogo: `
     <div class="card app-font">
       <h2>Canje por décimas</h2>
       <p class="muted">Cuántos puntos cuesta cada paquete de décimas. Es el mismo para todos tus cursos.</p>
@@ -5459,28 +5495,11 @@ function renderPremios(group){
         <button class="btn btn-accent btn-sm" onclick="addMotivo()">+ Agregar</button>
       </div>
     </div>
-
-    <div class="card app-font">
-      <h2>Canjes realizados (${canjes.length})</h2>
-      ${canjes.length === 0 ? '<div class="empty-state">Aún no hay canjes en este curso.</div>' : `
-      <div style="overflow-x:auto;">
-      <table>
-        <thead><tr><th>Fecha</th><th>Estudiante</th><th>Canje</th><th>Puntos</th><th></th></tr></thead>
-        <tbody>
-          ${canjes.map(c=> `
-            <tr>
-              <td style="white-space:nowrap;">${formatDate(c.date)}${c.time ? ' ' + c.time : ''}</td>
-              <td>${escapeHtml(studentName(c.studentId))}</td>
-              <td>${c.type === 'decimas' ? '➕ ' : '🎁 '}${escapeHtml(c.name)}</td>
-              <td>−${c.cost}</td>
-              <td><button class="btn btn-outline btn-sm" onclick="revertCanje('${c.id}')">↩️</button></td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-      </div>`}
-    </div>
-  `;
-  if(ensurePortalConfig().enabled) checkPublishedPortal();
+`,
+  };
+  const byTab = { premios: sec.saldos, catalogo: sec.catalogo, tarjetas: sec.tarjetas, portal: sec.portal, consulta: sec.consulta };
+  main.innerHTML = groupHeaderCard(group) + byTab[currentTab];
+  if(currentTab === 'portal' && ensurePortalConfig().enabled) checkPublishedPortal();
 }
 
 /* ============ MODO CONSULTA (el estudiante escanea su tarjeta y ve sus puntos) ============ */
@@ -5507,7 +5526,7 @@ function openKioskSetup(){
     <div class="modal-box app-font" style="max-width:420px;">
       <button class="modal-close" onclick="document.getElementById('kioskPinOverlay').remove()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🔒 PIN del modo consulta</h2>
-      <p class="muted">Crea un PIN de 4 a 6 dígitos. Lo pedirá la app para salir del modo consulta, así los estudiantes no pueden ver el resto de tus datos. Podrás verlo o cambiarlo en ⭐ Puntos.</p>
+      <p class="muted">Crea un PIN de 4 a 6 dígitos. Lo pedirá la app para salir del modo consulta, así los estudiantes no pueden ver el resto de tus datos. Podrás verlo o cambiarlo en 🪪 Tarjetas y portal → Modo consulta.</p>
       <label>PIN</label>
       <input type="password" id="kioskPinA" inputmode="numeric" maxlength="6" autocomplete="off">
       <label style="margin-top:8px;">Repite el PIN</label>
@@ -6568,7 +6587,7 @@ async function generatePortalFile(){
     URL.revokeObjectURL(url);
     p.lastGenerated = data.generado;
     saveState();
-    if(currentTab === 'premios') renderPremios(getActiveGroup());
+    if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
     showToast(`Archivo ${portalDataFileName()} generado (${count} estudiantes). Súbelo al repositorio reemplazando el anterior.`);
   }catch(e){
     console.error(e);
@@ -9903,7 +9922,7 @@ renderAll();
 try{ if(localStorage.getItem(KIOSK_FLAG) === '1') enterKiosk(); }catch(e){ console.error(e); }
 // Revisa qué estudiantes tienen imágenes de fondo guardadas en este dispositivo
 getReportTemplateBuffer().then(()=>{ if(currentTab === 'estudiantes' && !kioskActive) renderEstudiantes(getActiveGroup()); }).catch(()=>{});
-loadCardImgKeys().then(()=>{ if(currentTab === 'premios' && !kioskActive) renderPremios(getActiveGroup()); });
+loadCardImgKeys().then(()=>{ if(PUNTOS_TABS.includes(currentTab) && !kioskActive) renderPremios(getActiveGroup()); });
 applyThemeIcon();
 updateDriveHeaderBadge();
 if(isDriveTokenValid(loadStoredDriveToken())){
