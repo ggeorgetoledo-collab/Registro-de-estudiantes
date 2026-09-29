@@ -3999,7 +3999,7 @@ const DEFAULT_PREMIOS = [
   { id:'pre_tiempo', name:'10 minutos extra en una evaluación', cost:15, type:'premio' },
   { id:'pre_comodin', name:'Comodín: una tarea sin entregar', cost:25, type:'premio' },
 ];
-const DEFAULT_CARD_CONFIG = { size:'estandar', title:'Tarjeta de puntos', school:'', logo:null, decorate:false, showAlias:true, frame:'none' };
+const DEFAULT_CARD_CONFIG = { size:'estandar', title:'Tarjeta de puntos', school:'', logo:null, decorate:false, showAlias:true, frame:'none', backside:true };
 const CARD_SIZES = {
   estandar: { label:'Estándar · 8 por hoja', perPage:8 },
   pequena: { label:'Pequeña · 10 por hoja', perPage:10 },
@@ -4134,15 +4134,20 @@ function buildCardsDocument(cards, cfg, preview){
   const perPage = CARD_SIZES[size].perPage;
   const pages = [];
   for(let i=0; i<cards.length; i+=perPage) pages.push(cards.slice(i, i+perPage));
+  const withBack = !preview && cfg.backside !== false && cfg.frame && cfg.frame !== 'none';
   return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
     <title>Tarjetas QR</title>
     <style>
       @page { size: letter; margin: 0.5in; }
       *{ box-sizing:border-box; }
+      html, body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
       body{ margin:0; font-family: Calibri, Carlito, Arial, sans-serif; color:#000; background:#fff; }
+      .toolbar .tip{ font-size:12.5px; color:#444; max-width:560px; margin:6px auto 0; line-height:1.35; }
+      /* Reverso: mismo color del marco, con un pequeño margen extra (sangrado) por si la impresora corre la hoja */
+      .card.back{ border:none; }
       .toolbar{ padding:12px; text-align:center; font-size:14px; }
       .toolbar button{ font-size:16px; padding:8px 18px; cursor:pointer; }
-      .sheet{ display:grid; justify-content:center; page-break-after:always; break-after:page; }
+      .sheet{ display:grid; justify-content:center; align-content:start; padding:0.06in 0; page-break-after:always; break-after:page; page-break-inside:avoid; break-inside:avoid; }
       .sheet:last-child{ page-break-after:auto; break-after:auto; }
       .card{ border:1px dashed #000; background:#fff; overflow:hidden; display:flex; }
       .qr{ flex:none; background:#fff; padding:0.06in; }
@@ -4192,9 +4197,22 @@ function buildCardsDocument(cards, cfg, preview){
       ${preview ? 'body{ display:flex; justify-content:center; padding:8px 0; } .sheet{ page-break-after:auto; grid-template-columns:auto !important; }' : ''}
       @media print{ .toolbar{ display:none; } }
     </style></head><body>
-    ${preview ? '' : `<div class="toolbar">${cards.length} tarjeta(s) · ${CARD_SIZES[size].label} · recorta por el borde<br><br><button onclick="window.print()">🖨️ Imprimir</button></div>`}
-    ${pages.map(pg=> `<div class="sheet ${size}">${pg.map(c=> buildCardHtml(c, cfg)).join('')}</div>`).join('')}
+    ${preview ? '' : `<div class="toolbar">${cards.length} tarjeta(s) · ${CARD_SIZES[size].label} · recorta por el borde<br><br><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>${withBack ? `<div class="tip">Hojas intercaladas: frente, reverso, frente, reverso… Imprime <b>a doble cara, girando por el borde largo</b>. Si el color no sale, activa <b>Gráficos de fondo</b> en “Más ajustes” del cuadro de impresión.</div>` : ''}</div>`}
+    ${pages.map(pg=> `<div class="sheet ${size}">${pg.map(c=> buildCardHtml(c, cfg)).join('')}</div>` + (withBack ? buildBackSheet(pg.length, size, cfg.frame) : '')).join('')}
     </body></html>`;
+}
+
+/* Hoja de reverso: la misma grilla, pero con las columnas invertidas (espejo), porque al girar la hoja
+   por el borde largo la tarjeta de la izquierda queda a la derecha. */
+function buildBackSheet(count, size, color){
+  const cols = 2;
+  const cells = [];
+  for(let i=0; i<count; i++){
+    const row = Math.floor(i / cols) + 1;
+    const col = cols - (i % cols);
+    cells.push(`<div class="card back" style="grid-row:${row}; grid-column:${col}; background:${color}; box-shadow:0 0 0 0.05in ${color};"></div>`);
+  }
+  return `<div class="sheet ${size}">${cells.join('')}</div>`;
 }
 
 let cardDesignTarget = null; // { groupIds, onlyStudentId }
@@ -4274,6 +4292,10 @@ function renderCardDesignerForm(){
     <label style="display:flex; align-items:center; gap:8px; margin-top:6px; cursor:pointer;">
       <input type="checkbox" style="width:auto;" ${cfg.showAlias ? 'checked' : ''} onchange="updateCardConfig('showAlias', this.checked)">
       Mostrar apodo o frase (se escribe por estudiante en ⭐ Puntos)
+    </label>
+    <label style="display:flex; align-items:center; gap:8px; margin-top:6px; cursor:${cfg.frame && cfg.frame !== 'none' ? 'pointer' : 'default'}; ${cfg.frame && cfg.frame !== 'none' ? '' : 'opacity:0.5;'}">
+      <input type="checkbox" style="width:auto;" ${cfg.backside !== false ? 'checked' : ''} ${cfg.frame && cfg.frame !== 'none' ? '' : 'disabled'} onchange="updateCardConfig('backside', this.checked)">
+      Reverso del mismo color del marco (para imprimir a doble cara)${cfg.frame && cfg.frame !== 'none' ? '' : ' — elige primero un marco de color'}
     </label>
     <label style="margin-top:10px;">Marco de color</label>
     <div class="row" style="gap:6px;">
