@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#6C4EE3">
+<title>Mi registro</title>
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --primary:#6C4EE3; --primary-dark:#5638C4; --primary-light:#F1ECFC;
+    --bg:#F6F5FB; --card:#FFFFFF; --text:#2B2A3D; --dim:#7C7A94; --border:#E9E6F5;
+    --ok:#1F9D64; --ok-bg:#E6F8EF; --warn:#B7791F; --warn-bg:#FDF3DE; --bad:#D9453B; --bad-bg:#FDECEA; --neutral-bg:#F1F0F6;
+    --shadow:0 6px 20px rgba(76,60,150,0.08); --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --primary:#A78BFA; --primary-dark:#C4B5FD; --primary-light:rgba(167,139,250,0.16);
+      --bg:#17141F; --card:#221E2E; --text:#EDEAF5; --dim:#A79FC4; --border:#332C47;
+      --ok:#34D399; --ok-bg:rgba(52,211,153,0.14); --warn:#FBBF24; --warn-bg:rgba(251,191,36,0.14); --bad:#F87171; --bad-bg:rgba(248,113,113,0.14); --neutral-bg:rgba(255,255,255,0.06);
+      --shadow:0 6px 20px rgba(0,0,0,0.45);
+    }
+  }
+  *{ box-sizing:border-box; }
+  html{ -webkit-text-size-adjust:100%; }
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size:15px; line-height:1.45; }
+  main{ max-width:640px; margin:0 auto; padding:16px 16px 40px; }
+  h1, h2, .num{ font-family:'Poppins', 'Inter', sans-serif; }
+  .brand{ font-family:'Poppins','Inter',sans-serif; font-weight:800; color:var(--primary-dark); font-size:1rem; margin:4px 0 12px; }
+  .card{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; margin-bottom:14px; }
+  .hero h1{ margin:0; font-size:1.5rem; line-height:1.2; font-weight:800; overflow-wrap:anywhere; }
+  .dim{ color:var(--dim); }
+  .small{ font-size:0.82rem; }
+  .tiles{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .tile{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px; }
+  .tile .num{ font-size:1.9rem; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .tile .lbl{ color:var(--dim); font-size:0.8rem; font-weight:600; margin-top:2px; }
+  .num.ok{ color:var(--ok); } .num.bad{ color:var(--bad); } .num.primary{ color:var(--primary); }
+  h2{ font-size:1.08rem; margin:0 0 10px; font-weight:700; display:flex; align-items:center; gap:8px; }
+  .row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
+  .row:last-child{ border-bottom:none; }
+  .row .main{ min-width:0; }
+  .row .title{ font-weight:600; overflow-wrap:anywhere; }
+  .row .sub{ color:var(--dim); font-size:0.8rem; }
+  .row .obs{ color:var(--text); font-size:0.85rem; margin-top:3px; font-style:italic; }
+  .val{ font-weight:700; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .val.pos{ color:var(--ok); } .val.neg{ color:var(--bad); }
+  .chip{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:0.78rem; font-weight:600; white-space:nowrap; }
+  .chip.ok{ background:var(--ok-bg); color:var(--ok); }
+  .chip.warn{ background:var(--warn-bg); color:var(--warn); }
+  .chip.bad{ background:var(--bad-bg); color:var(--bad); }
+  .chip.neutral{ background:var(--neutral-bg); color:var(--dim); }
+  .chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .grade{ display:inline-block; min-width:44px; text-align:center; padding:4px 8px; border-radius:10px; font-weight:800; font-family:'Poppins','Inter',sans-serif; font-variant-numeric:tabular-nums; background:var(--primary-light); color:var(--primary-dark); }
+  .grade.bad{ background:var(--bad-bg); color:var(--bad); }
+  .grade.none{ background:var(--neutral-bg); color:var(--dim); }
+  .summary{ display:flex; flex-wrap:wrap; gap:6px 16px; font-size:0.88rem; margin-bottom:6px; }
+  .summary strong{ font-variant-numeric:tabular-nums; }
+  details summary{ cursor:pointer; color:var(--primary); font-weight:600; font-size:0.88rem; padding:8px 0 2px; list-style:none; }
+  details summary::-webkit-details-marker{ display:none; }
+  .empty{ color:var(--dim); font-size:0.9rem; padding:4px 0; }
+  .msg{ text-align:center; padding:36px 20px; }
+  .msg .icon{ font-size:2.6rem; }
+  .msg h1{ font-size:1.25rem; margin:10px 0 6px; }
+  .note{ font-size:0.8rem; color:var(--dim); text-align:center; margin-top:18px; line-height:1.5; }
+  @media (max-width:360px){ .tile .num{ font-size:1.6rem; } }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+(function(){
+  const app = document.getElementById('app');
+  const ESTADOS = {
+    en_plazo: ['Entregada a tiempo', 'ok'],
+    fuera_plazo: ['Entregada fuera de plazo', 'warn'],
+    no_entregada: ['No entregada', 'bad'],
+  };
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function fdate(iso){ if(!iso) return ''; const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : esc(iso); }
+  function fdatetime(iso){ const d = new Date(iso); if(isNaN(d)) return ''; const p = n=> String(n).padStart(2,'0'); return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} a las ${p(d.getHours())}:${p(d.getMinutes())}`; }
+  function nota(n){ return (n === null || n === undefined) ? '—' : Number(n).toFixed(1).replace('.', ','); }
+  function num(n){ return String(n == null ? 0 : n).replace('.', ','); }
+
+  function message(icon, title, text){
+    app.innerHTML = `<div class="brand">⭐ Mi registro</div><div class="card msg"><div class="icon">${icon}</div><h1>${esc(title)}</h1><div class="dim">${esc(text)}</div></div>`;
+  }
+
+  function b64ToBytes(b64){ const bin = atob(b64); const out = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i); return out; }
+  async function sha(str){ return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str))); }
+  function hex(bytes){ return Array.from(bytes, b=> b.toString(16).padStart(2,'0')).join(''); }
+
+  function listWithMore(items, renderItem, visible){
+    if(items.length === 0) return '';
+    const first = items.slice(0, visible).map(renderItem).join('');
+    if(items.length <= visible) return first;
+    return first + `<details><summary>Ver ${items.length - visible} más</summary>${items.slice(visible).map(renderItem).join('')}</details>`;
+  }
+
+  function render(d, generado){
+    const a = d.asistencia || {};
+    const totalClases = (a.presentes || 0) + (a.ausentes || 0);
+    const asistPct = totalClases ? Math.round(a.presentes / totalClases * 100) : null;
+    const final = d.notas && d.notas.final;
+    const puntos = d.puntos || { disponibles:0, ganados:0, canjeados:0, movs:[] };
+    const dec = d.decimas || { total:0, aplicadas:0, disponibles:0, movs:[] };
+    const premios = (d.premios || []).slice().sort((x,y)=> x.c - y.c);
+    const alcanza = premios.filter(p=> p.c <= puntos.disponibles);
+    const proximo = premios.find(p=> p.c > puntos.disponibles);
+
+    let html = `<div class="brand">⭐ Mi registro</div>
+      <div class="card hero">
+        <h1>${esc(d.nombre)}</h1>
+        <div class="dim">${esc(d.curso)}${d.periodo ? ' · ' + esc(d.periodo) : ''}</div>
+        <div class="dim small" style="margin-top:6px;">Datos actualizados el ${fdatetime(generado)}</div>
+      </div>
+      <div class="tiles">
+        <div class="tile"><div class="num primary">${num(puntos.disponibles)}</div><div class="lbl">Puntos disponibles</div></div>
+        <div class="tile"><div class="num ${asistPct !== null && asistPct < 85 ? 'bad' : ''}">${asistPct === null ? '—' : asistPct + '%'}</div><div class="lbl">Asistencia</div></div>
+        <div class="tile"><div class="num ${final !== null && final !== undefined && final < 4 ? 'bad' : ''}">${nota(final)}</div><div class="lbl">Nota final</div></div>
+        <div class="tile"><div class="num ok">${num(dec.disponibles)}</div><div class="lbl">Décimas por aplicar</div></div>
+      </div>`;
+
+    // Puntos
+    html += `<div class="card"><h2>⭐ Puntos</h2>
+      <div class="summary"><span>Ganados <strong>${num(puntos.ganados)}</strong></span><span>Canjeados <strong>${num(puntos.canjeados)}</strong></span><span>Disponibles <strong>${num(puntos.disponibles)}</strong></span></div>`;
+    if(premios.length){
+      html += `<div class="dim small" style="font-weight:600; margin:10px 0 6px;">Te alcanza para</div>`;
+      html += alcanza.length
+        ? `<div class="chips">${alcanza.map(p=> `<span class="chip ok">${p.t === 'd' ? '➕' : '🎁'} ${esc(p.n)} · ${p.c} pts</span>`).join('')}</div>`
+        : `<div class="empty">Todavía nada del catálogo. ¡Sigue sumando!</div>`;
+      if(proximo) html += `<div class="dim small" style="margin-top:8px;">Te faltan <strong>${num(Math.round((proximo.c - puntos.disponibles)*10)/10)}</strong> punto(s) para: ${esc(proximo.n)} (${proximo.c} pts)</div>`;
+    }
+    const pmovs = (puntos.movs || []);
+    html += `<div class="dim small" style="font-weight:600; margin:14px 0 2px;">Movimientos</div>`;
+    html += pmovs.length ? listWithMore(pmovs, m=> `
+      <div class="row"><div class="main"><div class="title">${esc(m.n)}</div><div class="sub">${fdate(m.d)}${m.h ? ' · ' + esc(m.h) : ''}</div></div>
+      <div class="val ${m.v > 0 ? 'pos' : 'neg'}">${m.v > 0 ? '+' : ''}${num(m.v)}</div></div>`, 6) : '<div class="empty">Aún no tienes movimientos.</div>';
+    html += `</div>`;
+
+    // Notas
+    const lista = (d.notas && d.notas.lista) || [];
+    html += `<div class="card"><h2>🎯 Calificaciones</h2>`;
+    html += lista.length ? lista.map(e=>{
+      const cls = e.nota === null || e.nota === undefined ? 'none' : (e.nota < 4 ? 'bad' : '');
+      return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${e.d ? fdate(e.d) : ''}${e.dec ? (e.d ? ' · ' : '') + 'incluye ' + e.dec + ' décima(s)' : ''}${(e.nota === null || e.nota === undefined) ? (e.d || e.dec ? ' · ' : '') + 'sin nota aún' : ''}</div></div><span class="grade ${cls}">${nota(e.nota)}</span></div>`;
+    }).join('') : '<div class="empty">Aún no hay evaluaciones.</div>';
+    if(lista.length){
+      html += `<div class="summary" style="margin-top:10px;"><span>Promedio simple <strong>${nota(d.notas.promedio)}</strong></span><span>Nota final <strong>${nota(final)}</strong></span></div>`;
+    }
+    html += `</div>`;
+
+    // Asistencia y trabajo en clases
+    const clases = (d.clases || []).slice().reverse();
+    html += `<div class="card"><h2>📝 Asistencia y trabajo en clases</h2>
+      <div class="summary"><span>Presente <strong>${a.presentes || 0}</strong> de <strong>${totalClases}</strong> clases</span>${a.logro !== null && a.logro !== undefined ? `<span>Logro <strong>${a.logro}%</strong> (${num(a.obtenido)} de ${num(a.maximo)} pts)</span>` : ''}</div>`;
+    html += clases.length ? listWithMore(clases, c=> `
+      <div class="row"><div class="main"><div class="title">${fdate(c.d)}${c.h ? ' · ' + esc(c.h) : ''}</div>${c.p && c.m ? `<div class="sub">Puntaje ${num(c.o)} de ${num(c.m)}</div>` : ''}${c.obs ? `<div class="obs">${esc(c.obs)}</div>` : ''}</div>
+      <span class="chip ${c.p ? 'ok' : 'bad'}">${c.p ? 'Presente' : 'Ausente'}</span></div>`, 8) : '<div class="empty">Aún no hay clases registradas.</div>';
+    html += `</div>`;
+
+    // Entregas
+    const entregas = (d.entregas || []).slice().sort((x,y)=> (y.d||'').localeCompare(x.d||''));
+    html += `<div class="card"><h2>📥 Entregas</h2>`;
+    html += entregas.length ? listWithMore(entregas, e=>{
+      const st = ESTADOS[e.e] || ['Pendiente', 'neutral'];
+      return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${fdate(e.d)}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
+    }, 8) : '<div class="empty">Aún no hay entregas registradas.</div>';
+    html += `</div>`;
+
+    // Décimas
+    html += `<div class="card"><h2>➕ Décimas</h2>
+      <div class="summary"><span>Acumuladas <strong>${num(dec.total)}</strong></span><span>Aplicadas a notas <strong>${num(dec.aplicadas)}</strong></span><span>Por aplicar <strong>${num(dec.disponibles)}</strong></span></div>
+      <div class="dim small">1 décima suma 0,1 a una nota cuando tu profesor la aplica.</div>`;
+    const dm = (dec.movs || []).slice().reverse();
+    if(dm.length) html += listWithMore(dm, m=> `<div class="row"><div class="main"><div class="title">${esc(m.n || 'Décimas')}</div><div class="sub">${fdate(m.d)}</div></div><div class="val ${m.v > 0 ? 'pos' : 'neg'}">${m.v > 0 ? '+' : ''}${num(m.v)}</div></div>`, 6);
+    html += `</div>`;
+
+    // Bitácora (solo si el profesor decidió publicarla)
+    if(Array.isArray(d.bitacora)){
+      html += `<div class="card"><h2>📓 Bitácora</h2>`;
+      html += d.bitacora.length ? listWithMore(d.bitacora.slice().reverse(), b=> `
+        <div class="row"><div class="main"><div class="title">${fdate(b.d)}${b.c ? ' · ' + esc(b.c) : ''}</div>${b.a ? `<div class="sub">${esc(b.a)}</div>` : ''}${b.o ? `<div class="obs">${esc(b.o)}</div>` : ''}</div></div>`, 6) : '<div class="empty">Sin registros.</div>';
+      html += `</div>`;
+    }
+
+    html += `<p class="note">🔒 Este enlace es personal: no lo compartas ni prestes tu tarjeta.<br>Si la perdiste, avísale a tu profesor para que te entregue una nueva.<br>Si ves algo que no corresponde, conversa con tu profesor.</p>`;
+    app.innerHTML = html;
+  }
+
+  async function load(){
+    const params = new URLSearchParams(location.hash.slice(1));
+    const token = (params.get('t') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const fileId = (params.get('f') || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+    if(!token || !fileId){
+      message('🪪', 'Escanea el código QR de tu tarjeta', 'Apunta la cámara de tu celular al QR de tu tarjeta de puntos y se abrirá esta página con tu registro.');
+      return;
+    }
+    if(!window.crypto || !crypto.subtle){
+      message('⚠️', 'Tu navegador no puede abrir el registro', 'Prueba abriendo el enlace en Chrome o Safari actualizados.');
+      return;
+    }
+    message('⏳', 'Cargando tu registro…', '');
+    let data;
+    try{
+      const r = await fetch(`datos-${fileId}.json?_=${Date.now()}`, { cache: 'no-store' });
+      if(r.status === 404){ message('📭', 'Todavía no hay datos publicados', 'Tu profesor aún no ha publicado los registros. Vuelve a intentarlo más tarde.'); return; }
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      data = await r.json();
+    }catch(e){
+      message('📶', 'No se pudo cargar tu registro', 'Revisa tu conexión a internet e inténtalo de nuevo.');
+      return;
+    }
+    try{
+      const id = hex(await sha('rc-id:' + token)).slice(0, 32);
+      const enc = data.entries && data.entries[id];
+      if(!enc){
+        message('🤔', 'No encontramos tu tarjeta', 'Puede que tu tarjeta sea nueva y aún no esté en la última publicación, o que haya sido reemplazada. Avísale a tu profesor.');
+        return;
+      }
+      const key = await crypto.subtle.importKey('raw', await sha('rc-key:' + token), 'AES-GCM', false, ['decrypt']);
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(enc.iv) }, key, b64ToBytes(enc.ct));
+      render(JSON.parse(new TextDecoder().decode(plain)), data.generado);
+    }catch(e){
+      message('⚠️', 'No se pudo abrir tu registro', 'El enlace no es válido. Vuelve a escanear el QR de tu tarjeta o avísale a tu profesor.');
+    }
+  }
+
+  window.addEventListener('hashchange', load);
+  load();
+})();
+</script>
+</body>
+</html>

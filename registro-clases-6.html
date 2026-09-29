@@ -4114,6 +4114,16 @@ function normalizeCardCode(raw){
   return code.replace(/[^A-Z0-9]/g, '');
 }
 function findStudentByCard(raw){
+  // QR del portal: https://…/consulta.html#f=…&t=CLAVE
+  const tm = String(raw || '').match(/[#&?]t=([A-Za-z0-9]{12,})/);
+  if(tm){
+    const tok = tm[1].toUpperCase();
+    for(const g of state.groups){
+      const s = (g.students || []).find(st=> st.webToken === tok);
+      if(s) return { group: g, student: s };
+    }
+    return null;
+  }
   const code = normalizeCardCode(raw);
   if(!code) return null;
   // Primero el curso activo (por si un código se repitiera al importar respaldos), luego el resto
@@ -4124,9 +4134,10 @@ function findStudentByCard(raw){
   }
   return null;
 }
-function qrSvgForCode(code){
+function qrSvgForCode(code){ return qrSvgForData(QR_PREFIX + code); }
+function qrSvgForData(data){
   const qr = qrcode(0, 'M');
-  qr.addData(QR_PREFIX + code);
+  qr.addData(data);
   qr.make();
   return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
 }
@@ -4228,7 +4239,7 @@ function buildCardHtml(c, cfg, imgs){
   const alias = cfg.showAlias && c.alias ? `<div class="alias">“${escapeHtml(c.alias)}”</div>` : '';
   // Si el estudiante tiene imagen de frente, esa imagen ya es su personalización: no se agrega el recuadro para dibujar
   const deco = cfg.decorate && !front ? `<div class="deco"><span>${cfg.size === 'carnet' ? 'Dibuja aquí tu avatar' : 'Mi avatar'}</span></div>` : '';
-  const qr = `<div class="qr">${qrSvgForCode(c.code)}</div>`;
+  const qr = `<div class="qr">${qrSvgForData(c.qr || (QR_PREFIX + c.code))}</div>`;
   const cls = front ? ' has-img' : '';
   if(cfg.size === 'carnet'){
     return `<div class="card v${cls}" style="${frameCss}${bgCss}">
@@ -4404,11 +4415,12 @@ function setCardPreviewFrame(frame, html){
 let cardDesignTarget = null; // { groupIds, onlyStudentId }
 
 function collectCardsForTarget(target){
+  if(ensurePortalConfig().enabled) ensureWebTokens();
   const cards = [];
   state.groups.filter(g=> target.groupIds.includes(g.id)).forEach(g=>{
     (g.students || []).forEach(s=>{
       if(target.onlyStudentId && s.id !== target.onlyStudentId) return;
-      cards.push({ studentId: s.id, name: s.name, course: g.name, code: s.card, alias: s.cardAlias || '' });
+      cards.push({ studentId: s.id, name: s.name, course: g.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s) });
     });
   });
   return cards;
@@ -4595,7 +4607,7 @@ async function renderStudentCardImages(){
   const s = group && group.students.find(x=> x.id === cardImgStudent.studentId);
   const box = document.getElementById('cardImgSlots');
   if(!s || !box) return;
-  const card = { studentId: s.id, name: s.name, course: group.name, code: s.card, alias: s.cardAlias || '' };
+  const card = { studentId: s.id, name: s.name, course: group.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s) };
   const images = await loadCardImagesFor([card]);
   const imgs = images[s.id] || {};
   const slot = (side, label)=> `
@@ -4779,8 +4791,8 @@ function handleScannedCode(raw){
   // La misma tarjeta frente a la cámara se ignora por unos segundos (evita sumar dos veces sin querer)
   if(code === qrScanner.lastCode && now - qrScanner.lastTime < 3000) return;
   qrScanner.lastCode = code; qrScanner.lastTime = now;
-  if(kioskActive){ showKioskStudent(code); return; }
-  selectScanStudentByCode(code, true);
+  if(kioskActive){ showKioskStudent(raw); return; }
+  selectScanStudentByCode(raw, true);
 }
 
 function selectScanStudentByCode(code, fromCamera){
@@ -5169,8 +5181,11 @@ function regenerateStudentCard(studentId){
   const group = getActiveGroup();
   const s = group.students.find(x=> x.id === studentId);
   if(!s) return;
-  if(!confirm(`¿Generar un código nuevo para ${s.name}?\n\nLa tarjeta anterior dejará de funcionar (útil si la perdió o se la prestó a otro). Tendrás que imprimirle una nueva.`)) return;
+  if(!confirm(`¿Generar un código nuevo para ${s.name}?\n\nLa tarjeta anterior dejará de funcionar (útil si la perdió o se la prestó a otro), también en el portal desde tu próxima publicación. Tendrás que imprimirle una nueva.`)) return;
   s.card = generateCardCode(allCardCodes());
+  // También cambia la clave del portal: la tarjeta antigua deja de abrir su registro desde la próxima publicación
+  const toks = new Set(); state.groups.forEach(g=> (g.students||[]).forEach(x=>{ if(x.webToken) toks.add(x.webToken); }));
+  s.webToken = generateWebToken(toks);
   saveState();
   renderPremios(group);
   showToast('Código nuevo generado: ' + s.card);
@@ -5279,6 +5294,8 @@ function renderPremios(group){
       </div>` : ''}
     </div>
 
+    ${portalCardHtml(group)}
+
     <div class="card app-font">
       <h2>Tarjetas QR</h2>
       <p class="muted">Diseña e imprime las tarjetas: tamaño, logo, título, marco de color, espacio para dibujar, apodo e imágenes de fondo de cada estudiante.</p>
@@ -5302,6 +5319,7 @@ function renderPremios(group){
                 <td style="white-space:nowrap;">
                   <button class="btn ${studentHasCardImg(s.id) ? 'btn-accent' : 'btn-outline'} btn-sm" title="Imágenes de fondo (frente y reverso)" onclick="openStudentCardImages('${s.id}')">🖼️${studentHasCardImg(s.id) ? ' ✓' : ''}</button>
                   <button class="btn btn-outline btn-sm" title="Imprimir solo esta tarjeta" onclick="openCardDesigner(['${group.id}'], '${s.id}')">🖨️</button>
+                  ${ensurePortalConfig().enabled ? `<button class="btn btn-outline btn-sm" title="Abrir su portal (como lo verá el estudiante)" onclick="openPortalForStudent('${s.id}')">🔗</button>` : ''}
                   <button class="btn btn-outline btn-sm" title="Código nuevo (tarjeta perdida)" onclick="regenerateStudentCard('${s.id}')">🔄</button>
                 </td>
               </tr>`).join('')}
@@ -5382,6 +5400,7 @@ function renderPremios(group){
       </div>`}
     </div>
   `;
+  if(ensurePortalConfig().enabled) checkPublishedPortal();
 }
 
 /* ============ MODO CONSULTA (el estudiante escanea su tarjeta y ve sus puntos) ============ */
@@ -6311,6 +6330,254 @@ async function downloadTemplateSample(){
   const s = group.students[0];
   await buildAndDownloadDocx(buildStudentHistoryBody(group, s, reportOptionsFromTemplate()), reportFileName(s), { nombre: s.name, curso: group.name });
   showToast('Descargado un informe de ejemplo con tu plantilla');
+}
+
+/* ============ PORTAL DEL ESTUDIANTE (consulta desde su propio celular) ============ */
+/* Cada tarjeta lleva un QR con un enlace a consulta.html y una clave secreta de 20 caracteres (#t=...).
+   El profesor genera un archivo datos-<id>.json y lo sube al repositorio. Ese archivo es público,
+   pero cada registro va cifrado (AES-GCM) con una clave derivada de la clave secreta de la tarjeta:
+   sin la tarjeta no se puede leer. La clave va en el "#" del enlace, que el navegador nunca envía al servidor. */
+const PORTAL_PAGE = 'consulta.html';
+
+function ensurePortalConfig(){
+  if(!state.portal) state.portal = { enabled:false, includeObs:false, includeBitacora:false, fileId:null, url:'', lastGenerated:null };
+  if(!state.portal.fileId){
+    const email = localStorage.getItem('gdrive_email') || '';
+    const slug = (email.split('@')[0] || 'profesor').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+    state.portal.fileId = slug || 'profesor';
+  }
+  return state.portal;
+}
+function portalDataFileName(){ return 'datos-' + ensurePortalConfig().fileId + '.json'; }
+function portalDefaultUrl(){
+  if(location.protocol !== 'http:' && location.protocol !== 'https:') return '';
+  return location.origin + location.pathname.replace(/[^/]*$/, '') + PORTAL_PAGE;
+}
+function portalBaseUrl(){
+  const p = ensurePortalConfig();
+  return (p.url || '').trim() || portalDefaultUrl();
+}
+function generateWebToken(existing){
+  let tok;
+  do{
+    const rnd = crypto.getRandomValues(new Uint8Array(20));
+    tok = Array.from(rnd, b=> CARD_ALPHABET[b % CARD_ALPHABET.length]).join('');
+  } while(existing.has(tok));
+  existing.add(tok);
+  return tok;
+}
+function ensureWebTokens(){
+  const existing = new Set();
+  state.groups.forEach(g=> (g.students || []).forEach(s=>{ if(s.webToken) existing.add(s.webToken); }));
+  let changed = false;
+  state.groups.forEach(g=> (g.students || []).forEach(s=>{
+    if(!s.webToken){ s.webToken = generateWebToken(existing); changed = true; }
+  }));
+  if(changed) saveState();
+}
+function portalStudentUrl(s){
+  return `${portalBaseUrl()}#f=${encodeURIComponent(ensurePortalConfig().fileId)}&t=${s.webToken}`;
+}
+/* Contenido del QR de una tarjeta: enlace al portal (si está activado) o el código simple */
+function cardQrData(s){
+  const p = ensurePortalConfig();
+  if(p.enabled && s.webToken && portalBaseUrl()) return portalStudentUrl(s);
+  return QR_PREFIX + s.card;
+}
+
+/* ---- Cifrado ---- */
+async function sha256Bytes(str){
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str)));
+}
+function bytesToHex(bytes){ return Array.from(bytes, b=> b.toString(16).padStart(2, '0')).join(''); }
+async function encryptForToken(token, obj){
+  const id = bytesToHex(await sha256Bytes('rc-id:' + token)).slice(0, 32);
+  const key = await crypto.subtle.importKey('raw', await sha256Bytes('rc-key:' + token), 'AES-GCM', false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj)));
+  return [id, { iv: arrayBufferToBase64(iv.buffer), ct: arrayBufferToBase64(ct) }];
+}
+
+/* ---- Datos de un estudiante para el portal ---- */
+function buildPortalPayload(group, s){
+  const p = ensurePortalConfig();
+  const sid = s.id;
+  const stats = computeStudentStats(group, sid);
+  const grade = computeStudentFinalGrade(group, sid);
+  const period = (state.periods || []).find(x=> x.id === state.activePeriodId);
+  const sessions = getActiveSessions(group)
+    .filter(se=> (se.entries || []).some(e=> e.studentId === sid))
+    .sort((a,b)=> ((a.date||'') + (a.time||'')).localeCompare((b.date||'') + (b.time||'')));
+  const clases = sessions.map(se=>{
+    const entry = se.entries.find(e=> e.studentId === sid);
+    const present = isEntryPresent(entry);
+    const inds = se.indicatorSnapshot || group.indicators;
+    let obt = 0, max = 0;
+    if(present) inds.forEach(ind=>{
+      const v = (entry.cotejo || {})[ind.id];
+      if(v !== null && v !== undefined){ obt += v; max += (ind.levels || 5); }
+    });
+    const c = { d: se.date || '', h: se.time || '', p: present ? 1 : 0, o: obt, m: max };
+    if(p.includeObs && entry.observaciones) c.obs = entry.observaciones;
+    return c;
+  });
+  const evaluaciones = getActiveEvaluations(group).map(e=>({
+    n: e.name, d: e.date || '', nota: computeStudentEvalGrade(e, sid),
+    dec: (e.decimasAplicadas && e.decimasAplicadas[sid]) || 0,
+  }));
+  const decimasMovs = getActiveDecimas(group)
+    .filter(d=> d.values && d.values[sid])
+    .map(d=> ({ d: d.date || '', n: d.note || '', v: d.values[sid] }))
+    .sort((a,b)=> a.d.localeCompare(b.d));
+  const entregas = getActiveEntregas(group).map(e=>{
+    const st = e.estados ? e.estados[sid] : null;
+    return { n: e.name, d: e.date || '', e: st || '' };
+  });
+  const payload = {
+    nombre: s.name, curso: group.name, periodo: period ? period.name : '',
+    generado: new Date().toISOString(),
+    asistencia: { presentes: stats.presentCount, ausentes: stats.absentCount, logro: stats.percent, obtenido: stats.obtained, maximo: stats.maxPossible },
+    clases,
+    notas: { lista: evaluaciones, final: grade.finalGrade, promedio: grade.promedioSimple },
+    decimas: {
+      total: computeStudentDecimasTotal(group, sid), aplicadas: computeStudentDecimasApplied(group, sid),
+      disponibles: computeStudentDecimasAvailable(group, sid), movs: decimasMovs,
+    },
+    puntos: {
+      ganados: computeStudentPuntosTotal(group, sid), canjeados: computeStudentPuntosRedeemed(group, sid),
+      disponibles: computeStudentPuntosAvailable(group, sid),
+      movs: kioskMovements(group, sid).map(m=> ({ d: m.date, h: m.time, n: m.text, v: m.amount })),
+    },
+    premios: (state.premios || []).map(x=> ({ n: x.name, c: x.cost, t: x.type === 'decimas' ? 'd' : 'p' })),
+    entregas,
+  };
+  if(p.includeBitacora){
+    // Solo registros dirigidos a este estudiante (los generales del curso pueden mencionar a otros)
+    payload.bitacora = getActiveBitacora(group)
+      .filter(b=> (b.studentIds || []).includes(sid))
+      .sort((a,b)=> (a.date||'').localeCompare(b.date||''))
+      .map(b=> ({ d: b.date || '', c: BITACORA_CATEGORIAS[b.categoria || ''] || '', a: b.actividadPedagogica || '', o: b.observaciones || '' }));
+  }
+  return payload;
+}
+
+async function generatePortalFile(){
+  if(!window.crypto || !crypto.subtle){ showToast('Para generar el archivo abre la app desde su dirección https (GitHub Pages).'); return; }
+  ensureRewardsConfig();
+  ensureAllCards();
+  ensureWebTokens();
+  const p = ensurePortalConfig();
+  try{
+    showToastQuick('Generando y cifrando los registros…');
+    const entries = {};
+    let count = 0;
+    for(const g of state.groups){
+      for(const s of (g.students || [])){
+        const [id, enc] = await encryptForToken(s.webToken, buildPortalPayload(g, s));
+        entries[id] = enc;
+        count++;
+      }
+    }
+    const data = { v: 1, generado: new Date().toISOString(), estudiantes: count, entries };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = portalDataFileName();
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    p.lastGenerated = data.generado;
+    saveState();
+    if(currentTab === 'premios') renderPremios(getActiveGroup());
+    showToast(`Archivo ${portalDataFileName()} generado (${count} estudiantes). Súbelo al repositorio reemplazando el anterior.`);
+  }catch(e){
+    console.error(e);
+    showToast('No se pudo generar el archivo: ' + (e.message || 'error'));
+  }
+}
+
+/* Revisa qué versión del archivo está publicada en el sitio (solo funciona con la app abierta desde GitHub Pages) */
+async function checkPublishedPortal(){
+  const el = document.getElementById('portalPublishedStatus');
+  if(!el) return;
+  if(!portalDefaultUrl()){ el.textContent = 'No se puede revisar desde aquí (abre la app desde su dirección web).'; return; }
+  el.textContent = 'Revisando el sitio…';
+  const fmt = iso=>{ const d = new Date(iso); return formatDate(toISODate(d)) + ' ' + d.toTimeString().slice(0,5); };
+  let pageOk = false;
+  try{ const r = await fetch(PORTAL_PAGE + '?_=' + Date.now(), { cache: 'no-store' }); pageOk = r.ok; }catch(e){}
+  try{
+    const r = await fetch(portalDataFileName() + '?_=' + Date.now(), { cache: 'no-store' });
+    if(!r.ok) throw new Error('no');
+    const j = await r.json();
+    el.innerHTML = `${pageOk ? '✅ Página de consulta publicada' : '⚠️ Falta subir <strong>consulta.html</strong>'} · Datos publicados: <strong>${fmt(j.generado)}</strong> (${j.estudiantes} estudiantes)`;
+  }catch(e){
+    el.innerHTML = `${pageOk ? '✅ Página de consulta publicada' : '⚠️ Falta subir <strong>consulta.html</strong>'} · ⚠️ Aún no hay datos publicados (<strong>${escapeHtml(portalDataFileName())}</strong>)`;
+  }
+}
+
+function setPortalEnabled(on){
+  const p = ensurePortalConfig();
+  if(on && !portalBaseUrl()){ showToast('Primero indica la dirección de la página de consulta'); renderPremios(getActiveGroup()); return; }
+  if(on && !confirm('Al activar el portal, las tarjetas que imprimas desde ahora llevarán un QR que abre la página de consulta del estudiante.\n\nLas tarjetas ya impresas siguen funcionando en tu escáner y en el modo consulta, pero para que los estudiantes vean su registro desde su celular hay que imprimirles la tarjeta nueva.\n\n¿Activar?')){
+    renderPremios(getActiveGroup()); return;
+  }
+  p.enabled = !!on;
+  if(on) ensureWebTokens();
+  saveState();
+  renderPremios(getActiveGroup());
+}
+function updatePortalOption(field, value){
+  const p = ensurePortalConfig();
+  p[field] = value;
+  saveState();
+  if(field === 'url') renderPremios(getActiveGroup());
+}
+function openPortalForStudent(studentId){
+  const group = getActiveGroup();
+  const s = group.students.find(x=> x.id === studentId);
+  if(!s) return;
+  ensureWebTokens();
+  window.open(portalStudentUrl(s), '_blank', 'noopener');
+}
+
+function portalCardHtml(group){
+  const p = ensurePortalConfig();
+  const fmt = iso=>{ const d = new Date(iso); return formatDate(toISODate(d)) + ' ' + d.toTimeString().slice(0,5); };
+  return `
+    <div class="card app-font">
+      <h2>Portal del estudiante</h2>
+      <p class="muted">Cada estudiante escanea el QR de su tarjeta con su propio celular y ve su registro: puntos, asistencia y trabajo en clases, notas, décimas y entregas. Los datos se publican cifrados: solo se pueden leer con la tarjeta de cada estudiante.</p>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:6px;">
+        <input type="checkbox" style="width:auto;" ${p.enabled ? 'checked' : ''} onchange="setPortalEnabled(this.checked)">
+        <strong>Activar portal</strong> (las tarjetas nuevas llevan el QR del portal)
+      </label>
+      ${p.enabled ? `
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:6px;">
+          <input type="checkbox" style="width:auto;" ${p.includeObs ? 'checked' : ''} onchange="updatePortalOption('includeObs', this.checked)">
+          Publicar también las observaciones escritas en cada clase
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;">
+          <input type="checkbox" style="width:auto;" ${p.includeBitacora ? 'checked' : ''} onchange="updatePortalOption('includeBitacora', this.checked)">
+          Publicar la bitácora (solo registros dirigidos a ese estudiante)
+        </label>
+        <ol class="muted" style="font-size:0.85rem; line-height:1.5; margin:10px 0 6px; padding-left:20px;">
+          <li><strong>Una sola vez:</strong> sube <strong>consulta.html</strong> al repositorio, junto a la app.</li>
+          <li>Imprime las tarjetas de nuevo (su QR ahora abre el portal).</li>
+          <li><strong>Cada vez que quieras actualizar:</strong> genera el archivo y súbelo al repositorio reemplazando el anterior. Los estudiantes verán los datos hasta esa fecha.</li>
+        </ol>
+        <div class="row" style="gap:6px; margin-top:6px;">
+          <button class="btn btn-accent btn-sm" onclick="generatePortalFile()">⬇️ Generar ${escapeHtml(portalDataFileName())}</button>
+          <button class="btn btn-outline btn-sm" onclick="checkPublishedPortal()">🔎 Revisar lo publicado</button>
+        </div>
+        <p class="muted" style="font-size:0.8rem; margin:8px 0 0;">Último archivo generado: ${p.lastGenerated ? fmt(p.lastGenerated) : 'nunca'} · Datos del periodo seleccionado en la app.</p>
+        <p class="muted" id="portalPublishedStatus" style="font-size:0.8rem; margin:4px 0 0;"></p>
+        <details style="margin-top:8px;">
+          <summary style="cursor:pointer; font-size:0.85rem; font-weight:600;">Dirección de la página de consulta</summary>
+          <input type="url" value="${escapeHtml(p.url || '')}" placeholder="${escapeHtml(portalDefaultUrl() || 'https://…/consulta.html')}" style="margin-top:6px;" onchange="updatePortalOption('url', this.value.trim())">
+          <p class="muted" style="font-size:0.75rem; margin:4px 0 0;">Déjalo vacío para usar la dirección de esta app (${escapeHtml(portalDefaultUrl() || 'no disponible')}). Si la cambias, hay que reimprimir las tarjetas.</p>
+        </details>
+      ` : ''}
+    </div>`;
 }
 
 /* ============ TAB: ENTREGAS (guías/trabajos: en plazo, fuera de plazo, no entregado) ============ */
