@@ -2199,6 +2199,7 @@ function renderEstudiantes(group){
         `).join('')
       }
     </div>
+    ${reportTemplateCardHtml()}
   `;
 
   document.getElementById('addStudentBtn').addEventListener('click', ()=>{
@@ -5870,6 +5871,7 @@ function renderMailReports(){
     <textarea id="mailBody" rows="7" ${dis} onchange="updateMailTemplate('body', this.value)">${escapeHtml(tpl.body)}</textarea>
     <p class="muted" style="font-size:0.75rem; margin-top:2px;">Se reemplazan automáticamente: {nombre} · {primer_nombre} · {curso} · {fecha}</p>
 
+    <p class="muted" style="font-size:0.8rem; margin-top:8px;">Formato: ${state.reportTemplate ? '📄 plantilla "' + escapeHtml(state.reportTemplate.name) + '"' : 'simple (sin plantilla)'} · se cambia en Cursos → Plantilla Word para informes.</p>
     <p class="scan-section-label" style="margin-top:10px;">Contenido del informe</p>
     <p class="muted" style="font-size:0.78rem; margin:0 0 4px;">Siempre incluye: resumen, asistencia y puntaje por clase, calificaciones, décimas, puntos y entregas.</p>
     <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -6009,7 +6011,7 @@ async function downloadMailPreview(){
   const group = mailGroup();
   if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para generar el Word.'); return; }
   const s = group.students.find(x=> mailSendState.selected.has(x.id)) || group.students[0];
-  const blob = await buildDocxBlob(buildStudentHistoryBody(group, s, reportOptionsFromTemplate()));
+  const blob = await buildDocxBlob(buildStudentHistoryBody(group, s, reportOptionsFromTemplate()), { nombre: s.name, curso: group.name });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = reportFileName(s);
@@ -6045,7 +6047,7 @@ async function startMailSend(){
     ms.status[s.id] = { state: 'sending' };
     refreshMailRow(s);
     try{
-      const blob = await buildDocxBlob(buildStudentHistoryBody(group, s, opts));
+      const blob = await buildDocxBlob(buildStudentHistoryBody(group, s, opts), { nombre: s.name, curso: group.name });
       const mime = await buildReportMime(s.email.trim(), fillMailPlaceholders(tpl.subject, group, s), fillMailPlaceholders(tpl.body, group, s), reportFileName(s), blob);
       await gmailSendMime(token, mime);
       ms.status[s.id] = { state: 'ok' };
@@ -6070,6 +6072,245 @@ function refreshMailRow(s){
   if(cell) cell.innerHTML = mailStatusHtml(s);
   const footer = document.getElementById('mailSendFooter');
   if(footer) footer.innerHTML = mailFooterHtml(0);
+}
+
+/* ============ PLANTILLA WORD PARA INFORMES ============ */
+/* El profesor sube un .docx con su encabezado (logo, colegio), pie de página, márgenes y letra.
+   Los Word que genera la app se insertan en el cuerpo de esa plantilla: donde diga {CONTENIDO},
+   o al final si no aparece. {NOMBRE}, {CURSO} y {FECHA} se reemplazan también en encabezado y pie.
+   Plantillas de hasta 300 KB se guardan con tus datos (se sincronizan con Drive); las más pesadas,
+   solo en este dispositivo. */
+const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const TEMPLATE_SYNC_MAX = 300 * 1024;
+const TEMPLATE_DB = 'registroClasesReportTemplate';
+let reportTemplateCache = null;   // { key, buffer }
+
+function templateDb(){
+  return new Promise((resolve, reject)=>{
+    if(!('indexedDB' in window)){ reject(new Error('Este navegador no permite guardar archivos')); return; }
+    const req = indexedDB.open(TEMPLATE_DB, 1);
+    req.onupgradeneeded = ()=> req.result.createObjectStore('files');
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+async function templateDbOp(mode, fn){
+  const db = await templateDb();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction('files', mode);
+    const req = fn(tx.objectStore('files'));
+    tx.oncomplete = ()=> resolve(req ? req.result : undefined);
+    tx.onerror = ()=> reject(tx.error);
+  });
+}
+function arrayBufferToBase64(buf){
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for(let i=0; i<bytes.length; i+=0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function base64ToArrayBuffer(b64){
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for(let i=0; i<bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/* Devuelve el ArrayBuffer de la plantilla activa, o null si no hay (o si es de otro dispositivo) */
+async function getReportTemplateBuffer(){
+  const info = state.reportTemplate;
+  if(!info) return null;
+  const key = info.uploadedAt + '|' + info.name;
+  if(reportTemplateCache && reportTemplateCache.key === key) return reportTemplateCache.buffer;
+  let buffer = null;
+  if(info.b64) buffer = base64ToArrayBuffer(info.b64);
+  else {
+    try{
+      const stored = await templateDbOp('readonly', st=> st.get('template'));
+      if(stored && stored.uploadedAt === info.uploadedAt) buffer = stored.data;
+    }catch(e){}
+  }
+  if(buffer) reportTemplateCache = { key, buffer };
+  return buffer;
+}
+function reportTemplateAvailableHere(){
+  const info = state.reportTemplate;
+  if(!info) return false;
+  if(info.b64) return true;
+  return !!(reportTemplateCache && reportTemplateCache.key === info.uploadedAt + '|' + info.name);
+}
+
+/* ---- Utilidades XML ---- */
+function wParagraphText(p){
+  return [...p.getElementsByTagNameNS(WORD_NS, 't')].map(t=> t.textContent).join('');
+}
+/* Reemplaza un texto aunque Word lo haya partido en varios fragmentos (runs) con distinto formato */
+function replaceInWordParagraph(p, replacements){
+  const ts = [...p.getElementsByTagNameNS(WORD_NS, 't')];
+  if(ts.length === 0) return;
+  const fullText = ()=> ts.map(t=> t.textContent).join('');
+  if(fullText().indexOf('{') === -1) return;
+  for(const [key, value] of replacements){
+    let guard = 0, idx;
+    while((idx = fullText().indexOf(key)) !== -1 && guard++ < 50){
+      const end = idx + key.length;
+      let pos = 0, first = true;
+      for(const t of ts){
+        const txt = t.textContent, s = pos, e = pos + txt.length;
+        pos = e;
+        if(e <= idx || s >= end) continue;
+        const a = Math.max(idx, s) - s, b = Math.min(end, e) - s;
+        t.textContent = txt.slice(0, a) + (first ? value : '') + txt.slice(b);
+        t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
+        first = false;
+      }
+    }
+  }
+}
+function templateReplacements(ctx){
+  const pairs = [
+    ['{NOMBRE}', ctx.nombre || ''],
+    ['{CURSO}', ctx.curso || ''],
+    ['{FECHA}', formatDate(toISODate(new Date()))],
+  ];
+  // también en minúsculas: {nombre}, {curso}, {fecha}
+  return [...pairs, ...pairs.map(([k, v])=> [k.toLowerCase(), v])];
+}
+function replacePlaceholdersInXmlDoc(doc, ctx){
+  const reps = templateReplacements(ctx);
+  [...doc.getElementsByTagNameNS(WORD_NS, 'p')].forEach(p=> replaceInWordParagraph(p, reps));
+}
+
+/* Inserta el contenido generado (XML de párrafos/tablas) en la plantilla y devuelve el .docx final */
+async function mergeIntoTemplate(templateBuffer, bodyXml, ctx){
+  const zip = await JSZip.loadAsync(templateBuffer);
+  // Ubicación del documento principal (normalmente word/document.xml)
+  let docPath = 'word/document.xml';
+  try{
+    const rels = await zip.file('_rels/.rels').async('string');
+    const m = rels.match(/Type="[^"]*\/officeDocument"[^>]*Target="\/?([^"]+)"/) || rels.match(/Target="\/?([^"]+)"[^>]*Type="[^"]*\/officeDocument"/);
+    if(m) docPath = m[1];
+  }catch(e){}
+  const docFile = zip.file(docPath);
+  if(!docFile) throw new Error('La plantilla no parece un documento de Word válido');
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(await docFile.async('string'), 'application/xml');
+  if(doc.getElementsByTagName('parsererror').length) throw new Error('No se pudo leer la plantilla');
+  const body = doc.getElementsByTagNameNS(WORD_NS, 'body')[0];
+  if(!body) throw new Error('La plantilla no tiene cuerpo de documento');
+
+  const frag = parser.parseFromString(`<w:root xmlns:w="${WORD_NS}">${bodyXml}</w:root>`, 'application/xml');
+  if(frag.getElementsByTagName('parsererror').length) throw new Error('No se pudo armar el contenido del informe');
+  const nodes = [...frag.documentElement.childNodes].filter(n=> n.nodeType === 1);
+
+  const target = [...body.getElementsByTagNameNS(WORD_NS, 'p')].find(p=> /\{contenido\}/i.test(wParagraphText(p)));
+  if(target){
+    const parent = target.parentNode;
+    nodes.forEach(n=> parent.insertBefore(doc.importNode(n, true), target));
+    parent.removeChild(target);
+    // Una celda de tabla de Word siempre debe terminar en un párrafo
+    if(parent.localName === 'tc'){
+      const last = [...parent.childNodes].filter(n=> n.nodeType === 1).pop();
+      if(!last || last.localName !== 'p') parent.appendChild(doc.createElementNS(WORD_NS, 'w:p'));
+    }
+  } else {
+    const sectPr = [...body.childNodes].find(n=> n.nodeType === 1 && n.localName === 'sectPr') || null;
+    nodes.forEach(n=> body.insertBefore(doc.importNode(n, true), sectPr));
+  }
+  replacePlaceholdersInXmlDoc(doc, ctx);
+  zip.file(docPath, new XMLSerializer().serializeToString(doc));
+
+  // Encabezados y pies de página
+  for(const path of Object.keys(zip.files).filter(p=> /^word\/(header|footer)\d*\.xml$/.test(p))){
+    const hdoc = parser.parseFromString(await zip.file(path).async('string'), 'application/xml');
+    if(hdoc.getElementsByTagName('parsererror').length) continue;
+    replacePlaceholdersInXmlDoc(hdoc, ctx);
+    zip.file(path, new XMLSerializer().serializeToString(hdoc));
+  }
+  // Si subieron una plantilla .dotx, el resultado debe abrirse como documento normal
+  const ctFile = zip.file('[Content_Types].xml');
+  if(ctFile){
+    const ct = await ctFile.async('string');
+    if(ct.includes('wordprocessingml.template.main+xml')){
+      zip.file('[Content_Types].xml', ct.replace(/wordprocessingml\.template\.main\+xml/g, 'wordprocessingml.document.main+xml'));
+    }
+  }
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+}
+
+/* ---- Pantalla de la plantilla (en Cursos) ---- */
+function reportTemplateCardHtml(){
+  const info = state.reportTemplate;
+  const here = reportTemplateAvailableHere();
+  return `
+    <div class="card app-font">
+      <h2>Plantilla Word para informes</h2>
+      <p class="muted">Sube un Word con tu encabezado (logo y nombre del colegio), pie de página, márgenes y tipo de letra. Todos los Word que genera la app (informes por estudiante, envíos por correo y demás exportaciones) se arman dentro de esa plantilla.</p>
+      <details style="margin:6px 0 10px;">
+        <summary style="cursor:pointer; font-weight:600; font-size:0.88rem;">¿Cómo preparar la plantilla?</summary>
+        <ul class="muted" style="font-size:0.85rem; line-height:1.5; margin:6px 0 0; padding-left:18px;">
+          <li>Parte de tu guía o documento habitual y deja el cuerpo vacío (conserva el encabezado con el logo).</li>
+          <li>Escribe <strong>{CONTENIDO}</strong> en una línea sola donde quieres que vaya el informe. Si no lo escribes, el informe se agrega al final.</li>
+          <li>Puedes escribir <strong>{NOMBRE}</strong>, <strong>{CURSO}</strong> y <strong>{FECHA}</strong> en cualquier parte, incluido el encabezado; se completan solos.</li>
+          <li>La letra del informe será la letra "Normal" de tu plantilla.</li>
+        </ul>
+      </details>
+      ${info ? `
+        <div class="stat-row"><span>📄 ${escapeHtml(info.name)}</span><span class="muted" style="font-size:0.78rem;">${formatDate(toISODate(new Date(info.uploadedAt)))}${info.b64 ? ' · sincronizada' : ' · solo en el dispositivo donde se subió'}</span></div>
+        ${!here ? '<p class="muted" style="color:var(--danger); font-size:0.8rem;">Esta plantilla se subió en otro dispositivo y es muy pesada para sincronizarse: aquí se usará el formato simple hasta que la subas también en este dispositivo.</p>' : ''}
+      ` : '<p class="muted" style="font-size:0.85rem;">Sin plantilla: se usa el formato simple (Calibri 11, sin encabezado).</p>'}
+      <div class="row" style="gap:6px; margin-top:8px;">
+        <label class="btn btn-accent btn-sm" style="margin:0; cursor:pointer;">📁 ${info ? 'Cambiar plantilla' : 'Subir plantilla (.docx)'}
+          <input type="file" accept=".docx,.dotx" style="display:none;" onchange="uploadReportTemplate(this.files[0])">
+        </label>
+        ${info ? `<button class="btn btn-outline btn-sm" onclick="downloadTemplateSample()">👁️ Ver informe de ejemplo</button>
+        <button class="btn btn-danger btn-sm" onclick="removeReportTemplate()">Quitar</button>` : ''}
+      </div>
+    </div>`;
+}
+
+async function uploadReportTemplate(file){
+  if(!file) return;
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para leer la plantilla.'); return; }
+  if(!/\.(docx|dotx)$/i.test(file.name)){ showToast('La plantilla debe ser un archivo de Word (.docx)'); return; }
+  try{
+    const buffer = await file.arrayBuffer();
+    // Se prueba con un contenido de ejemplo para confirmar que la plantilla sirve
+    await mergeIntoTemplate(buffer, wordParagraph('Prueba'), { nombre: 'Prueba', curso: 'Prueba' });
+    const uploadedAt = Date.now();
+    if(buffer.byteLength <= TEMPLATE_SYNC_MAX){
+      state.reportTemplate = { name: file.name, uploadedAt, b64: arrayBufferToBase64(buffer) };
+      try{ await templateDbOp('readwrite', st=> st.delete('template')); }catch(e){}
+    } else {
+      await templateDbOp('readwrite', st=> st.put({ data: buffer, uploadedAt, name: file.name }, 'template'));
+      state.reportTemplate = { name: file.name, uploadedAt };
+    }
+    reportTemplateCache = { key: uploadedAt + '|' + file.name, buffer };
+    saveState();
+    if(currentTab === 'estudiantes') renderEstudiantes(getActiveGroup());
+    showToast(buffer.byteLength <= TEMPLATE_SYNC_MAX
+      ? 'Plantilla guardada. Usa "Ver informe de ejemplo" para revisarla.'
+      : 'Plantilla guardada solo en este dispositivo (pesa más de 300 KB; si reduces el tamaño del logo, se sincronizará).');
+  }catch(e){
+    console.error(e);
+    showToast('No se pudo usar ese archivo como plantilla: ' + (e.message || 'error desconocido'));
+  }
+}
+async function removeReportTemplate(){
+  if(!confirm('¿Quitar la plantilla? Los Word volverán al formato simple.')) return;
+  state.reportTemplate = null;
+  reportTemplateCache = null;
+  try{ await templateDbOp('readwrite', st=> st.delete('template')); }catch(e){}
+  saveState();
+  if(currentTab === 'estudiantes') renderEstudiantes(getActiveGroup());
+  showToast('Plantilla quitada');
+}
+async function downloadTemplateSample(){
+  const group = getActiveGroup();
+  if(!group || group.students.length === 0){ showToast('Agrega estudiantes para ver un ejemplo'); return; }
+  const s = group.students[0];
+  await buildAndDownloadDocx(buildStudentHistoryBody(group, s, reportOptionsFromTemplate()), reportFileName(s), { nombre: s.name, curso: group.name });
+  showToast('Descargado un informe de ejemplo con tu plantilla');
 }
 
 /* ============ TAB: ENTREGAS (guías/trabajos: en plazo, fuera de plazo, no entregado) ============ */
@@ -8531,7 +8772,7 @@ function wordTable(headers, rows, widths){
   const dataRows = rows.map(r=> wordRow(r.map(c=> wordCell(c)).join(''))).join('');
   const grid = widths.map(w=>`<w:gridCol w:w="${w}"/>`).join('');
   return `<w:tbl>
-    <w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/></w:tblPr>
+    <w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="4" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="4" w:space="0" w:color="000000"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="000000"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="000000"/></w:tblBorders><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr>
     <w:tblGrid>${grid}</w:tblGrid>
     ${headerRow}
     ${dataRows}
@@ -8561,8 +8802,8 @@ function buildDocxStylesXml(){
 </w:styles>`;
 }
 
-async function buildAndDownloadDocx(documentXml, filename){
-  const blob = await buildDocxBlob(documentXml);
+async function buildAndDownloadDocx(documentXml, filename, ctx){
+  const blob = await buildDocxBlob(documentXml, ctx);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -8573,7 +8814,20 @@ async function buildAndDownloadDocx(documentXml, filename){
   URL.revokeObjectURL(url);
 }
 
-async function buildDocxBlob(documentXml){
+/* Usa la plantilla Word del profesor si existe; si no (o si falla), el formato simple */
+async function buildDocxBlob(documentXml, ctx){
+  ctx = ctx || { nombre: '', curso: (getActiveGroup() || {}).name || '' };
+  try{
+    const tpl = await getReportTemplateBuffer();
+    if(tpl) return await mergeIntoTemplate(tpl, documentXml, ctx);
+  }catch(e){
+    console.error('Plantilla', e);
+    showToast('No se pudo usar la plantilla Word (' + (e.message || 'error') + '); se usó el formato simple.');
+  }
+  return buildDefaultDocxBlob(documentXml);
+}
+
+async function buildDefaultDocxBlob(documentXml){
   const fullDocumentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>${documentXml}</w:body>
@@ -8640,9 +8894,14 @@ function buildStudentHistoryBody(group, student, opts){
   const decimasApplied = computeStudentDecimasApplied(group, studentId);
 
   let body = '';
-  body += wordHeading(`Historial completo - ${student.name}`, 32);
+  const ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX','X'];
+  let sec = 0;
+  const section = (title)=> wordHeading(`${ROMAN[sec++]}. ${title}`, 24);
+  body += wordHeading('Informe del estudiante', 32);
+  body += wordParagraph(`Estudiante: ${student.name}`);
   body += wordParagraph(`Curso: ${group.name}`);
-  body += wordHeading('Resumen', 24);
+  body += wordParagraph(`Fecha de emisión: ${formatDate(toISODate(new Date()))}`);
+  body += section('Resumen');
   body += wordTable(
     ['Indicador','Valor'],
     [
@@ -8662,7 +8921,7 @@ function buildStudentHistoryBody(group, student, opts){
   const sessions = getActiveSessions(group)
     .filter(s=> s.entries.some(e=>e.studentId===studentId))
     .sort((a,b)=> (a.date+a.time).localeCompare(b.date+b.time));
-  body += wordHeading('Historial de clases', 24);
+  body += section('Historial de clases');
   if(sessions.length === 0){
     body += wordParagraph('Sin registros.');
   } else {
@@ -8682,7 +8941,7 @@ function buildStudentHistoryBody(group, student, opts){
   }
 
   const evals = getActiveEvaluations(group);
-  body += wordHeading('Calificaciones', 24);
+  body += section('Calificaciones');
   if(evals.length === 0){
     body += wordParagraph('Sin evaluaciones registradas.');
   } else {
@@ -8697,7 +8956,7 @@ function buildStudentHistoryBody(group, student, opts){
   }
 
   const decimaSessions = getActiveDecimas(group).filter(d=> d.values && d.values[studentId] !== null && d.values[studentId] !== undefined);
-  body += wordHeading('Décimas', 24);
+  body += section('Décimas');
   if(decimaSessions.length === 0){
     body += wordParagraph('Sin décimas registradas.');
   } else {
@@ -8710,7 +8969,7 @@ function buildStudentHistoryBody(group, student, opts){
 
   const puntosSessions = getActivePuntos(group).filter(d=> d.values && d.values[studentId]);
   const canjesStudent = getActiveCanjes(group).filter(c=> c.studentId === studentId);
-  body += wordHeading('Puntos', 24);
+  body += section('Puntos');
   if(puntosSessions.length === 0 && canjesStudent.length === 0){
     body += wordParagraph('Sin puntos registrados.');
   } else {
@@ -8722,7 +8981,7 @@ function buildStudentHistoryBody(group, student, opts){
   }
 
   const entregas = getActiveEntregas(group);
-  body += wordHeading('Entregas', 24);
+  body += section('Entregas');
   if(entregas.length === 0){
     body += wordParagraph('Sin entregas registradas.');
   } else {
@@ -8740,7 +8999,7 @@ function buildStudentHistoryBody(group, student, opts){
   const bitacoraEntries = getActiveBitacora(group)
     .filter(e=> (e.studentIds||[]).length === 0 || e.studentIds.includes(studentId))
     .sort((a,b)=> (a.date||'').localeCompare(b.date||''));
-  body += wordHeading('Bitácora', 24);
+  body += section('Bitácora');
   if(bitacoraEntries.length === 0){
     body += wordParagraph('Sin registros de bitácora.');
   } else {
@@ -8764,7 +9023,7 @@ async function exportStudentHistoryToWord(studentId){
   if(!student) return;
 
   const body = buildStudentHistoryBody(group, student);
-  await buildAndDownloadDocx(body, `historial_${safeFileName(student.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  await buildAndDownloadDocx(body, `historial_${safeFileName(student.name)}_${new Date().toISOString().slice(0,10)}.docx`, { nombre: student.name, curso: group.name });
   showToast('Historial del estudiante exportado a Word');
 }
 
@@ -8779,7 +9038,7 @@ async function exportAllStudentsToWord(group){
     const studentBody = buildStudentHistoryBody(group, s);
     return i < group.students.length - 1 ? studentBody + wordPageBreak() : studentBody;
   }).join('');
-  await buildAndDownloadDocx(body, `historial_completo_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  await buildAndDownloadDocx(body, `historial_completo_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`, { nombre: '', curso: group.name });
   showToast('Word con todo el curso exportado (un estudiante por página)');
 }
 
@@ -9296,6 +9555,7 @@ renderAll();
 // Si el dispositivo quedó en modo consulta (ej. alguien recargó la página), vuelve a ese modo
 try{ if(localStorage.getItem(KIOSK_FLAG) === '1') enterKiosk(); }catch(e){ console.error(e); }
 // Revisa qué estudiantes tienen imágenes de fondo guardadas en este dispositivo
+getReportTemplateBuffer().then(()=>{ if(currentTab === 'estudiantes' && !kioskActive) renderEstudiantes(getActiveGroup()); }).catch(()=>{});
 loadCardImgKeys().then(()=>{ if(currentTab === 'premios' && !kioskActive) renderPremios(getActiveGroup()); });
 applyThemeIcon();
 updateDriveHeaderBadge();
