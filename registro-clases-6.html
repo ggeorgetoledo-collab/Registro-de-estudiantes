@@ -1067,7 +1067,7 @@ function exportSelectedGroupsBackup(){
 
   const periodIds = new Set();
   selectedGroups.forEach(g=>{
-    [...(g.sessions||[]), ...(g.evaluations||[]), ...(g.decimas||[]), ...(g.gradeGroups||[]), ...(g.processes||[]), ...(g.bitacora||[]), ...(g.entregas||[]), ...(g.canjes||[])]
+    [...(g.sessions||[]), ...(g.evaluations||[]), ...(g.decimas||[]), ...(g.gradeGroups||[]), ...(g.processes||[]), ...(g.bitacora||[]), ...(g.entregas||[]), ...(g.canjes||[]), ...(g.puntos||[])]
       .forEach(item=>{ if(item.periodId) periodIds.add(item.periodId); });
   });
   const periods = (state.periods || []).filter(p=> periodIds.has(p.id));
@@ -1274,7 +1274,24 @@ function mergeGroupData(localGroup, importedGroup, periodIdMap){
     const sid = studentIdMap.get(c.studentId) || c.studentId;
     const dup = localGroup.canjes.some(lc=> lc.studentId===sid && lc.date===c.date && (lc.time||'')===(c.time||'') && lc.name===c.name);
     if(dup) return;
-    localGroup.canjes.push({ ...c, id: uid(), studentId: sid, periodId: remapPeriodIdValue(c.periodId) });
+    localGroup.canjes.push({ ...c, id: uid(), studentId: sid, periodId: remapPeriodIdValue(c.periodId), decimaSessionId: null });
+  });
+
+  // Puntos: por fecha+motivo. Si ya existe, se completan valores de estudiantes que no tenían (sin sobrescribir).
+  if(!localGroup.puntos) localGroup.puntos = [];
+  (importedGroup.puntos || []).forEach(d=>{
+    const existing = localGroup.puntos.find(ld=> ld.date===d.date && (ld.note||'')===(d.note||''));
+    if(existing){
+      if(!existing.values) existing.values = {};
+      Object.keys(d.values || {}).forEach(oldSid=>{
+        const newSid = studentIdMap.get(oldSid) || oldSid;
+        if(existing.values[newSid] === undefined || existing.values[newSid] === null) existing.values[newSid] = d.values[oldSid];
+      });
+    } else {
+      const newValues = {};
+      Object.keys(d.values || {}).forEach(oldSid=>{ newValues[studentIdMap.get(oldSid) || oldSid] = d.values[oldSid]; });
+      localGroup.puntos.push({ ...d, id: uid(), periodId: remapPeriodIdValue(d.periodId), values: newValues });
+    }
   });
 
   return { sessionsAdded, evalsAdded, evalsFilled, decimasAdded, entregasAdded, studentIdMap };
@@ -1337,7 +1354,8 @@ function importAdditionalData(file){
         if(!newGroup.bitacora) newGroup.bitacora = [];
         if(!newGroup.entregas) newGroup.entregas = [];
         if(!newGroup.canjes) newGroup.canjes = [];
-        [newGroup.sessions, newGroup.evaluations, newGroup.decimas, newGroup.gradeGroups, newGroup.processes, newGroup.bitacora, newGroup.entregas, newGroup.canjes]
+        if(!newGroup.puntos) newGroup.puntos = [];
+        [newGroup.sessions, newGroup.evaluations, newGroup.decimas, newGroup.gradeGroups, newGroup.processes, newGroup.bitacora, newGroup.entregas, newGroup.canjes, newGroup.puntos]
           .forEach(list=> list.forEach(remapPeriodId));
         state.groups.push(newGroup);
         added++;
@@ -1543,7 +1561,7 @@ function totalWeightAssigned(group){
 
 function ensureDefaultGroup(){
   if(state.groups.length === 0){
-    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], canjes: [] };
+    const g = { id: uid(), name: 'Grupo 1', students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], canjes: [], puntos: [] };
     state.groups.push(g);
     state.activeGroupId = g.id;
     saveState();
@@ -1562,6 +1580,7 @@ function ensureDefaultGroup(){
     if(!g.bitacora) g.bitacora = [];
     if(!g.entregas) g.entregas = [];
     if(!g.canjes) g.canjes = [];
+    if(!g.puntos) g.puntos = [];
     if(g.activeProcessId === undefined) g.activeProcessId = null;
   });
   ensureRewardsConfig();
@@ -1956,7 +1975,7 @@ document.getElementById('groupSelect').addEventListener('change', e=>{
 document.getElementById('newGroupBtn').addEventListener('click', ()=>{
   const name = prompt('Nombre del nuevo grupo/curso:');
   if(!name) return;
-  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], canjes: [] };
+  const g = { id: uid(), name: name.trim(), students: [], indicators: [], sessions: [], evaluations: [], decimas: [], gradeGroups: [], processes: [], activeProcessId: null, bitacora: [], entregas: [], canjes: [], puntos: [] };
   state.groups.push(g);
   state.activeGroupId = g.id;
   saveState();
@@ -1979,7 +1998,7 @@ const SUBTAB_LABELS = {
   historial: 'Historial',
   decimas: 'Décimas',
   escanear: '📷 Escanear',
-  premios: '🎁 Premios',
+  premios: '⭐ Puntos',
   entregas: 'Entregas',
   calificaciones: 'Calificaciones',
 };
@@ -2300,10 +2319,15 @@ function openStudentDetail(studentId){
       <div class="stat-row"><span>No entregada</span><strong style="color:${ENTREGA_ESTADOS.no_entregada.color.text};">${entregaStats.no_entregada}</strong></div>
       <div class="stat-row"><span>% cumplimiento</span><strong style="${entregaCumplimiento!==null && entregaCumplimiento<60 ? 'color:var(--danger);' : ''}">${entregaCumplimiento !== null ? entregaCumplimiento + '%' : '-'}</strong></div>
       <hr class="divider">
+      <p class="muted" style="margin-bottom:4px; font-weight:600;">Puntos (tarjeta QR)</p>
+      <div class="stat-row"><span>Ganados</span><strong style="color:var(--primary);">${computeStudentPuntosTotal(group, studentId)}</strong></div>
+      <div class="stat-row"><span>Canjeados</span><strong>${computeStudentPuntosRedeemed(group, studentId)}</strong></div>
+      <div class="stat-row"><span>Disponibles</span><strong style="color:var(--success);">${computeStudentPuntosAvailable(group, studentId)}</strong></div>
+      <hr class="divider">
       <p class="muted" style="margin-bottom:4px; font-weight:600;">Décimas</p>
       <div class="stat-row"><span>Acumuladas</span><strong style="color:var(--primary);">${decimasTotal}</strong></div>
       <div class="stat-row"><span>Ya aplicadas a notas</span><strong>${decimasApplied}</strong></div>
-      <div class="stat-row"><span>Canjeadas en premios</span><strong>${computeStudentDecimasRedeemed(group, studentId)}</strong></div>
+
       <div class="stat-row"><span>Disponibles</span><strong style="color:var(--success);">${decimasAvailable}</strong></div>
       ${evals.length > 0 && decimasAvailable > 0 ? `
         <div class="row" style="margin-top:8px; gap:6px;">
@@ -2768,7 +2792,7 @@ function renderInicio(){
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('historial')">🗂️<span>Historial</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('decimas')">➕<span>Décimas</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('escanear')">📷<span>Escanear tarjeta</span></button>
-        <button class="btn btn-outline quick-link-btn" onclick="goToTab('premios')">🎁<span>Premios</span></button>
+        <button class="btn btn-outline quick-link-btn" onclick="goToTab('premios')">⭐<span>Puntos</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('entregas')">📥<span>Entregas</span></button>
         <button class="btn btn-outline quick-link-btn" onclick="goToTab('calificaciones')">🎯<span>Calificaciones</span></button>
       </div>
@@ -3616,7 +3640,7 @@ function computeStudentDecimasApplied(group, studentId){
 }
 
 function computeStudentDecimasAvailable(group, studentId){
-  return Math.round((computeStudentDecimasTotal(group, studentId) - computeStudentDecimasApplied(group, studentId) - computeStudentDecimasRedeemed(group, studentId)) * 10) / 10;
+  return Math.round((computeStudentDecimasTotal(group, studentId) - computeStudentDecimasApplied(group, studentId)) * 10) / 10;
 }
 
 function applyDecimasToEval(studentId){
@@ -3684,7 +3708,7 @@ function openDecimasBulkForm(evalId){
       <div style="display:flex; flex-wrap:wrap; gap:6px; max-height:110px; overflow-y:auto;">
         ${group.students.map(s=>{
           const total = computeStudentDecimasTotal(group, s.id);
-          const usadas = computeStudentDecimasUsed(group, s.id);
+          const usadas = computeStudentDecimasApplied(group, s.id);
           const disponible = computeStudentDecimasAvailable(group, s.id);
           return `<span class="pill" style="${disponible>0 ? 'color:var(--success); border-color:var(--success-border); background:var(--success-light);' : ''}">${escapeHtml(s.name)}: ${total} · ${usadas} · ${disponible}</span>`;
         }).join('')}
@@ -3827,7 +3851,7 @@ function renderDecimas(group){
         <tbody>
           ${group.students.map(s=>{
             const total = computeStudentDecimasTotal(group, s.id);
-            const usadas = computeStudentDecimasUsed(group, s.id);
+            const usadas = computeStudentDecimasApplied(group, s.id);
             const disponible = computeStudentDecimasAvailable(group, s.id);
             return `
             <tr>
@@ -3953,10 +3977,14 @@ function deleteDecima(id){
   renderDecimas(group);
 }
 
-/* ============ TARJETAS QR, ESCÁNER Y PREMIOS (canje de décimas) ============ */
+/* ============ TARJETAS QR, PUNTOS Y CANJES ============ */
+/* Al escanear se asignan PUNTOS (moneda aparte de las décimas).
+   Los puntos se canjean por premios o por décimas; las décimas obtenidas por canje
+   quedan registradas en el módulo Décimas (motivo "Canje de puntos"). */
 const QR_PREFIX = 'RCQR:';
 const CARD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sin 0/O ni 1/I para evitar confusiones al escribir el código a mano
 const SCAN_QUICK_AMOUNTS = [1, 2, 5];
+const CANJE_DECIMAS_NOTE = 'Canje de puntos';
 const DEFAULT_MOTIVOS = [
   { id:'mot_participacion', name:'Participación', value:1 },
   { id:'mot_ayuda', name:'Ayuda a un compañero', value:2 },
@@ -3964,28 +3992,57 @@ const DEFAULT_MOTIVOS = [
   { id:'mot_convivencia', name:'Buena convivencia', value:1 },
 ];
 const DEFAULT_PREMIOS = [
-  { id:'pre_puesto', name:'Elegir puesto por una clase', cost:10 },
-  { id:'pre_musica', name:'Elegir la música de la clase', cost:10 },
-  { id:'pre_tiempo', name:'10 minutos extra en una evaluación', cost:15 },
-  { id:'pre_comodin', name:'Comodín: una tarea sin entregar', cost:25 },
+  { id:'pre_dec1', name:'1 décima', cost:5, type:'decimas', decimas:1 },
+  { id:'pre_dec3', name:'3 décimas', cost:12, type:'decimas', decimas:3 },
+  { id:'pre_puesto', name:'Elegir puesto por una clase', cost:10, type:'premio' },
+  { id:'pre_musica', name:'Elegir la música de la clase', cost:10, type:'premio' },
+  { id:'pre_tiempo', name:'10 minutos extra en una evaluación', cost:15, type:'premio' },
+  { id:'pre_comodin', name:'Comodín: una tarea sin entregar', cost:25, type:'premio' },
+];
+const DEFAULT_CARD_CONFIG = { size:'estandar', title:'Tarjeta de puntos', school:'', logo:null, decorate:false, showAlias:true, frame:'none' };
+const CARD_SIZES = {
+  estandar: { label:'Estándar · 8 por hoja', perPage:8 },
+  pequena: { label:'Pequeña · 10 por hoja', perPage:10 },
+  carnet: { label:'Carnet vertical (para colgar) · 4 por hoja', perPage:4 },
+};
+const CARD_FRAMES = [
+  ['none','Sin color'], ['#A8D5BA','Verde'], ['#F6C6A8','Durazno'], ['#A9CCE3','Celeste'],
+  ['#C9B6E4','Lila'], ['#F7E1A0','Amarillo'], ['#F4B6C2','Rosado'], ['#555555','Gris oscuro'],
 ];
 
 function ensureRewardsConfig(){
   if(!Array.isArray(state.decimaMotivos)) state.decimaMotivos = JSON.parse(JSON.stringify(DEFAULT_MOTIVOS));
   if(!Array.isArray(state.premios)) state.premios = JSON.parse(JSON.stringify(DEFAULT_PREMIOS));
+  if(!state.premiosV2){
+    // Versión anterior: los premios no tenían tipo. Se marcan como premio y se agregan las opciones de canje por décimas.
+    state.premios.forEach(p=>{ if(!p.type) p.type = 'premio'; });
+    if(!state.premios.some(p=> p.type === 'decimas')){
+      state.premios.unshift(...JSON.parse(JSON.stringify(DEFAULT_PREMIOS.filter(p=> p.type === 'decimas'))));
+    }
+    state.premiosV2 = true;
+  }
+  if(!state.cardConfig) state.cardConfig = { ...DEFAULT_CARD_CONFIG };
 }
 
-/* ---- Canjes (décimas gastadas en premios) ---- */
+/* ---- Puntos ---- */
+function getActivePuntos(group){
+  return (group.puntos || []).filter(d=> !state.activePeriodId || d.periodId === state.activePeriodId);
+}
 function getActiveCanjes(group){
   return (group.canjes || []).filter(c=> !state.activePeriodId || c.periodId === state.activePeriodId);
 }
-function computeStudentDecimasRedeemed(group, studentId){
+function computeStudentPuntosTotal(group, studentId){
+  let total = 0;
+  getActivePuntos(group).forEach(d=>{ total += (d.values && d.values[studentId]) || 0; });
+  return Math.round(total * 10) / 10;
+}
+function computeStudentPuntosRedeemed(group, studentId){
   let total = 0;
   getActiveCanjes(group).forEach(c=>{ if(c.studentId === studentId) total += (c.cost || 0); });
   return Math.round(total * 10) / 10;
 }
-function computeStudentDecimasUsed(group, studentId){
-  return Math.round((computeStudentDecimasApplied(group, studentId) + computeStudentDecimasRedeemed(group, studentId)) * 10) / 10;
+function computeStudentPuntosAvailable(group, studentId){
+  return Math.round((computeStudentPuntosTotal(group, studentId) - computeStudentPuntosRedeemed(group, studentId)) * 10) / 10;
 }
 
 /* ---- Códigos de tarjeta ---- */
@@ -4034,53 +4091,253 @@ function qrSvgForCode(code){
   return qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
 }
 
-/* ---- Impresión de tarjetas (tamaño carta, 8 por hoja, blanco y negro) ---- */
-function printStudentCards(groupIds, onlyStudentId){
-  ensureAllCards();
-  const cards = [];
-  state.groups.filter(g=> groupIds.includes(g.id)).forEach(g=>{
-    (g.students || []).forEach(s=>{
-      if(onlyStudentId && s.id !== onlyStudentId) return;
-      cards.push({ name: s.name, course: g.name, code: s.card });
-    });
-  });
-  if(cards.length === 0){ showToast('No hay estudiantes para imprimir tarjetas'); return; }
-  const win = window.open('', '_blank');
-  if(!win){ showToast('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes e inténtalo de nuevo.'); return; }
-  const cardsHtml = cards.map(c=> `
-    <div class="card">
-      <div class="qr">${qrSvgForCode(c.code)}</div>
-      <div class="info">
-        <div class="kicker">Tarjeta de décimas</div>
-        <div class="name">${escapeHtml(c.name)}</div>
-        <div class="course">${escapeHtml(c.course)}</div>
-        <div class="code">Código: ${c.code}</div>
+/* ---- Diseño e impresión de tarjetas (tamaño carta) ---- */
+function buildCardHtml(c, cfg){
+  const frameCss = cfg.frame && cfg.frame !== 'none' ? `border:0.09in solid ${cfg.frame};` : '';
+  const head = (cfg.logo || cfg.title || cfg.school) ? `
+    <div class="head">
+      ${cfg.logo ? `<img class="logo" src="${cfg.logo}" alt="">` : ''}
+      <div class="head-text">
+        ${cfg.title ? `<div class="kicker">${escapeHtml(cfg.title)}</div>` : ''}
+        ${cfg.school ? `<div class="school">${escapeHtml(cfg.school)}</div>` : ''}
       </div>
-    </div>`).join('');
-  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    </div>` : '';
+  const alias = cfg.showAlias && c.alias ? `<div class="alias">“${escapeHtml(c.alias)}”</div>` : '';
+  const deco = cfg.decorate ? `<div class="deco"><span>${cfg.size === 'carnet' ? 'Dibuja aquí tu avatar' : 'Mi avatar'}</span></div>` : '';
+  const qr = `<div class="qr">${qrSvgForCode(c.code)}</div>`;
+  if(cfg.size === 'carnet'){
+    return `<div class="card v" style="${frameCss}">
+      <div class="hole"></div>
+      ${head}
+      ${deco}
+      <div class="name">${escapeHtml(c.name)}</div>
+      ${alias}
+      <div class="course">${escapeHtml(c.course)}</div>
+      ${qr}
+      <div class="code">${c.code}</div>
+    </div>`;
+  }
+  return `<div class="card h" style="${frameCss}">
+    ${qr}
+    <div class="info">
+      ${head}
+      <div class="name">${escapeHtml(c.name)}</div>
+      ${alias}
+      <div class="course">${escapeHtml(c.course)} · <span class="code">${c.code}</span></div>
+      ${deco}
+    </div>
+  </div>`;
+}
+
+function buildCardsDocument(cards, cfg, preview){
+  const size = CARD_SIZES[cfg.size] ? cfg.size : 'estandar';
+  const perPage = CARD_SIZES[size].perPage;
+  const pages = [];
+  for(let i=0; i<cards.length; i+=perPage) pages.push(cards.slice(i, i+perPage));
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
     <title>Tarjetas QR</title>
     <style>
       @page { size: letter; margin: 0.5in; }
       *{ box-sizing:border-box; }
-      body{ margin:0; font-family: Calibri, Arial, sans-serif; color:#000; }
+      body{ margin:0; font-family: Calibri, Carlito, Arial, sans-serif; color:#000; background:#fff; }
       .toolbar{ padding:12px; text-align:center; font-size:14px; }
       .toolbar button{ font-size:16px; padding:8px 18px; cursor:pointer; }
-      .sheet{ display:grid; grid-template-columns: repeat(2, 3.5in); grid-auto-rows: 2.3in; gap:0.1in 0.3in; justify-content:center; }
-      .card{ border:1px dashed #000; padding:0.14in; display:flex; gap:0.14in; align-items:center; break-inside:avoid; page-break-inside:avoid; }
-      .qr{ width:1.75in; height:1.75in; flex:none; }
+      .sheet{ display:grid; justify-content:center; page-break-after:always; break-after:page; }
+      .sheet:last-child{ page-break-after:auto; break-after:auto; }
+      .card{ border:1px dashed #000; background:#fff; overflow:hidden; display:flex; }
+      .qr{ flex:none; background:#fff; padding:0.06in; }
       .qr svg{ width:100%; height:100%; display:block; }
-      .info{ min-width:0; }
-      .kicker{ font-size:9pt; text-transform:uppercase; letter-spacing:0.5px; }
-      .name{ font-size:13pt; font-weight:bold; margin:4px 0; line-height:1.15; word-wrap:break-word; }
-      .course{ font-size:10pt; }
-      .code{ font-size:10pt; margin-top:8px; font-family: Consolas, monospace; font-weight:bold; }
+      .head{ display:flex; align-items:center; gap:0.06in; }
+      .logo{ height:0.34in; max-width:0.7in; object-fit:contain; flex:none; }
+      .head-text{ min-width:0; }
+      .kicker{ font-size:8pt; font-weight:bold; text-transform:uppercase; letter-spacing:0.4px; line-height:1.1; }
+      .school{ font-size:7.5pt; line-height:1.1; }
+      .name{ font-weight:bold; line-height:1.12; word-wrap:break-word; }
+      .alias{ font-style:italic; line-height:1.1; }
+      .course{ line-height:1.2; }
+      .code{ font-family: Consolas, 'Courier New', monospace; font-weight:bold; }
+      .deco{ border:1px dashed #999; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:7.5pt; }
+
+      /* Horizontales */
+      .card.h{ align-items:center; gap:0.1in; padding:0.12in; }
+      .card.h .info{ min-width:0; flex:1; height:100%; display:flex; flex-direction:column; justify-content:center; gap:0.03in; }
+      .card.h .deco{ flex:1; min-height:0.35in; margin-top:0.04in; }
+      .sheet.estandar{ grid-template-columns: repeat(2, 3.5in); grid-auto-rows: 2.3in; gap:0.1in 0.3in; }
+      .estandar .qr{ width:1.6in; height:1.6in; }
+      .estandar .name{ font-size:13pt; }
+      .estandar .alias{ font-size:9.5pt; }
+      .estandar .course{ font-size:9.5pt; }
+      .sheet.pequena{ grid-template-columns: repeat(2, 3.4in); grid-auto-rows: 1.9in; gap:0.08in 0.3in; }
+      .pequena .qr{ width:1.35in; height:1.35in; }
+      .pequena .name{ font-size:11pt; }
+      .pequena .alias{ font-size:8.5pt; }
+      .pequena .course{ font-size:8.5pt; }
+      .pequena .logo{ height:0.28in; }
+
+      /* Carnet vertical */
+      .sheet.carnet{ grid-template-columns: repeat(2, 3.4in); grid-auto-rows: 4.7in; gap:0.15in 0.3in; }
+      .card.v{ flex-direction:column; align-items:center; text-align:center; padding:0.12in 0.16in; gap:0.05in; position:relative; }
+      .card.v .hole{ width:0.55in; height:0.14in; border:1px solid #999; border-radius:0.07in; flex:none; }
+      .card.v .head{ justify-content:center; }
+      .card.v .logo{ height:0.45in; }
+      .card.v .kicker{ font-size:9pt; }
+      .card.v .school{ font-size:8.5pt; }
+      .card.v .deco{ width:100%; flex:1; min-height:0.6in; font-size:9pt; }
+      .card.v .name{ font-size:15pt; }
+      .card.v .alias{ font-size:10.5pt; }
+      .card.v .course{ font-size:10pt; }
+      .card.v .qr{ width:1.75in; height:1.75in; }
+      .card.v .code{ font-size:10pt; }
+
+      ${preview ? 'body{ display:flex; justify-content:center; padding:8px 0; } .sheet{ page-break-after:auto; grid-template-columns:auto !important; }' : ''}
       @media print{ .toolbar{ display:none; } }
     </style></head><body>
-    <div class="toolbar">${cards.length} tarjeta(s) · 8 por hoja carta · recorta por la línea punteada<br><br><button onclick="window.print()">🖨️ Imprimir</button></div>
-    <div class="sheet">${cardsHtml}</div>
-    </body></html>`);
+    ${preview ? '' : `<div class="toolbar">${cards.length} tarjeta(s) · ${CARD_SIZES[size].label} · recorta por el borde<br><br><button onclick="window.print()">🖨️ Imprimir</button></div>`}
+    ${pages.map(pg=> `<div class="sheet ${size}">${pg.map(c=> buildCardHtml(c, cfg)).join('')}</div>`).join('')}
+    </body></html>`;
+}
+
+let cardDesignTarget = null; // { groupIds, onlyStudentId }
+
+function collectCardsForTarget(target){
+  const cards = [];
+  state.groups.filter(g=> target.groupIds.includes(g.id)).forEach(g=>{
+    (g.students || []).forEach(s=>{
+      if(target.onlyStudentId && s.id !== target.onlyStudentId) return;
+      cards.push({ name: s.name, course: g.name, code: s.card, alias: s.cardAlias || '' });
+    });
+  });
+  return cards;
+}
+
+function openCardDesigner(groupIds, onlyStudentId){
+  ensureRewardsConfig();
+  ensureAllCards();
+  cardDesignTarget = { groupIds, onlyStudentId: onlyStudentId || null };
+  const cards = collectCardsForTarget(cardDesignTarget);
+  if(cards.length === 0){ showToast('No hay estudiantes para imprimir tarjetas'); return; }
+  closeCardDesigner();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'cardDesignerOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="max-width:560px;">
+      <button class="modal-close" onclick="closeCardDesigner()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🎨 Diseñar tarjetas</h2>
+      <p class="muted">${cards.length} tarjeta(s). El diseño se guarda para la próxima vez. El QR siempre queda en blanco y negro para que se pueda escanear.</p>
+      <div id="cardDesignerForm"></div>
+      <p class="muted" style="font-weight:600; margin:12px 0 4px;">Vista previa</p>
+      <iframe id="cardPreviewFrame" title="Vista previa de la tarjeta" style="width:100%; border:1px solid var(--border); border-radius:10px; background:#fff;"></iframe>
+      <div class="row" style="justify-content:center; margin-top:12px;">
+        <button class="btn btn-accent" onclick="printDesignedCards()">🖨️ Imprimir ${cards.length} tarjeta(s)</button>
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) closeCardDesigner(); });
+  document.body.appendChild(overlay);
+  renderCardDesignerForm();
+}
+function closeCardDesigner(){
+  const o = document.getElementById('cardDesignerOverlay');
+  if(o) o.remove();
+}
+function renderCardDesignerForm(){
+  const box = document.getElementById('cardDesignerForm');
+  if(!box) return;
+  const cfg = state.cardConfig;
+  box.innerHTML = `
+    <label>Tamaño</label>
+    <select onchange="updateCardConfig('size', this.value)">
+      ${Object.entries(CARD_SIZES).map(([k,v])=> `<option value="${k}" ${cfg.size===k?'selected':''}>${v.label}</option>`).join('')}
+    </select>
+    <div class="grid-2" style="margin-top:8px;">
+      <div>
+        <label>Título</label>
+        <input type="text" value="${escapeHtml(cfg.title || '')}" placeholder="Ej. Tarjeta de puntos" onchange="updateCardConfig('title', this.value)">
+      </div>
+      <div>
+        <label>Nombre del colegio</label>
+        <input type="text" value="${escapeHtml(cfg.school || '')}" placeholder="Opcional" onchange="updateCardConfig('school', this.value)">
+      </div>
+    </div>
+    <label style="margin-top:8px;">Logo del colegio</label>
+    <div class="row" style="gap:8px; align-items:center;">
+      ${cfg.logo ? `<img src="${cfg.logo}" alt="Logo" style="height:40px; max-width:90px; object-fit:contain; background:#fff; border:1px solid var(--border); border-radius:6px; padding:2px;">` : ''}
+      <label class="btn btn-outline btn-sm" style="margin:0; cursor:pointer;">${cfg.logo ? 'Cambiar logo' : '📁 Subir logo'}
+        <input type="file" accept="image/*" style="display:none;" onchange="uploadCardLogo(this.files[0])">
+      </label>
+      ${cfg.logo ? `<button class="btn btn-danger btn-sm" onclick="updateCardConfig('logo', null)">Quitar</button>` : ''}
+    </div>
+    <label style="display:flex; align-items:center; gap:8px; margin-top:10px; cursor:pointer;">
+      <input type="checkbox" style="width:auto;" ${cfg.decorate ? 'checked' : ''} onchange="updateCardConfig('decorate', this.checked)">
+      Espacio en blanco para que el estudiante dibuje su avatar
+    </label>
+    <label style="display:flex; align-items:center; gap:8px; margin-top:6px; cursor:pointer;">
+      <input type="checkbox" style="width:auto;" ${cfg.showAlias ? 'checked' : ''} onchange="updateCardConfig('showAlias', this.checked)">
+      Mostrar apodo o frase (se escribe por estudiante en ⭐ Puntos)
+    </label>
+    <label style="margin-top:10px;">Marco de color</label>
+    <div class="row" style="gap:6px;">
+      ${CARD_FRAMES.map(([val, name])=> `
+        <button type="button" title="${name}" onclick="updateCardConfig('frame', '${val}')"
+          style="width:34px; height:34px; border-radius:50%; cursor:pointer; background:${val==='none' ? '#fff' : val}; border:${cfg.frame===val ? '3px solid var(--primary)' : '1px solid var(--border-strong)'}; font-size:0.7rem; color:#666;">${val==='none' ? '✕' : ''}</button>`).join('')}
+    </div>
+  `;
+  refreshCardPreview();
+}
+function updateCardConfig(field, value){
+  ensureRewardsConfig();
+  state.cardConfig[field] = value;
+  saveState();
+  renderCardDesignerForm();
+}
+function uploadCardLogo(file){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    const img = new Image();
+    img.onload = ()=>{
+      // Se reduce para no inflar el respaldo en Drive
+      const max = 256;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      updateCardConfig('logo', c.toDataURL('image/png'));
+      showToast('Logo agregado');
+    };
+    img.onerror = ()=> showToast('No se pudo leer esa imagen');
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+function refreshCardPreview(){
+  const frame = document.getElementById('cardPreviewFrame');
+  if(!frame || !cardDesignTarget) return;
+  const cards = collectCardsForTarget(cardDesignTarget);
+  const sample = cards.find(c=> c.alias) || cards[0];
+  if(!sample) return;
+  const cfg = state.cardConfig;
+  frame.onload = ()=>{
+    // Se escala la tarjeta para que quepa completa en el ancho disponible (pantallas de celular)
+    try{
+      const doc = frame.contentDocument;
+      const sheet = doc.querySelector('.sheet');
+      const avail = frame.clientWidth - 16;
+      const scale = Math.min(1, avail / sheet.scrollWidth);
+      doc.body.style.zoom = scale;
+      frame.style.height = Math.ceil(sheet.scrollHeight * scale + 20) + 'px';
+    }catch(e){}
+  };
+  frame.srcdoc = buildCardsDocument([sample], cfg, true);
+}
+function printDesignedCards(){
+  if(!cardDesignTarget) return;
+  const cards = collectCardsForTarget(cardDesignTarget);
+  const win = window.open('', '_blank');
+  if(!win){ showToast('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes e inténtalo de nuevo.'); return; }
+  win.document.write(buildCardsDocument(cards, state.cardConfig, false));
   win.document.close();
-  setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 400);
+  setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 500);
 }
 
 /* ---- Escáner con la cámara ---- */
@@ -4172,7 +4429,7 @@ async function scanTick(){
   qrScanner.timer = null;
   const video = document.getElementById('qrVideo');
   if(!qrScanner.stream || !video || !document.body.contains(video)){ stopQrScanner(); return; }
-  const paused = document.hidden || document.getElementById('studentModalOverlay') || document.getElementById('decimasBulkFormOverlay');
+  const paused = document.hidden || document.getElementById('studentModalOverlay') || document.getElementById('decimasBulkFormOverlay') || document.getElementById('cardDesignerOverlay');
   if(!paused && video.readyState >= 2 && !qrScanner.busy){
     qrScanner.busy = true;
     try{
@@ -4248,8 +4505,8 @@ function selectScanStudent(groupId, studentId, fromScan){
   scanCurrent = { groupId, studentId };
   if(fromScan && scanAutoAction){
     const [kind, val] = scanAutoAction.split(':');
-    if(kind === 'q') assignScanDecimas(Number(val), null);
-    else if(kind === 'm') assignScanDecimasMotivo(val);
+    if(kind === 'q') assignScanPuntos(Number(val), null);
+    else if(kind === 'm') assignScanPuntosMotivo(val);
     return;
   }
   renderScanResult();
@@ -4262,34 +4519,71 @@ function getScanCurrent(){
   return (group && student) ? { group, student } : null;
 }
 
-function assignScanDecimasMotivo(motivoId){
+function assignScanPuntosMotivo(motivoId){
   ensureRewardsConfig();
   const m = state.decimaMotivos.find(x=> x.id === motivoId);
   if(!m){ showToast('Ese motivo ya no existe'); return; }
-  assignScanDecimas(Number(m.value) || 0, m.name);
+  assignScanPuntos(Number(m.value) || 0, m.name);
 }
 
-function assignScanDecimas(amount, motivoName){
+function assignScanPuntos(amount, motivoName){
   const cur = getScanCurrent();
   if(!cur){ showToast('Primero escanea una tarjeta'); return; }
   if(!amount){ showToast('La cantidad debe ser distinta de 0'); return; }
   const { group, student } = cur;
-  if(!group.decimas) group.decimas = [];
+  if(!group.puntos) group.puntos = [];
   const today = toISODate(new Date());
   const note = motivoName || 'Escaneo rápido';
   const period = state.activePeriodId || null;
-  // Todo lo asignado el mismo día con el mismo motivo queda en un solo registro de Décimas
-  let session = group.decimas.find(d=> d.values && d.date === today && (d.note || '') === note && (d.periodId || null) === period);
+  // Todo lo asignado el mismo día con el mismo motivo queda en un solo registro de puntos
+  let session = group.puntos.find(d=> d.values && d.date === today && (d.note || '') === note && (d.periodId || null) === period);
   if(!session){
-    session = { id: uid(), date: today, note, periodId: state.activePeriodId, values: {}, source: 'scan' };
-    group.decimas.push(session);
+    session = { id: uid(), date: today, note, periodId: state.activePeriodId, values: {} };
+    group.puntos.push(session);
   }
   session.values[student.id] = Math.round(((session.values[student.id] || 0) + amount) * 10) / 10;
-  scanLog.unshift({ id: uid(), type:'decima', groupId: group.id, studentId: student.id, studentName: student.name, sessionId: session.id, amount, note, time: Date.now() });
+  scanLog.unshift({ id: uid(), type:'punto', groupId: group.id, studentId: student.id, studentName: student.name, sessionId: session.id, amount, note, time: Date.now() });
   scanLog = scanLog.slice(0, 20);
   saveState();
   renderScanResult();
-  flashScanResult(`${amount > 0 ? '+' : ''}${amount} décima(s) · ${note}`);
+  flashScanResult(`${amount > 0 ? '+' : ''}${amount} punto(s) · ${note}`);
+}
+
+/* Registra las décimas ganadas por un canje en el módulo Décimas */
+function addCanjeDecimas(group, studentId, amount, date, periodId){
+  if(!group.decimas) group.decimas = [];
+  let session = group.decimas.find(d=> d.values && d.date === date && d.note === CANJE_DECIMAS_NOTE && (d.periodId || null) === (periodId || null));
+  if(!session){
+    session = { id: uid(), date, note: CANJE_DECIMAS_NOTE, periodId, values: {}, source: 'canje' };
+    group.decimas.push(session);
+  }
+  session.values[studentId] = Math.round(((session.values[studentId] || 0) + amount) * 10) / 10;
+  return session.id;
+}
+function removeCanjeDecimas(group, canje){
+  const session = (group.decimas || []).find(d=> d.id === canje.decimaSessionId)
+    || (group.decimas || []).find(d=> d.values && d.date === canje.date && d.note === CANJE_DECIMAS_NOTE && (d.periodId || null) === (canje.periodId || null));
+  if(!session || !session.values) return;
+  const nuevo = Math.round(((session.values[canje.studentId] || 0) - (canje.decimas || 0)) * 10) / 10;
+  if(nuevo === 0) delete session.values[canje.studentId];
+  else session.values[canje.studentId] = nuevo;
+  const vacio = Object.values(session.values).every(v=> v === null || v === undefined || v === 0);
+  if(vacio && session.source === 'canje') group.decimas = group.decimas.filter(d=> d.id !== session.id);
+}
+/* Devuelve true si se revirtió; false si no se puede (décimas ya usadas en una nota) */
+function revertCanjeData(group, canjeId){
+  const canje = (group.canjes || []).find(c=> c.id === canjeId);
+  if(!canje) return true;
+  if(canje.type === 'decimas' && canje.decimas){
+    const disponibles = computeStudentDecimasAvailable(group, canje.studentId);
+    if(disponibles < canje.decimas){
+      showToast('No se puede revertir: esas décimas ya se aplicaron a una nota. Revierte primero la aplicación en la ficha del estudiante.');
+      return false;
+    }
+    removeCanjeDecimas(group, canje);
+  }
+  group.canjes = group.canjes.filter(c=> c.id !== canjeId);
+  return true;
 }
 
 function canjearPremioScan(premioId){
@@ -4299,17 +4593,24 @@ function canjearPremioScan(premioId){
   const premio = state.premios.find(p=> p.id === premioId);
   if(!premio) return;
   const { group, student } = cur;
-  const disponible = computeStudentDecimasAvailable(group, student.id);
-  if(disponible < premio.cost){ showToast(`No le alcanza: tiene ${disponible} y el premio cuesta ${premio.cost}`); return; }
-  if(!confirm(`¿Canjear "${premio.name}" para ${student.name}?\n\nSe descuentan ${premio.cost} décimas (le quedarán ${Math.round((disponible - premio.cost)*10)/10}).`)) return;
+  const disponible = computeStudentPuntosAvailable(group, student.id);
+  if(disponible < premio.cost){ showToast(`No le alcanza: tiene ${disponible} puntos y cuesta ${premio.cost}`); return; }
+  const esDecimas = premio.type === 'decimas';
+  const detalle = esDecimas ? `recibe ${premio.decimas} décima(s)` : `"${premio.name}"`;
+  if(!confirm(`¿Canjear para ${student.name}?\n\nSe descuentan ${premio.cost} puntos (le quedarán ${Math.round((disponible - premio.cost)*10)/10}) y ${detalle}.`)) return;
   if(!group.canjes) group.canjes = [];
-  const canje = { id: uid(), date: toISODate(new Date()), time: new Date().toTimeString().slice(0,5), studentId: student.id, premioId: premio.id, name: premio.name, cost: premio.cost, periodId: state.activePeriodId };
+  const date = toISODate(new Date());
+  const canje = { id: uid(), date, time: new Date().toTimeString().slice(0,5), studentId: student.id, premioId: premio.id, name: premio.name, cost: premio.cost, type: esDecimas ? 'decimas' : 'premio', periodId: state.activePeriodId };
+  if(esDecimas){
+    canje.decimas = premio.decimas;
+    canje.decimaSessionId = addCanjeDecimas(group, student.id, premio.decimas, date, state.activePeriodId);
+  }
   group.canjes.push(canje);
   scanLog.unshift({ id: uid(), type:'canje', groupId: group.id, studentId: student.id, studentName: student.name, canjeId: canje.id, amount: -premio.cost, note: premio.name, time: Date.now() });
   scanLog = scanLog.slice(0, 20);
   saveState();
   renderScanResult();
-  flashScanResult(`🎁 Canjeado: ${premio.name}`);
+  flashScanResult(esDecimas ? `➕ ${premio.decimas} décima(s) agregada(s)` : `🎁 Canjeado: ${premio.name}`);
 }
 
 function undoScanLog(logId){
@@ -4317,17 +4618,17 @@ function undoScanLog(logId){
   if(!item) return;
   const group = state.groups.find(g=> g.id === item.groupId);
   if(group){
-    if(item.type === 'decima'){
-      const session = (group.decimas || []).find(d=> d.id === item.sessionId);
+    if(item.type === 'punto'){
+      const session = (group.puntos || []).find(d=> d.id === item.sessionId);
       if(session && session.values){
         const nuevo = Math.round(((session.values[item.studentId] || 0) - item.amount) * 10) / 10;
         if(nuevo === 0) delete session.values[item.studentId];
         else session.values[item.studentId] = nuevo;
         const vacio = Object.values(session.values).every(v=> v === null || v === undefined || v === 0);
-        if(vacio && session.source === 'scan') group.decimas = group.decimas.filter(d=> d.id !== session.id);
+        if(vacio) group.puntos = group.puntos.filter(d=> d.id !== session.id);
       }
     } else if(item.type === 'canje'){
-      group.canjes = (group.canjes || []).filter(c=> c.id !== item.canjeId);
+      if(!revertCanjeData(group, item.canjeId)) return;
     }
   }
   scanLog = scanLog.filter(l=> l.id !== logId);
@@ -4376,6 +4677,12 @@ function renderScanPicker(){
     </select>`;
 }
 
+function premioButtonHtml(p, disponible){
+  const alcanza = disponible >= p.cost;
+  const label = p.type === 'decimas' ? `➕ ${escapeHtml(p.name)} · ${p.cost} pts` : `🎁 ${escapeHtml(p.name)} · ${p.cost} pts`;
+  return `<button class="btn btn-outline btn-sm ${alcanza ? '' : 'scan-disabled'}" ${alcanza ? '' : 'disabled'} onclick="canjearPremioScan('${p.id}')">${label}</button>`;
+}
+
 function renderScanResult(){
   const box = document.getElementById('scanResult');
   if(!box) return;
@@ -4383,45 +4690,49 @@ function renderScanResult(){
   const cur = getScanCurrent();
   let html = '';
   if(!cur){
-    html = '<div class="empty-state">Escanea una tarjeta (o elige un estudiante) para asignar décimas o canjear premios.</div>';
+    html = '<div class="empty-state">Escanea una tarjeta (o elige un estudiante) para asignar puntos o hacer canjes.</div>';
   } else {
     const { group, student } = cur;
-    const total = computeStudentDecimasTotal(group, student.id);
-    const aplicadas = computeStudentDecimasApplied(group, student.id);
-    const canjeadas = computeStudentDecimasRedeemed(group, student.id);
-    const disponible = computeStudentDecimasAvailable(group, student.id);
+    const total = computeStudentPuntosTotal(group, student.id);
+    const canjeados = computeStudentPuntosRedeemed(group, student.id);
+    const disponible = computeStudentPuntosAvailable(group, student.id);
+    const decimasDisp = computeStudentDecimasAvailable(group, student.id);
+    const premiosDec = state.premios.filter(p=> p.type === 'decimas');
+    const premiosOtros = state.premios.filter(p=> p.type !== 'decimas');
     html = `
       <div class="scan-student">
         <div>
           <div class="scan-student-name">${escapeHtml(student.name)}</div>
-          <div class="muted">${escapeHtml(group.name)}</div>
+          <div class="muted">${escapeHtml(group.name)}${student.cardAlias ? ' · “' + escapeHtml(student.cardAlias) + '”' : ''}</div>
         </div>
         <div class="scan-balance">
           <div class="scan-balance-num">${disponible}</div>
-          <div class="muted" style="font-size:0.72rem;">disponibles</div>
+          <div class="muted" style="font-size:0.72rem;">puntos</div>
         </div>
       </div>
-      <div class="muted" style="font-size:0.78rem; margin-top:4px;">Acumuladas ${total} · aplicadas a notas ${aplicadas} · canjeadas ${canjeadas}</div>
+      <div class="muted" style="font-size:0.78rem; margin-top:4px;">Puntos ganados ${total} · canjeados ${canjeados} · décimas disponibles ${decimasDisp}</div>
       <div class="scan-flash" id="scanFlash"></div>
 
-      <p class="scan-section-label">Asignar rápido</p>
+      <p class="scan-section-label">Asignar puntos</p>
       <div class="scan-chip-row">
-        ${SCAN_QUICK_AMOUNTS.map(n=> `<button class="btn btn-accent scan-big-btn" onclick="assignScanDecimas(${n}, null)">+${n}</button>`).join('')}
+        ${SCAN_QUICK_AMOUNTS.map(n=> `<button class="btn btn-accent scan-big-btn" onclick="assignScanPuntos(${n}, null)">+${n}</button>`).join('')}
       </div>
       <p class="scan-section-label">Por motivo</p>
       <div class="scan-chip-row">
-        ${state.decimaMotivos.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin motivos. Agrégalos en 🎁 Premios.</span>' :
-          state.decimaMotivos.map(m=> `<button class="btn btn-outline btn-sm" onclick="assignScanDecimasMotivo('${m.id}')">${escapeHtml(m.name)} <strong>${m.value > 0 ? '+' : ''}${m.value}</strong></button>`).join('')}
+        ${state.decimaMotivos.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin motivos. Agrégalos en ⭐ Puntos.</span>' :
+          state.decimaMotivos.map(m=> `<button class="btn btn-outline btn-sm" onclick="assignScanPuntosMotivo('${m.id}')">${escapeHtml(m.name)} <strong>${m.value > 0 ? '+' : ''}${m.value}</strong></button>`).join('')}
       </div>
 
-      <p class="scan-section-label">Canjear</p>
+      <p class="scan-section-label">Canjear por décimas</p>
       <div class="scan-chip-row">
-        ${state.premios.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin premios en el catálogo. Agrégalos en 🎁 Premios.</span>' :
-          state.premios.map(p=>{
-            const alcanza = disponible >= p.cost;
-            return `<button class="btn ${alcanza ? 'btn-outline' : 'btn-outline scan-disabled'} btn-sm" ${alcanza ? '' : 'disabled'} onclick="canjearPremioScan('${p.id}')">🎁 ${escapeHtml(p.name)} · ${p.cost}</button>`;
-          }).join('')}
-        <button class="btn btn-ink btn-sm" onclick="openStudentDetail('${student.id}')">🎯 Aplicar a una nota / ver ficha</button>
+        ${premiosDec.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin opciones de décimas. Agrégalas en ⭐ Puntos.</span>' : premiosDec.map(p=> premioButtonHtml(p, disponible)).join('')}
+      </div>
+      <p class="scan-section-label">Canjear por premios</p>
+      <div class="scan-chip-row">
+        ${premiosOtros.length === 0 ? '<span class="muted" style="font-size:0.8rem;">Sin premios en el catálogo. Agrégalos en ⭐ Puntos.</span>' : premiosOtros.map(p=> premioButtonHtml(p, disponible)).join('')}
+      </div>
+      <div class="scan-chip-row" style="margin-top:10px;">
+        <button class="btn btn-ink btn-sm" onclick="openStudentDetail('${student.id}')">🎯 Aplicar décimas a una nota / ver ficha</button>
       </div>
     `;
   }
@@ -4431,7 +4742,7 @@ function renderScanResult(){
       <p class="scan-section-label">Últimos movimientos</p>
       ${scanLog.map(l=> `
         <div class="stat-row">
-          <span style="font-size:0.85rem;">${new Date(l.time).toTimeString().slice(0,5)} · <strong>${escapeHtml(l.studentName)}</strong> · ${l.type === 'canje' ? '🎁 ' + escapeHtml(l.note) + ' (−' + Math.abs(l.amount) + ')' : (l.amount > 0 ? '+' : '') + l.amount + ' · ' + escapeHtml(l.note)}</span>
+          <span style="font-size:0.85rem;">${new Date(l.time).toTimeString().slice(0,5)} · <strong>${escapeHtml(l.studentName)}</strong> · ${l.type === 'canje' ? 'Canje: ' + escapeHtml(l.note) + ' (−' + Math.abs(l.amount) + ' pts)' : (l.amount > 0 ? '+' : '') + l.amount + ' pts · ' + escapeHtml(l.note)}</span>
           <button class="btn btn-outline btn-sm" onclick="undoScanLog('${l.id}')">↩️ Deshacer</button>
         </div>`).join('')}
     `;
@@ -4447,7 +4758,7 @@ function renderEscanear(group){
   const main = document.getElementById('main');
   const autoOptions = [
     ['', 'Mostrar opciones para elegir'],
-    ...SCAN_QUICK_AMOUNTS.map(n=> ['q:' + n, `Asignar +${n} automáticamente`]),
+    ...SCAN_QUICK_AMOUNTS.map(n=> ['q:' + n, `Asignar +${n} punto(s) automáticamente`]),
     ...state.decimaMotivos.map(m=> ['m:' + m.id, `Asignar "${m.name}" (${m.value > 0 ? '+' : ''}${m.value}) automáticamente`]),
   ];
   if(!autoOptions.some(o=> o[0] === scanAutoAction)) scanAutoAction = '';
@@ -4466,7 +4777,7 @@ function renderEscanear(group){
       <select id="scanAutoSelect" onchange="setScanAutoAction(this.value)">
         ${autoOptions.map(o=> `<option value="${escapeHtml(o[0])}" ${o[0] === scanAutoAction ? 'selected' : ''}>${escapeHtml(o[1])}</option>`).join('')}
       </select>
-      <p class="muted" id="scanAutoHint" style="font-size:0.78rem; margin-top:4px; display:${scanAutoAction ? 'block' : 'none'};">Modo ráfaga: cada tarjeta escaneada suma de inmediato. Puedes deshacer abajo si te equivocas.</p>
+      <p class="muted" id="scanAutoHint" style="font-size:0.78rem; margin-top:4px; display:${scanAutoAction ? 'block' : 'none'};">Modo ráfaga: cada tarjeta escaneada suma puntos de inmediato. Puedes deshacer abajo si te equivocas.</p>
       <div class="grid-2" style="margin-top:10px;">
         <div>
           <label>Sin cámara: código de la tarjeta</label>
@@ -4486,14 +4797,21 @@ function renderEscanear(group){
   if(qrScanner.wanted) startQrScanner();
 }
 
-/* ---- Pestaña Premios: catálogo, motivos, tarjetas y canjes ---- */
-function addPremio(){
-  const name = document.getElementById('premioNewName').value.trim();
-  const cost = Number(document.getElementById('premioNewCost').value);
-  if(!name){ showToast('Escribe el nombre del premio'); return; }
-  if(!cost || cost <= 0){ showToast('El costo debe ser mayor que 0'); return; }
+/* ---- Pestaña Puntos: saldos, tarjetas, catálogo, motivos y canjes ---- */
+function addPremio(type){
+  const pre = type === 'decimas' ? 'premioDec' : 'premioNew';
+  const cost = Math.round(Number(document.getElementById(pre + 'Cost').value));
+  if(!cost || cost <= 0){ showToast('El costo en puntos debe ser mayor que 0'); return; }
   ensureRewardsConfig();
-  state.premios.push({ id: uid(), name, cost: Math.round(cost) });
+  if(type === 'decimas'){
+    const dec = Math.round(Number(document.getElementById('premioDecAmount').value));
+    if(!dec || dec <= 0){ showToast('Indica cuántas décimas entrega'); return; }
+    state.premios.push({ id: uid(), name: `${dec} décima${dec === 1 ? '' : 's'}`, cost, type:'decimas', decimas: dec });
+  } else {
+    const name = document.getElementById('premioNewName').value.trim();
+    if(!name){ showToast('Escribe el nombre del premio'); return; }
+    state.premios.push({ id: uid(), name, cost, type:'premio' });
+  }
   saveState();
   renderPremios(getActiveGroup());
 }
@@ -4502,10 +4820,11 @@ function updatePremio(id, field, value){
   if(!p) return;
   if(field === 'name'){ const v = String(value).trim(); if(v) p.name = v; }
   if(field === 'cost'){ const n = Math.round(Number(value)); if(n > 0) p.cost = n; }
+  if(field === 'decimas'){ const n = Math.round(Number(value)); if(n > 0){ p.decimas = n; p.name = `${n} décima${n === 1 ? '' : 's'}`; } }
   saveState();
 }
 function deletePremio(id){
-  if(!confirm('¿Quitar este premio del catálogo? Los canjes ya hechos se conservan.')) return;
+  if(!confirm('¿Quitar esta opción del catálogo? Los canjes ya hechos se conservan.')) return;
   state.premios = (state.premios || []).filter(p=> p.id !== id);
   saveState();
   renderPremios(getActiveGroup());
@@ -4514,7 +4833,7 @@ function addMotivo(){
   const name = document.getElementById('motivoNewName').value.trim();
   const value = Number(document.getElementById('motivoNewValue').value);
   if(!name){ showToast('Escribe el nombre del motivo'); return; }
-  if(!value){ showToast('Las décimas deben ser distintas de 0'); return; }
+  if(!value){ showToast('Los puntos deben ser distintos de 0'); return; }
   ensureRewardsConfig();
   state.decimaMotivos.push({ id: uid(), name, value: Math.round(value) });
   saveState();
@@ -4528,7 +4847,7 @@ function updateMotivo(id, field, value){
   saveState();
 }
 function deleteMotivo(id){
-  if(!confirm('¿Quitar este motivo? Las décimas ya asignadas se conservan.')) return;
+  if(!confirm('¿Quitar este motivo? Los puntos ya asignados se conservan.')) return;
   state.decimaMotivos = (state.decimaMotivos || []).filter(m=> m.id !== id);
   saveState();
   renderPremios(getActiveGroup());
@@ -4538,11 +4857,12 @@ function revertCanje(canjeId){
   const c = (group.canjes || []).find(x=> x.id === canjeId);
   if(!c) return;
   const st = group.students.find(s=> s.id === c.studentId);
-  if(!confirm(`¿Revertir el canje "${c.name}"${st ? ' de ' + st.name : ''}? Se le devuelven ${c.cost} décimas.`)) return;
-  group.canjes = group.canjes.filter(x=> x.id !== canjeId);
+  const extra = c.type === 'decimas' ? ` y se le quitan las ${c.decimas} décima(s) del canje` : '';
+  if(!confirm(`¿Revertir el canje "${c.name}"${st ? ' de ' + st.name : ''}? Se le devuelven ${c.cost} puntos${extra}.`)) return;
+  if(!revertCanjeData(group, canjeId)) return;
   saveState();
   renderPremios(group);
-  showToast('Canje revertido — las décimas volvieron a estar disponibles');
+  showToast('Canje revertido');
 }
 function regenerateStudentCard(studentId){
   const group = getActiveGroup();
@@ -4554,6 +4874,56 @@ function regenerateStudentCard(studentId){
   renderPremios(group);
   showToast('Código nuevo generado: ' + s.card);
 }
+function updateStudentAlias(studentId, value){
+  const group = getActiveGroup();
+  const s = group.students.find(x=> x.id === studentId);
+  if(!s) return;
+  s.cardAlias = String(value || '').trim().slice(0, 40);
+  saveState();
+}
+
+function puntosExportData(group){
+  const resumen = group.students.map(s=> [s.name, computeStudentPuntosTotal(group, s.id), computeStudentPuntosRedeemed(group, s.id), computeStudentPuntosAvailable(group, s.id)]);
+  const movimientos = [];
+  getActivePuntos(group).slice().sort((a,b)=> (a.date||'').localeCompare(b.date||'')).forEach(d=>{
+    group.students.forEach(s=>{
+      const v = d.values ? d.values[s.id] : null;
+      if(v) movimientos.push([formatDate(d.date), d.note || '', s.name, v]);
+    });
+  });
+  const nameOf = id=> (group.students.find(s=> s.id === id) || {}).name || '(estudiante eliminado)';
+  const canjes = getActiveCanjes(group).slice().sort((a,b)=> ((a.date||'') + (a.time||'')).localeCompare((b.date||'') + (b.time||'')))
+    .map(c=> [formatDate(c.date) + (c.time ? ' ' + c.time : ''), nameOf(c.studentId), c.name, c.cost, c.type === 'decimas' ? c.decimas : '']);
+  return { resumen, movimientos, canjes };
+}
+async function exportPuntosToExcel(group){
+  if(typeof ExcelJS === 'undefined'){ showToast('Se necesita conexión a internet para exportar esta hoja.'); return; }
+  const { resumen, movimientos, canjes } = puntosExportData(group);
+  const wb = new ExcelJS.Workbook();
+  const addSheet = (name, headers, rows, widths)=>{
+    const ws = wb.addWorksheet(name);
+    ws.addRow(headers).font = { bold:true };
+    rows.forEach(r=> ws.addRow(r));
+    widths.forEach((w, i)=> ws.getColumn(i+1).width = w);
+  };
+  addSheet('Puntos', ['Estudiante','Ganados','Canjeados','Disponibles'], resumen, [28,12,12,12]);
+  addSheet('Movimientos', ['Fecha','Motivo','Estudiante','Puntos'], movimientos, [14,26,28,10]);
+  addSheet('Canjes', ['Fecha','Estudiante','Canje','Puntos','Décimas recibidas'], canjes, [18,28,32,10,16]);
+  await downloadWorkbook(wb, `puntos_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('Puntos exportados');
+}
+async function exportPuntosToWord(group){
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para exportar a Word.'); return; }
+  const { resumen, canjes } = puntosExportData(group);
+  let body = wordHeading(`Puntos - ${group.name}`, 32);
+  body += wordTable(['Estudiante','Ganados','Canjeados','Disponibles'], resumen.map(r=> r.map(String)), [3600,1500,1500,1500]);
+  if(canjes.length){
+    body += wordHeading('Canjes', 24);
+    body += wordTable(['Fecha','Estudiante','Canje','Puntos','Décimas'], canjes.map(r=> r.map(String)), [1700,2500,2600,900,900]);
+  }
+  await buildAndDownloadDocx(body, `puntos_${safeFileName(group.name)}_${new Date().toISOString().slice(0,10)}.docx`);
+  showToast('Puntos exportados a Word');
+}
 
 function renderPremios(group){
   ensureRewardsConfig();
@@ -4561,30 +4931,59 @@ function renderPremios(group){
   const main = document.getElementById('main');
   const canjes = getActiveCanjes(group).slice().sort((a,b)=> ((b.date||'') + (b.time||'')).localeCompare((a.date||'') + (a.time||'')));
   const studentName = id=> (group.students.find(s=> s.id === id) || {}).name || '(estudiante eliminado)';
+  const premiosDec = state.premios.filter(p=> p.type === 'decimas');
+  const premiosOtros = state.premios.filter(p=> p.type !== 'decimas');
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
-      <h2>Tarjetas QR</h2>
-      <p class="muted">Cada estudiante tiene un código único. Imprime las tarjetas (tamaño carta, 8 por hoja, en blanco y negro) y escanéalas en 📷 Escanear.</p>
-      <div class="row" style="gap:6px; margin-bottom:10px;">
-        <button class="btn btn-accent btn-sm" onclick="printStudentCards(['${group.id}'])">🖨️ Tarjetas de ${escapeHtml(group.name)}</button>
-        <button class="btn btn-outline btn-sm" onclick="printStudentCards(state.groups.map(g=>g.id))">🖨️ Tarjetas de todos los cursos</button>
-        <button class="btn btn-ink btn-sm" onclick="goToTab('escanear')">📷 Ir a escanear</button>
+      <div class="flex-between">
+        <h2 style="border:none; margin-bottom:0; padding-bottom:0;">Puntos por estudiante</h2>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="exportPuntosToExcel(getActiveGroup())">⬇️ Excel</button>
+          <button class="btn btn-outline btn-sm" onclick="exportPuntosToWord(getActiveGroup())">⬇️ Word</button>
+        </div>
       </div>
+      <p class="muted">Los puntos se asignan escaneando la tarjeta y se canjean por premios o por décimas. Las décimas canjeadas aparecen en Décimas como "${CANJE_DECIMAS_NOTE}".</p>
       ${group.students.length === 0 ? '<div class="empty-state">Este curso no tiene estudiantes.</div>' : `
+      <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Estudiante</th><th>Ganados</th><th>Canjeados</th><th>Disponibles</th></tr></thead>
+        <tbody>
+          ${group.students.map(s=> `
+            <tr>
+              <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
+              <td>${computeStudentPuntosTotal(group, s.id)}</td>
+              <td class="muted">${computeStudentPuntosRedeemed(group, s.id)}</td>
+              <td class="avg-badge" style="color:var(--success);">${computeStudentPuntosAvailable(group, s.id)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>`}
+      <div class="row" style="margin-top:10px;"><button class="btn btn-ink btn-sm" onclick="goToTab('escanear')">📷 Ir a escanear</button></div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Tarjetas QR</h2>
+      <p class="muted">Diseña e imprime las tarjetas: tamaño, logo, título, marco de color, espacio para dibujar y apodo.</p>
+      <div class="row" style="gap:6px; margin-bottom:10px;">
+        <button class="btn btn-accent btn-sm" onclick="openCardDesigner(['${group.id}'])">🎨 Tarjetas de ${escapeHtml(group.name)}</button>
+        <button class="btn btn-outline btn-sm" onclick="openCardDesigner(state.groups.map(g=>g.id))">🎨 Tarjetas de todos los cursos</button>
+      </div>
+      ${group.students.length === 0 ? '' : `
       <details>
-        <summary style="cursor:pointer; font-weight:600;">Ver códigos por estudiante (${group.students.length})</summary>
+        <summary style="cursor:pointer; font-weight:600;">Códigos y apodos por estudiante (${group.students.length})</summary>
+        <p class="muted" style="font-size:0.78rem;">El apodo o frase lo elige cada estudiante y aparece impreso en su tarjeta (máx. 40 caracteres).</p>
         <div style="overflow-x:auto;">
         <table>
-          <thead><tr><th>Estudiante</th><th>Código</th><th>Disponibles</th><th></th></tr></thead>
+          <thead><tr><th>Estudiante</th><th>Código</th><th>Apodo o frase</th><th></th></tr></thead>
           <tbody>
             ${group.students.map(s=> `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
                 <td style="font-family:monospace; font-weight:700;">${s.card}</td>
-                <td>${computeStudentDecimasAvailable(group, s.id)}</td>
+                <td><input type="text" maxlength="40" value="${escapeHtml(s.cardAlias || '')}" placeholder="Opcional" style="min-width:120px;" onchange="updateStudentAlias('${s.id}', this.value)"></td>
                 <td style="white-space:nowrap;">
-                  <button class="btn btn-outline btn-sm" title="Imprimir solo esta tarjeta" onclick="printStudentCards(['${group.id}'], '${s.id}')">🖨️</button>
+                  <button class="btn btn-outline btn-sm" title="Imprimir solo esta tarjeta" onclick="openCardDesigner(['${group.id}'], '${s.id}')">🖨️</button>
                   <button class="btn btn-outline btn-sm" title="Código nuevo (tarjeta perdida)" onclick="regenerateStudentCard('${s.id}')">🔄</button>
                 </td>
               </tr>`).join('')}
@@ -4595,33 +4994,52 @@ function renderPremios(group){
     </div>
 
     <div class="card app-font">
-      <h2>Catálogo de premios</h2>
-      <p class="muted">Es el mismo para todos tus cursos. Los cambios se guardan al salir de cada casilla.</p>
-      ${state.premios.map(p=> `
-        <div class="row" style="gap:6px; margin-bottom:6px; flex-wrap:nowrap;">
-          <input type="text" value="${escapeHtml(p.name)}" style="flex:1; min-width:0;" onchange="updatePremio('${p.id}','name',this.value)">
-          <input type="number" value="${p.cost}" min="1" step="1" style="width:80px;" title="Costo en décimas" onchange="updatePremio('${p.id}','cost',this.value)">
+      <h2>Canje por décimas</h2>
+      <p class="muted">Cuántos puntos cuesta cada paquete de décimas. Es el mismo para todos tus cursos.</p>
+      ${premiosDec.map(p=> `
+        <div class="row" style="gap:6px; margin-bottom:6px; flex-wrap:nowrap; align-items:center;">
+          <input type="number" value="${p.decimas}" min="1" step="1" style="width:70px;" title="Décimas que entrega" onchange="updatePremio('${p.id}','decimas',this.value)">
+          <span class="muted" style="white-space:nowrap;">décima(s) por</span>
+          <input type="number" value="${p.cost}" min="1" step="1" style="width:70px;" title="Costo en puntos" onchange="updatePremio('${p.id}','cost',this.value)">
+          <span class="muted" style="flex:1;">puntos</span>
           <button class="btn btn-danger btn-sm" onclick="deletePremio('${p.id}')">✕</button>
-        </div>`).join('') || '<div class="empty-state">Sin premios todavía.</div>'}
-      <div class="row" style="gap:6px; margin-top:10px; flex-wrap:nowrap;">
-        <input type="text" id="premioNewName" placeholder="Nuevo premio" style="flex:1; min-width:0;">
-        <input type="number" id="premioNewCost" placeholder="Costo" min="1" step="1" style="width:80px;">
-        <button class="btn btn-accent btn-sm" onclick="addPremio()">+ Agregar</button>
+        </div>`).join('') || '<div class="empty-state">Sin opciones de décimas.</div>'}
+      <div class="row" style="gap:6px; margin-top:10px; flex-wrap:nowrap; align-items:center;">
+        <input type="number" id="premioDecAmount" placeholder="Déc." min="1" step="1" style="width:70px;">
+        <span class="muted" style="white-space:nowrap;">por</span>
+        <input type="number" id="premioDecCost" placeholder="Pts" min="1" step="1" style="width:70px;">
+        <button class="btn btn-accent btn-sm" onclick="addPremio('decimas')">+ Agregar</button>
       </div>
     </div>
 
     <div class="card app-font">
-      <h2>Motivos para asignar décimas</h2>
-      <p class="muted">Aparecen como botones al escanear. Lo asignado queda en Décimas, agrupado por fecha y motivo.</p>
+      <h2>Catálogo de premios</h2>
+      <p class="muted">Costo en puntos. Es el mismo para todos tus cursos; los cambios se guardan al salir de cada casilla.</p>
+      ${premiosOtros.map(p=> `
+        <div class="row" style="gap:6px; margin-bottom:6px; flex-wrap:nowrap;">
+          <input type="text" value="${escapeHtml(p.name)}" style="flex:1; min-width:0;" onchange="updatePremio('${p.id}','name',this.value)">
+          <input type="number" value="${p.cost}" min="1" step="1" style="width:80px;" title="Costo en puntos" onchange="updatePremio('${p.id}','cost',this.value)">
+          <button class="btn btn-danger btn-sm" onclick="deletePremio('${p.id}')">✕</button>
+        </div>`).join('') || '<div class="empty-state">Sin premios todavía.</div>'}
+      <div class="row" style="gap:6px; margin-top:10px; flex-wrap:nowrap;">
+        <input type="text" id="premioNewName" placeholder="Nuevo premio" style="flex:1; min-width:0;">
+        <input type="number" id="premioNewCost" placeholder="Pts" min="1" step="1" style="width:80px;">
+        <button class="btn btn-accent btn-sm" onclick="addPremio('premio')">+ Agregar</button>
+      </div>
+    </div>
+
+    <div class="card app-font">
+      <h2>Motivos para asignar puntos</h2>
+      <p class="muted">Aparecen como botones al escanear.</p>
       ${state.decimaMotivos.map(m=> `
         <div class="row" style="gap:6px; margin-bottom:6px; flex-wrap:nowrap;">
           <input type="text" value="${escapeHtml(m.name)}" style="flex:1; min-width:0;" onchange="updateMotivo('${m.id}','name',this.value)">
-          <input type="number" value="${m.value}" step="1" style="width:80px;" title="Décimas" onchange="updateMotivo('${m.id}','value',this.value)">
+          <input type="number" value="${m.value}" step="1" style="width:80px;" title="Puntos" onchange="updateMotivo('${m.id}','value',this.value)">
           <button class="btn btn-danger btn-sm" onclick="deleteMotivo('${m.id}')">✕</button>
         </div>`).join('') || '<div class="empty-state">Sin motivos todavía.</div>'}
       <div class="row" style="gap:6px; margin-top:10px; flex-wrap:nowrap;">
         <input type="text" id="motivoNewName" placeholder="Nuevo motivo" style="flex:1; min-width:0;">
-        <input type="number" id="motivoNewValue" placeholder="Décimas" step="1" style="width:80px;">
+        <input type="number" id="motivoNewValue" placeholder="Pts" step="1" style="width:80px;">
         <button class="btn btn-accent btn-sm" onclick="addMotivo()">+ Agregar</button>
       </div>
     </div>
@@ -4631,13 +5049,13 @@ function renderPremios(group){
       ${canjes.length === 0 ? '<div class="empty-state">Aún no hay canjes en este curso.</div>' : `
       <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Fecha</th><th>Estudiante</th><th>Premio</th><th>Décimas</th><th></th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Estudiante</th><th>Canje</th><th>Puntos</th><th></th></tr></thead>
         <tbody>
           ${canjes.map(c=> `
             <tr>
               <td style="white-space:nowrap;">${formatDate(c.date)}${c.time ? ' ' + c.time : ''}</td>
               <td>${escapeHtml(studentName(c.studentId))}</td>
-              <td>${escapeHtml(c.name)}</td>
+              <td>${c.type === 'decimas' ? '➕ ' : '🎁 '}${escapeHtml(c.name)}</td>
               <td>−${c.cost}</td>
               <td><button class="btn btn-outline btn-sm" onclick="revertCanje('${c.id}')">↩️</button></td>
             </tr>`).join('')}
@@ -6921,10 +7339,10 @@ function addDecimasSheet(workbook, group){
     totalCell.value = computeStudentDecimasTotal(group, student.id);
     totalCell.font = { bold:true, color:{argb:'FF6C4EE3'} };
     totalCell.alignment = { horizontal:'center' };
-    [computeStudentDecimasApplied(group, student.id), computeStudentDecimasRedeemed(group, student.id), computeStudentDecimasAvailable(group, student.id)]
+    [computeStudentDecimasApplied(group, student.id), computeStudentDecimasAvailable(group, student.id)]
       .forEach((v, k)=>{ const cell = ws.getCell(rowNum, totalCol + 1 + k); cell.value = v; cell.alignment = { horizontal:'center' }; });
   });
-  ['Aplicadas a notas','Canjeadas','Restantes'].forEach((t, k)=>{
+  ['Aplicadas a notas','Restantes'].forEach((t, k)=>{
     const cell = ws.getCell(1, totalCol + 1 + k);
     cell.value = t;
     cell.font = { bold:true, color:{argb:'FFFFFFFF'} };
@@ -6932,7 +7350,7 @@ function addDecimasSheet(workbook, group){
     cell.alignment = { wrapText:true, horizontal:'center' };
   });
   ws.getColumn(1).width = 24;
-  for(let c=2; c<=totalCol + 3; c++){ ws.getColumn(c).width = 14; }
+  for(let c=2; c<=totalCol + 2; c++){ ws.getColumn(c).width = 14; }
   return true;
 }
 async function exportDecimasToExcel(group){
