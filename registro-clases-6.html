@@ -5507,7 +5507,10 @@ function renderPremios(group){
   };
   const byTab = { premios: sec.saldos, catalogo: sec.catalogo, tarjetas: sec.tarjetas, portal: sec.portal, consulta: sec.consulta };
   main.innerHTML = groupHeaderCard(group) + byTab[currentTab];
-  if(currentTab === 'portal' && ensurePortalConfig().enabled) checkPublishedPortal();
+  if(currentTab === 'portal' && ensurePortalConfig().enabled){
+    if(Date.now() - portalJustPublishedAt > 90000) checkPublishedPortal();
+    else setPortalPublishStatus('✅ Publicado. Estará visible para los estudiantes en 1 o 2 minutos.');
+  }
 }
 
 /* ============ MODO CONSULTA (el estudiante escanea su tarjeta y ve sus puntos) ============ */
@@ -6581,37 +6584,17 @@ function buildPortalPayload(group, s){
 
 async function generatePortalFile(){
   if(!window.crypto || !crypto.subtle){ showToast('Para generar el archivo abre la app desde su dirección https (GitHub Pages).'); return; }
-  ensureRewardsConfig();
-  ensureAllCards();
-  ensureWebTokens();
   const p = ensurePortalConfig();
   try{
     showToastQuick('Generando y cifrando los registros…');
-    const entries = {};
-    let count = 0;
-    // Un registro por tarjeta: si el estudiante está vinculado en varios cursos, lleva todas sus asignaturas
-    const byToken = new Map();
-    for(const g of state.groups){
-      for(const s of (g.students || [])){
-        if(!byToken.has(s.webToken)) byToken.set(s.webToken, []);
-        byToken.get(s.webToken).push({ g, s });
-      }
-    }
-    for(const [token, recs] of byToken){
-      const cursos = recs.map(({ g, s })=> buildPortalPayload(g, s));
-      const payload = { v: 2, nombre: recs[0].s.name, generado: new Date().toISOString(), cursos };
-      const [id, enc] = await encryptForToken(token, payload);
-      entries[id] = enc;
-      count++;
-    }
-    const data = { v: 2, generado: new Date().toISOString(), estudiantes: count, entries };
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const { json, count, generado } = await buildPortalDataJson();
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = portalDataFileName();
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    p.lastGenerated = data.generado;
+    p.lastGenerated = generado;
     saveState();
     if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
     showToast(`Archivo ${portalDataFileName()} generado (${count} estudiantes). Súbelo al repositorio reemplazando el anterior.`);
@@ -6625,18 +6608,22 @@ async function generatePortalFile(){
 async function checkPublishedPortal(){
   const el = document.getElementById('portalPublishedStatus');
   if(!el) return;
-  if(!portalDefaultUrl()){ el.textContent = 'No se puede revisar desde aquí (abre la app desde su dirección web).'; return; }
+  // Revisa la carpeta donde está la página de consulta (puede ser el sitio de la app o el de cada profesor)
+  const pageUrl = portalBaseUrl();
+  if(!pageUrl){ el.textContent = 'Indica la dirección de la página de consulta para poder revisar lo publicado.'; return; }
+  const folder = pageUrl.replace(/[^/]*$/, '');
   el.textContent = 'Revisando el sitio…';
   const fmt = iso=>{ const d = new Date(iso); return formatDate(toISODate(d)) + ' ' + d.toTimeString().slice(0,5); };
   let pageOk = false;
-  try{ const r = await fetch(PORTAL_PAGE + '?_=' + Date.now(), { cache: 'no-store' }); pageOk = r.ok; }catch(e){}
+  try{ const r = await fetch(pageUrl + '?_=' + Date.now(), { cache: 'no-store' }); pageOk = r.ok; }catch(e){}
+  const pageMsg = pageOk ? '✅ Página de consulta publicada' : '⚠️ No se encontró <strong>consulta.html</strong> en ' + escapeHtml(folder);
   try{
-    const r = await fetch(portalDataFileName() + '?_=' + Date.now(), { cache: 'no-store' });
+    const r = await fetch(folder + portalDataFileName() + '?_=' + Date.now(), { cache: 'no-store' });
     if(!r.ok) throw new Error('no');
     const j = await r.json();
-    el.innerHTML = `${pageOk ? '✅ Página de consulta publicada' : '⚠️ Falta subir <strong>consulta.html</strong>'} · Datos publicados: <strong>${fmt(j.generado)}</strong> (${j.estudiantes} estudiantes)`;
+    el.innerHTML = `${pageMsg} · Datos publicados: <strong>${fmt(j.generado)}</strong> (${j.estudiantes} estudiantes)`;
   }catch(e){
-    el.innerHTML = `${pageOk ? '✅ Página de consulta publicada' : '⚠️ Falta subir <strong>consulta.html</strong>'} · ⚠️ Aún no hay datos publicados (<strong>${escapeHtml(portalDataFileName())}</strong>)`;
+    el.innerHTML = `${pageMsg} · ⚠️ Aún no hay datos publicados (<strong>${escapeHtml(portalDataFileName())}</strong>)`;
   }
 }
 
@@ -6686,15 +6673,17 @@ function portalCardHtml(group){
           Publicar la bitácora (solo registros dirigidos a ese estudiante)
         </label>
         <ol class="muted" style="font-size:0.85rem; line-height:1.5; margin:10px 0 6px; padding-left:20px;">
-          <li><strong>Una sola vez:</strong> sube <strong>consulta.html</strong> al repositorio, junto a la app.</li>
-          <li>Imprime las tarjetas de nuevo (su QR ahora abre el portal).</li>
-          <li><strong>Cada vez que quieras actualizar:</strong> genera el archivo y súbelo al repositorio reemplazando el anterior. Los estudiantes verán los datos hasta esa fecha.</li>
+          <li><strong>Una sola vez:</strong> sube <strong>consulta.html</strong> al repositorio y conecta GitHub con el botón 🔑.</li>
+          <li>Imprime las tarjetas (su QR abre el portal).</li>
+          <li><strong>Cada vez que quieras actualizar:</strong> presiona <strong>🚀 Publicar ahora</strong>. Los estudiantes verán los datos hasta ese momento.</li>
         </ol>
         <div class="row" style="gap:6px; margin-top:6px;">
-          <button class="btn btn-accent btn-sm" onclick="generatePortalFile()">⬇️ Generar ${escapeHtml(portalDataFileName())}</button>
+          <button class="btn btn-accent" onclick="publishPortalNow()">🚀 Publicar ahora</button>
+          <button class="btn btn-outline btn-sm" onclick="openGhSetup()">🔑 ${ghReady() ? 'GitHub conectado' : 'Conectar GitHub'}</button>
           <button class="btn btn-outline btn-sm" onclick="checkPublishedPortal()">🔎 Revisar lo publicado</button>
         </div>
-        <p class="muted" style="font-size:0.8rem; margin:8px 0 0;">Último archivo generado: ${p.lastGenerated ? fmt(p.lastGenerated) : 'nunca'} · Datos del periodo seleccionado en la app.</p>
+        <p class="muted" style="font-size:0.78rem; margin:6px 0 0;">${ghReady() ? `Publica en <strong>${escapeHtml(ghConfig().owner)}/${escapeHtml(ghConfig().repo)}</strong>${ghConfig().folder ? ' · carpeta ' + escapeHtml(ghConfig().folder) : ''}.` : 'Sin conectar GitHub en este dispositivo: el botón 🚀 te pedirá la llave de acceso.'} ¿Prefieres hacerlo a mano? <a href="#" onclick="generatePortalFile(); return false;">Descargar ${escapeHtml(portalDataFileName())}</a> y súbelo tú.</p>
+        <p class="muted" style="font-size:0.8rem; margin:8px 0 0;">Última publicación desde la app: ${p.lastPublished ? fmt(p.lastPublished) : 'nunca'} · Datos del periodo seleccionado en la app.</p>
         <p class="muted" id="portalPublishedStatus" style="font-size:0.8rem; margin:4px 0 0;"></p>
         <details style="margin-top:8px;">
           <summary style="cursor:pointer; font-size:0.85rem; font-weight:600;">Dirección de la página de consulta</summary>
@@ -6897,6 +6886,223 @@ function linkedCardHtml(){
         <span class="muted" style="font-size:0.82rem;">${persons} estudiante(s) con tarjeta compartida</span>
       </div>
     </div>`;
+}
+
+/* ============ PUBLICACIÓN DIRECTA EN GITHUB (botón "Publicar ahora") ============ */
+/* Sube datos-<id>.json al repositorio con la API de GitHub, usando una llave de acceso (token)
+   limitada a ese repositorio. La llave se guarda solo en este dispositivo (no se sincroniza ni va en respaldos). */
+function ghTokenKey(){ return 'gh_portal_token::' + (localStorage.getItem('gdrive_email') || 'local'); }
+function getGhToken(){ try{ return localStorage.getItem(ghTokenKey()) || ''; }catch(e){ return ''; } }
+function setGhToken(t){ try{ if(t) localStorage.setItem(ghTokenKey(), t); else localStorage.removeItem(ghTokenKey()); }catch(e){} }
+
+/* Deduce usuario, repositorio y carpeta desde la dirección de la página de consulta (https://usuario.github.io/repo/…/consulta.html) */
+function guessGhRepoFromUrl(url){
+  const m = String(url || '').match(/^https:\/\/([A-Za-z0-9-]+)\.github\.io\/(.*)$/i);
+  if(!m) return null;
+  const owner = m[1];
+  const segs = m[2].split(/[?#]/)[0].split('/').filter(Boolean);
+  segs.pop(); // quita consulta.html
+  if(segs.length === 0) return { owner, repo: owner + '.github.io', folder: '' };
+  return { owner, repo: segs[0], folder: segs.slice(1).join('/') };
+}
+function ghConfig(){
+  const p = ensurePortalConfig();
+  const guess = guessGhRepoFromUrl(portalBaseUrl()) || {};
+  const gh = p.github || {};
+  return {
+    owner: (gh.owner || guess.owner || '').trim(),
+    repo: (gh.repo || guess.repo || '').trim(),
+    branch: (gh.branch || '').trim(),
+    folder: (gh.folder !== undefined && gh.folder !== null ? gh.folder : (guess.folder || '')).trim().replace(/^\/+|\/+$/g, ''),
+  };
+}
+function ghReady(){ const c = ghConfig(); return !!(getGhToken() && c.owner && c.repo); }
+
+async function ghApi(path, opts){
+  const res = await fetch('https://api.github.com' + path, {
+    ...(opts || {}),
+    headers: { 'Accept': 'application/vnd.github+json', 'Authorization': 'Bearer ' + getGhToken(), 'X-GitHub-Api-Version': '2022-11-28', ...((opts && opts.headers) || {}) },
+  });
+  let body = null;
+  try{ body = await res.json(); }catch(e){}
+  return { res, body };
+}
+function ghErrorMessage(res, body){
+  const msg = (body && body.message) || '';
+  if(res.status === 401) return 'GitHub no aceptó la llave (puede estar mal copiada o vencida). Crea una nueva y pégala en "Conectar GitHub".';
+  if(res.status === 403) return 'La llave no tiene permiso para escribir en el repositorio. Revisa que tenga "Contents: Read and write".';
+  if(res.status === 404) return 'No se encontró el repositorio o la llave no tiene acceso a él. Revisa usuario, repositorio y que la llave incluya ese repositorio.';
+  return 'Error de GitHub (' + res.status + ')' + (msg ? ': ' + msg : '');
+}
+
+/* Arma el archivo de datos cifrado (el mismo que se descarga a mano) */
+async function buildPortalDataJson(){
+  ensureRewardsConfig();
+  ensureAllCards();
+  ensureWebTokens();
+  const entries = {};
+  let count = 0;
+  // Un registro por tarjeta: si el estudiante está vinculado en varios cursos, lleva todas sus asignaturas
+  const byToken = new Map();
+  for(const g of state.groups){
+    for(const s of (g.students || [])){
+      if(!byToken.has(s.webToken)) byToken.set(s.webToken, []);
+      byToken.get(s.webToken).push({ g, s });
+    }
+  }
+  for(const [token, recs] of byToken){
+    const cursos = recs.map(({ g, s })=> buildPortalPayload(g, s));
+    const payload = { v: 2, nombre: recs[0].s.name, generado: new Date().toISOString(), cursos };
+    const [id, enc] = await encryptForToken(token, payload);
+    entries[id] = enc;
+    count++;
+  }
+  const data = { v: 2, generado: new Date().toISOString(), estudiantes: count, entries };
+  return { json: JSON.stringify(data), count, generado: data.generado };
+}
+
+let portalPublishing = false;
+let portalJustPublishedAt = 0; // evita mostrar la versión anterior mientras GitHub Pages se actualiza
+async function publishPortalNow(){
+  if(portalPublishing) return;
+  if(!window.crypto || !crypto.subtle){ showToast('Para publicar abre la app desde su dirección https (GitHub Pages).'); return; }
+  if(!ghReady()){ openGhSetup(); return; }
+  const c = ghConfig();
+  const p = ensurePortalConfig();
+  const path = (c.folder ? c.folder + '/' : '') + portalDataFileName();
+  const apiPath = `/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+  portalPublishing = true;
+  setPortalPublishStatus('⏳ Cifrando y publicando…');
+  try{
+    const { json, count, generado } = await buildPortalDataJson();
+    const content = arrayBufferToBase64(new TextEncoder().encode(json).buffer);
+    let lastErr = null;
+    for(let attempt = 0; attempt < 2; attempt++){
+      // Si el archivo ya existe, GitHub pide su identificador (sha) para reemplazarlo
+      const ref = c.branch ? '?ref=' + encodeURIComponent(c.branch) : '';
+      const cur = await ghApi(apiPath + ref);
+      if(!cur.res.ok && cur.res.status !== 404){ throw new Error(ghErrorMessage(cur.res, cur.body)); }
+      if(cur.res.status === 404){
+        // 404 puede ser "el archivo aún no existe" o "no hay acceso al repositorio": se distingue consultando el repositorio
+        const repoCheck = await ghApi(`/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}`);
+        if(!repoCheck.res.ok) throw new Error(ghErrorMessage(repoCheck.res, repoCheck.body));
+      }
+      const body = {
+        message: `Actualizar datos del portal (${formatDate(toISODate(new Date()))} ${new Date().toTimeString().slice(0,5)})`,
+        content,
+      };
+      if(cur.res.ok && cur.body && cur.body.sha) body.sha = cur.body.sha;
+      if(c.branch) body.branch = c.branch;
+      const put = await ghApi(apiPath, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if(put.res.ok){
+        p.lastGenerated = generado;
+        p.lastPublished = generado;
+        saveState();
+        portalJustPublishedAt = Date.now();
+        if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
+        setPortalPublishStatus(`✅ Publicado (${count} estudiantes). Estará visible para los estudiantes en 1 o 2 minutos.`);
+        showToast(`✅ Portal publicado (${count} estudiantes). Visible en 1–2 minutos.`);
+        return;
+      }
+      lastErr = put;
+      if(put.res.status !== 409 && put.res.status !== 422) break; // 409/422: otro cambio al mismo tiempo, se reintenta una vez
+    }
+    throw new Error(ghErrorMessage(lastErr.res, lastErr.body));
+  }catch(e){
+    console.error(e);
+    const msg = (e && e.message) || 'error desconocido';
+    setPortalPublishStatus('❌ ' + msg);
+    showToast('No se pudo publicar: ' + msg);
+  }finally{
+    portalPublishing = false;
+  }
+}
+function setPortalPublishStatus(html){
+  const el = document.getElementById('portalPublishedStatus');
+  if(el) el.innerHTML = html;
+}
+
+/* ---- Ventana "Conectar GitHub" ---- */
+function openGhSetup(){
+  const c = ghConfig();
+  const hasToken = !!getGhToken();
+  document.getElementById('ghSetupOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'ghSetupOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="max-width:560px;">
+      <button class="modal-close" onclick="document.getElementById('ghSetupOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">🔑 Conectar GitHub</h2>
+      <p class="muted">Una sola vez por dispositivo: crea en GitHub una llave de acceso limitada a tu repositorio y pégala aquí. Así el botón <strong>🚀 Publicar ahora</strong> sube los datos por ti.</p>
+      <details class="mail-setup" ${hasToken ? '' : 'open'}>
+        <summary>Cómo crear la llave (5 minutos)</summary>
+        <ol>
+          <li>En <strong>github.com</strong>, toca tu foto (arriba a la derecha) → <strong>Settings</strong>.</li>
+          <li>Abajo a la izquierda: <strong>Developer settings → Personal access tokens → Fine-grained tokens → Generate new token</strong>.</li>
+          <li><strong>Token name:</strong> "Registro de clases". <strong>Expiration:</strong> 1 año (cuando venza, crea otra y pégala aquí).</li>
+          <li><strong>Repository access:</strong> <em>Only select repositories</em> → elige <strong>${escapeHtml(c.repo || 'tu repositorio')}</strong>.</li>
+          <li><strong>Permissions → Repository permissions → Contents:</strong> <em>Read and write</em>.</li>
+          <li><strong>Generate token</strong>, copia la llave (empieza con <code>github_pat_</code>) y pégala abajo.</li>
+        </ol>
+      </details>
+      <div class="grid-2" style="margin-top:10px;">
+        <div><label>Usuario u organización</label><input type="text" id="ghOwner" value="${escapeHtml(c.owner)}" placeholder="ej. tuusuario"></div>
+        <div><label>Repositorio</label><input type="text" id="ghRepo" value="${escapeHtml(c.repo)}" placeholder="ej. portal-estudiantes"></div>
+      </div>
+      <div class="grid-2" style="margin-top:8px;">
+        <div><label>Carpeta dentro del repositorio</label><input type="text" id="ghFolder" value="${escapeHtml(c.folder)}" placeholder="(vacío = carpeta principal)"></div>
+        <div><label>Rama</label><input type="text" id="ghBranch" value="${escapeHtml(c.branch)}" placeholder="(la principal)"></div>
+      </div>
+      <p class="muted" style="font-size:0.75rem; margin:4px 0 0;">Se completan solos a partir de la dirección de tu página de consulta. El archivo debe quedar en la misma carpeta que <strong>consulta.html</strong>.</p>
+      <label style="margin-top:10px;">Llave de acceso (token)</label>
+      <input type="password" id="ghToken" placeholder="${hasToken ? '•••••••• (guardada; pega otra para reemplazarla)' : 'github_pat_…'}" autocomplete="off">
+      <p class="muted" style="font-size:0.75rem; margin:4px 0 0;">🔒 La llave se guarda solo en este dispositivo: no se sincroniza con Drive ni va en los respaldos. Si pierdes el dispositivo, bórrala en GitHub (Fine-grained tokens → Delete).</p>
+      <p id="ghSetupMsg" class="muted" style="min-height:1.2em; margin:8px 0 0;"></p>
+      <div class="row" style="justify-content:center; gap:6px; margin-top:8px;">
+        <button class="btn btn-accent" onclick="saveGhSetup()">Probar y guardar</button>
+        ${hasToken ? '<button class="btn btn-danger btn-sm" onclick="forgetGhToken()">Olvidar llave</button>' : ''}
+      </div>
+    </div>`;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+async function saveGhSetup(){
+  const msg = document.getElementById('ghSetupMsg');
+  const owner = document.getElementById('ghOwner').value.trim();
+  const repo = document.getElementById('ghRepo').value.trim();
+  const folder = document.getElementById('ghFolder').value.trim().replace(/^\/+|\/+$/g, '');
+  const branch = document.getElementById('ghBranch').value.trim();
+  const newToken = document.getElementById('ghToken').value.trim();
+  if(!owner || !repo){ msg.textContent = 'Completa usuario y repositorio.'; return; }
+  const oldToken = getGhToken();
+  if(newToken) setGhToken(newToken);
+  if(!getGhToken()){ msg.textContent = 'Pega la llave de acceso.'; return; }
+  msg.textContent = 'Probando la conexión…';
+  try{
+    const r = await ghApi(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`);
+    if(!r.res.ok){
+      if(newToken) setGhToken(oldToken); // no se guarda una llave que no funciona
+      msg.textContent = '❌ ' + ghErrorMessage(r.res, r.body);
+      return;
+    }
+    const p = ensurePortalConfig();
+    p.github = { owner, repo, folder, branch };
+    saveState();
+    document.getElementById('ghSetupOverlay')?.remove();
+    if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
+    showToast(`Conectado a ${r.body.full_name}. Ya puedes usar 🚀 Publicar ahora.`);
+  }catch(e){
+    if(newToken) setGhToken(oldToken);
+    msg.textContent = '❌ No se pudo conectar con GitHub (revisa tu internet).';
+  }
+}
+function forgetGhToken(){
+  if(!confirm('¿Olvidar la llave de GitHub en este dispositivo? Tendrás que pegarla de nuevo para publicar desde aquí.')) return;
+  setGhToken('');
+  document.getElementById('ghSetupOverlay')?.remove();
+  if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
+  showToast('Llave olvidada en este dispositivo');
 }
 
 /* ============ TAB: ENTREGAS (guías/trabajos: en plazo, fuera de plazo, no entregado) ============ */
