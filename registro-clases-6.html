@@ -4057,7 +4057,9 @@ const CARD_SIZES = {
 };
 const CARD_FRAMES = [
   ['none','Sin color'], ['#A8D5BA','Verde'], ['#F6C6A8','Durazno'], ['#A9CCE3','Celeste'],
-  ['#C9B6E4','Lila'], ['#F7E1A0','Amarillo'], ['#F4B6C2','Rosado'], ['#555555','Gris oscuro'],
+  ['#C9B6E4','Lila'], ['#F7E1A0','Amarillo'], ['#F4B6C2','Rosado'], ['#76C7B7','Turquesa'],
+  ['#E59866','Naranjo'], ['#7FA7D9','Azul'], ['#2E5E4E','Verde oscuro'], ['#1F3A5F','Azul marino'],
+  ['#7A1F3D','Burdeo'], ['#555555','Gris oscuro'],
 ];
 
 function ensureRewardsConfig(){
@@ -4217,10 +4219,54 @@ function compressCardImage(file){
 /* ---- Diseño e impresión de tarjetas (tamaño carta) ---- */
 function cssUrl(dataUrl){ return `url('${String(dataUrl).replace(/'/g, '%27')}')`; }
 
+/* ---- Diseño de cada tarjeta: el general (state.cardConfig) o uno propio por estudiante (s.cardDesign) ---- */
+const CARD_BGS = [
+  ['none','Blanco'], ['#EAF6EE','Verde claro'], ['#FDEFE5','Durazno claro'], ['#E8F1F9','Celeste claro'],
+  ['#F1EAF8','Lila claro'], ['#FDF6DC','Amarillo claro'], ['#FCE8EE','Rosado claro'], ['#EFEFEF','Gris claro'],
+];
+const CARD_LAYOUTS = [['izq','QR a la izquierda'], ['der','QR a la derecha'], ['arriba','QR arriba'], ['abajo','QR abajo']];
+const CARD_QR_SIZES = [['S','Pequeño'], ['M','Normal'], ['L','Grande']];
+const CARD_ALIGNS = [['left','Izquierda'], ['center','Centro'], ['right','Derecha']];
+const CARD_HEADPOS = [['top','Arriba'], ['bottom','Abajo']];
+const CARD_BACK_PHRASES = [
+  '📱 Escanea el código QR con tu celular para ver tu registro.',
+  '🔒 Esta tarjeta es personal: no la prestes.',
+  'Si encuentras esta tarjeta, entrégala a tu profesor.',
+  '⭐ Suma puntos participando, ayudando a tus compañeros y trabajando en clases.',
+];
+/* Tamaño del QR en pulgadas según tarjeta, distribución y tamaño elegido (S/M/L) */
+const CARD_QR_INCHES = {
+  estandar: { row: [1.3, 1.6, 1.85], col: [0.8, 0.95, 1.1] },
+  pequena:  { row: [1.1, 1.35, 1.55], col: [0.62, 0.72, 0.82] },
+  carnet:   { row: [1.2, 1.45, 1.6], col: [1.4, 1.75, 2.05] },
+};
+function defaultLayoutFor(size){ return size === 'carnet' ? 'abajo' : 'izq'; }
+function effectiveDesign(cfg, design){
+  const d = design && design.custom ? design : {};
+  const has = v=> v !== undefined && v !== null && v !== '';
+  const pick = (k, def)=> has(d[k]) ? d[k] : (has(cfg[k]) ? cfg[k] : def);
+  return {
+    frame: pick('frame', 'none'),
+    bg: pick('bg', 'none'),
+    layout: pick('layout', defaultLayoutFor(cfg.size)),
+    qrSize: pick('qrSize', 'M'),
+    align: pick('align', cfg.size === 'carnet' ? 'center' : 'left'),
+    headPos: pick('headPos', 'top'),
+  };
+}
+function qrInches(size, layout, qrSize){
+  const t = CARD_QR_INCHES[size] || CARD_QR_INCHES.estandar;
+  const arr = (layout === 'izq' || layout === 'der') ? t.row : t.col;
+  return arr[{ S:0, M:1, L:2 }[qrSize] ?? 1];
+}
+
 function buildCardHtml(c, cfg, imgs){
+  const des = effectiveDesign(cfg, c.design);
   const front = imgs && imgs.front;
-  const frameCss = cfg.frame && cfg.frame !== 'none' ? `border:0.09in solid ${cfg.frame};` : '';
-  const bgCss = front ? `background-image:${cssUrl(front)}; background-size:cover; background-position:center;` : '';
+  const frameCss = des.frame !== 'none' ? `border:0.09in solid ${des.frame};` : '';
+  const bgCss = front
+    ? `background-image:${cssUrl(front)}; background-size:cover; background-position:center;`
+    : (des.bg !== 'none' ? `background-color:${des.bg};` : '');
   const head = (cfg.logo || cfg.title || cfg.school) ? `
     <div class="head">
       ${cfg.logo ? `<img class="logo" src="${cfg.logo}" alt="">` : ''}
@@ -4232,44 +4278,43 @@ function buildCardHtml(c, cfg, imgs){
   const alias = cfg.showAlias && c.alias ? `<div class="alias">“${escapeHtml(c.alias)}”</div>` : '';
   // Si el estudiante tiene imagen de frente, esa imagen ya es su personalización: no se agrega el recuadro para dibujar
   const deco = cfg.decorate && !front ? `<div class="deco"><span>${cfg.size === 'carnet' ? 'Dibuja aquí tu avatar' : 'Mi avatar'}</span></div>` : '';
-  const qr = `<div class="qr">${qrSvgForData(c.qr || (QR_PREFIX + c.code))}</div>`;
-  const cls = front ? ' has-img' : '';
-  if(cfg.size === 'carnet'){
-    return `<div class="card v${cls}" style="${frameCss}${bgCss}">
-      <div class="hole"></div>
-      <div class="txt">
-        ${head}
-        ${deco}
-        <div class="name">${escapeHtml(c.name)}</div>
-        ${alias}
-        <div class="course">${escapeHtml(c.course)}</div>
-      </div>
-      ${qr}
-      <div class="code">${c.code}</div>
+  const q = qrInches(cfg.size, des.layout, des.qrSize);
+  const qr = `<div class="qr" style="width:${q}in; height:${q}in;">${qrSvgForData(c.qr || (QR_PREFIX + c.code))}</div>`;
+  const txt = `
+    <div class="txt">
+      ${des.headPos === 'top' ? head : ''}
+      <div class="name">${escapeHtml(c.name)}</div>
+      ${alias}
+      <div class="course">${escapeHtml(c.course)} · <span class="code">${c.code}</span></div>
+      ${des.headPos === 'bottom' ? head : ''}
     </div>`;
-  }
-  return `<div class="card h${cls}" style="${frameCss}${bgCss}">
-    ${qr}
-    <div class="info">
-      <div class="txt">
-        ${head}
-        <div class="name">${escapeHtml(c.name)}</div>
-        ${alias}
-        <div class="course">${escapeHtml(c.course)} · <span class="code">${c.code}</span></div>
-      </div>
-      ${deco}
-    </div>
+  const orient = cfg.size === 'carnet' ? 'v' : 'h';
+  return `<div class="card ${orient} L-${des.layout} A-${des.align}${front ? ' has-img' : ''}" style="${frameCss}${bgCss}">
+    ${cfg.size === 'carnet' ? '<div class="hole"></div>' : ''}
+    <div class="main">${qr}<div class="side">${txt}${deco}</div></div>
   </div>`;
 }
 
-/* Reverso de una tarjeta: imagen del estudiante (si tiene) o color del marco.
-   Ambos se extienden 0,05" fuera del borde (sangrado) por si la impresora corre la hoja. */
-function buildBackCell(cfg, imgs, gridStyle){
-  const color = cfg.frame && cfg.frame !== 'none' ? cfg.frame : null;
+/* Texto del reverso (igual para todas las tarjetas, más el nombre si se elige) */
+function backContentHtml(cfg, c){
+  const parts = [];
+  if(cfg.backShowName && c) parts.push(`<div class="back-name">${escapeHtml(c.name)}</div>`);
+  if(cfg.backText && String(cfg.backText).trim()) parts.push(`<div class="back-text">${escapeHtml(String(cfg.backText).trim()).replace(/\n/g, '<br>')}</div>`);
+  if(cfg.backCatalog){
+    const list = (state.premios || []).slice().sort((a,b)=> a.cost - b.cost);
+    if(list.length) parts.push(`<div class="back-cat"><div class="back-cat-title">Canjes</div>${list.map(p=> `<div class="back-cat-row"><span>${p.type === 'decimas' ? '➕' : '🎁'} ${escapeHtml(p.name)}</span><span>${p.cost} pts</span></div>`).join('')}</div>`);
+  }
+  return parts.length ? `<div class="back-content"><div class="back-box">${parts.join('')}</div></div>` : '';
+}
+/* Reverso de una tarjeta: imagen del estudiante (si tiene) o su color (marco o fondo), más el texto del reverso.
+   El color y la imagen se extienden 0,05" fuera del borde (sangrado) por si la impresora corre la hoja. */
+function buildBackCell(cfg, imgs, gridStyle, c){
+  const des = effectiveDesign(cfg, c && c.design);
+  const color = des.frame !== 'none' ? des.frame : (des.bg !== 'none' ? des.bg : null);
   const back = imgs && imgs.back;
   const colorCss = color ? `background:${color}; box-shadow:0 0 0 0.05in ${color};` : '';
   const img = back ? `<div class="back-img" style="background-image:${cssUrl(back)};"></div>` : '';
-  return `<div class="card back" style="${gridStyle || ''}${colorCss}">${img}</div>`;
+  return `<div class="card back ${cfg.size === 'carnet' ? 'v' : 'h'}" style="${gridStyle || ''}${colorCss}">${img}${backContentHtml(cfg, c)}</div>`;
 }
 
 /* Hoja de reverso: la misma grilla, pero con las columnas invertidas (espejo), porque al girar la hoja
@@ -4279,15 +4324,18 @@ function buildBackSheet(pageCards, size, cfg, images){
   const cells = pageCards.map((c, i)=>{
     const row = Math.floor(i / cols) + 1;
     const col = cols - (i % cols);
-    return buildBackCell(cfg, images[c.studentId], `grid-row:${row}; grid-column:${col};`);
+    return buildBackCell(cfg, images[c.studentId], `grid-row:${row}; grid-column:${col};`, c);
   });
   return `<div class="sheet ${size}">${cells.join('')}</div>`;
 }
 
 function cardsNeedBack(cards, cfg, images){
   if(cfg.backside === false) return false;
-  if(cfg.frame && cfg.frame !== 'none') return true;
-  return cards.some(c=> images[c.studentId] && images[c.studentId].back);
+  if((cfg.backText && String(cfg.backText).trim()) || cfg.backCatalog || cfg.backShowName) return true;
+  return cards.some(c=>{
+    const des = effectiveDesign(cfg, c.design);
+    return des.frame !== 'none' || des.bg !== 'none' || (images[c.studentId] && images[c.studentId].back);
+  });
 }
 
 /* opts: { preview:bool, showBack:bool (solo en vista previa: muestra el reverso bajo el frente) } */
@@ -4304,7 +4352,7 @@ function buildCardsDocument(cards, cfg, images, opts){
   if(preview){
     content = `<div class="sheet ${size}">${cards.map(c=> buildCardHtml(c, cfg, images[c.studentId])).join('')}</div>`;
     if(opts.showBack){
-      content = `<div class="pv-label">Frente</div>${content}<div class="pv-label">Reverso</div><div class="sheet ${size}">${cards.map(c=> buildBackCell(cfg, images[c.studentId], '')).join('')}</div>`;
+      content = `<div class="pv-label">Frente</div>${content}<div class="pv-label">Reverso</div><div class="sheet ${size}">${cards.map(c=> buildBackCell(cfg, images[c.studentId], '', c)).join('')}</div>`;
     }
   } else {
     content = pages.map(pg=> `<div class="sheet ${size}">${pg.map(c=> buildCardHtml(c, cfg, images[c.studentId])).join('')}</div>`
@@ -4322,60 +4370,64 @@ function buildCardsDocument(cards, cfg, images, opts){
       .toolbar .tip{ font-size:12.5px; color:#444; max-width:560px; margin:6px auto 0; line-height:1.35; }
       .sheet{ display:grid; justify-content:center; align-content:start; padding:0.06in 0; page-break-after:always; break-after:page; page-break-inside:avoid; break-inside:avoid; }
       .sheet:last-child{ page-break-after:auto; break-after:auto; }
-      .card{ border:1px dashed #000; background-color:#fff; overflow:hidden; display:flex; }
-      .qr{ flex:none; background:#fff; padding:0.06in; }
+      .sheet.estandar{ grid-template-columns: repeat(2, 3.5in); grid-auto-rows: 2.3in; gap:0.1in 0.3in; }
+      .sheet.pequena{ grid-template-columns: repeat(2, 3.4in); grid-auto-rows: 1.9in; gap:0.08in 0.3in; }
+      .sheet.carnet{ grid-template-columns: repeat(2, 3.4in); grid-auto-rows: 4.7in; gap:0.15in 0.3in; }
+
+      .card{ border:1px dashed #000; background-color:#fff; overflow:hidden; display:flex; flex-direction:column; padding:0.12in; position:relative; }
+      .card.v{ padding:0.12in 0.16in; }
+      .hole{ align-self:center; width:0.55in; height:0.14in; border:1px solid #999; border-radius:0.07in; flex:none; background:#fff; margin-bottom:0.05in; }
+      .main{ flex:1; min-height:0; display:flex; align-items:center; gap:0.1in; }
+      .L-izq .main{ flex-direction:row; }
+      .L-der .main{ flex-direction:row-reverse; }
+      .L-arriba .main{ flex-direction:column; gap:0.06in; }
+      .L-abajo .main{ flex-direction:column-reverse; gap:0.06in; }
+      .qr{ flex:none; background:#fff; padding:0.05in; }
       .qr svg{ width:100%; height:100%; display:block; }
+      .side{ flex:1; min-width:0; min-height:0; align-self:stretch; display:flex; flex-direction:column; justify-content:center; gap:0.05in; }
+      .L-arriba .side, .L-abajo .side{ width:100%; flex:1 1 auto; }
+      .txt{ display:flex; flex-direction:column; gap:0.03in; }
+      .A-left .txt{ text-align:left; align-items:flex-start; }
+      .A-center .txt{ text-align:center; align-items:center; }
+      .A-right .txt{ text-align:right; align-items:flex-end; }
       .head{ display:flex; align-items:center; gap:0.06in; }
+      .A-right .head{ flex-direction:row-reverse; }
       .logo{ height:0.34in; max-width:0.7in; object-fit:contain; flex:none; }
       .head-text{ min-width:0; }
       .kicker{ font-size:8pt; font-weight:bold; text-transform:uppercase; letter-spacing:0.4px; line-height:1.1; }
       .school{ font-size:7.5pt; line-height:1.1; }
-      .name{ font-weight:bold; line-height:1.12; word-wrap:break-word; }
+      .name{ font-weight:bold; line-height:1.12; word-wrap:break-word; max-width:100%; }
       .alias{ font-style:italic; line-height:1.1; }
       .course{ line-height:1.2; }
       .code{ font-family: Consolas, 'Courier New', monospace; font-weight:bold; }
-      .deco{ border:1px dashed #999; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:7.5pt; }
-      .txt{ display:flex; flex-direction:column; gap:0.03in; }
+      .deco{ border:1px dashed #999; border-radius:6px; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:7.5pt; flex:1; min-height:0.35in; }
+      .h.L-arriba .deco, .h.L-abajo .deco{ display:none; }
       /* Con imagen de fondo: el texto va sobre un recuadro blanco para que se lea */
       .has-img .txt{ background:rgba(255,255,255,0.88); border-radius:0.06in; padding:0.05in 0.08in; }
 
-      /* Reverso */
-      .card.back{ border:none; position:relative; overflow:visible; }
-      .back-img{ position:absolute; inset:-0.05in; background-size:cover; background-position:center; }
-
-      /* Horizontales */
-      .card.h{ align-items:center; gap:0.1in; padding:0.12in; }
-      .card.h .info{ min-width:0; flex:1; height:100%; display:flex; flex-direction:column; justify-content:center; gap:0.04in; }
-      .card.h .deco{ flex:1; min-height:0.35in; }
-      .sheet.estandar{ grid-template-columns: repeat(2, 3.5in); grid-auto-rows: 2.3in; gap:0.1in 0.3in; }
-      .estandar .qr{ width:1.6in; height:1.6in; }
-      .estandar .name{ font-size:13pt; }
-      .estandar .alias{ font-size:9.5pt; }
-      .estandar .course{ font-size:9.5pt; }
-      .sheet.pequena{ grid-template-columns: repeat(2, 3.4in); grid-auto-rows: 1.9in; gap:0.08in 0.3in; }
-      .pequena .qr{ width:1.35in; height:1.35in; }
-      .pequena .name{ font-size:11pt; }
-      .pequena .alias{ font-size:8.5pt; }
-      .pequena .course{ font-size:8.5pt; }
+      /* Tamaños de letra */
+      .estandar .name{ font-size:13pt; } .estandar .alias, .estandar .course{ font-size:9.5pt; }
+      .estandar .L-arriba .name, .estandar .L-abajo .name{ font-size:12pt; }
+      .pequena .name{ font-size:11pt; } .pequena .alias, .pequena .course{ font-size:8.5pt; }
       .pequena .logo{ height:0.28in; }
+      .pequena .L-arriba .kicker, .pequena .L-abajo .kicker, .pequena .L-arriba .school, .pequena .L-abajo .school{ font-size:6.5pt; }
+      .carnet .logo{ height:0.45in; }
+      .carnet .kicker{ font-size:9pt; } .carnet .school{ font-size:8.5pt; }
+      .carnet .name{ font-size:15pt; } .carnet .alias{ font-size:10.5pt; } .carnet .course{ font-size:10pt; }
+      .carnet .L-izq .name, .carnet .L-der .name{ font-size:13pt; }
+      .carnet .deco{ font-size:9pt; min-height:0.6in; }
 
-      /* Carnet vertical */
-      .sheet.carnet{ grid-template-columns: repeat(2, 3.4in); grid-auto-rows: 4.7in; gap:0.15in 0.3in; }
-      .card.v{ flex-direction:column; align-items:center; text-align:center; padding:0.12in 0.16in; gap:0.05in; position:relative; }
-      .card.v .hole{ width:0.55in; height:0.14in; border:1px solid #999; border-radius:0.07in; flex:none; background:#fff; }
-      .card.v .txt{ width:100%; flex:1; align-items:center; gap:0.05in; }
-      .card.v.has-img .txt{ flex:none; width:auto; max-width:100%; margin-top:auto; }
-      .card.v .head{ justify-content:center; }
-      .card.v .logo{ height:0.45in; }
-      .card.v .kicker{ font-size:9pt; }
-      .card.v .school{ font-size:8.5pt; }
-      .card.v .deco{ width:100%; flex:1; min-height:0.6in; font-size:9pt; }
-      .card.v .name{ font-size:15pt; }
-      .card.v .alias{ font-size:10.5pt; }
-      .card.v .course{ font-size:10pt; }
-      .card.v .qr{ width:1.75in; height:1.75in; }
-      .card.v > .code{ font-size:10pt; }
-      .card.v.has-img > .code{ background:#fff; padding:0 0.08in; border-radius:0.04in; }
+      /* Reverso */
+      .card.back{ border:none; position:relative; overflow:visible; padding:0; }
+      .back-img{ position:absolute; inset:-0.05in; background-size:cover; background-position:center; }
+      .back-content{ position:absolute; inset:0.12in; display:flex; align-items:center; justify-content:center; z-index:1; }
+      .back-box{ background:rgba(255,255,255,0.92); border-radius:0.08in; padding:0.08in 0.14in; max-width:100%; max-height:100%; overflow:hidden; text-align:center; font-size:8.5pt; line-height:1.3; }
+      .v .back-box{ font-size:10pt; }
+      .back-name{ font-weight:bold; font-size:1.2em; margin-bottom:0.04in; }
+      .back-text{ margin:0.02in 0; }
+      .back-cat{ margin-top:0.05in; text-align:left; min-width:2in; }
+      .back-cat-title{ font-weight:bold; text-align:center; margin-bottom:0.02in; }
+      .back-cat-row{ display:flex; justify-content:space-between; gap:0.15in; border-bottom:1px dotted #bbb; font-size:0.92em; }
 
       ${preview ? `body{ display:flex; flex-direction:column; align-items:center; padding:8px 0; }
         .sheet{ page-break-after:auto; }
@@ -4387,6 +4439,31 @@ function buildCardsDocument(cards, cfg, images, opts){
     ${preview ? '' : `<div class="toolbar">${cards.length} tarjeta(s) · ${CARD_SIZES[size].label} · recorta por el borde<br><br><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>${withBack ? `<div class="tip">Hojas intercaladas: frente, reverso, frente, reverso… Imprime <b>a doble cara, girando por el borde largo</b>. Si los colores o imágenes no salen, activa <b>Gráficos de fondo</b> en “Más ajustes” del cuadro de impresión.</div>` : ''}</div>`}
     ${content}
     </body></html>`;
+}
+
+/* ---- Controles de diseño (se usan en el diseñador general y en la tarjeta de cada estudiante) ---- */
+function designOptionButtons(options, current, fn, field){
+  return `<div class="row" style="gap:6px;">${options.map(([v, l])=> `<button type="button" class="btn btn-sm ${v === current ? 'btn-accent' : 'btn-outline'}" onclick="${fn}('${field}','${v}')">${l}</button>`).join('')}</div>`;
+}
+function designSwatches(options, current, fn, field){
+  return `<div class="row" style="gap:6px;">${options.map(([v, name])=> `
+    <button type="button" title="${name}" onclick="${fn}('${field}','${v}')"
+      style="width:32px; height:32px; border-radius:50%; cursor:pointer; background:${v === 'none' ? '#fff' : v}; border:${current === v ? '3px solid var(--primary)' : '1px solid var(--border-strong)'}; font-size:0.7rem; color:#666;">${v === 'none' ? '✕' : ''}</button>`).join('')}</div>`;
+}
+function designControlsHtml(des, fn){
+  return `
+    <label style="margin-top:10px;">Color del marco</label>
+    ${designSwatches(CARD_FRAMES, des.frame, fn, 'frame')}
+    <label style="margin-top:10px;">Color de fondo</label>
+    ${designSwatches(CARD_BGS, des.bg, fn, 'bg')}
+    <label style="margin-top:10px;">Distribución (dónde va el QR respecto del nombre)</label>
+    ${designOptionButtons(CARD_LAYOUTS, des.layout, fn, 'layout')}
+    <label style="margin-top:10px;">Tamaño del QR</label>
+    ${designOptionButtons(CARD_QR_SIZES, des.qrSize, fn, 'qrSize')}
+    <label style="margin-top:10px;">Alineación del texto</label>
+    ${designOptionButtons(CARD_ALIGNS, des.align, fn, 'align')}
+    <label style="margin-top:10px;">Título, colegio y logo</label>
+    ${designOptionButtons(CARD_HEADPOS, des.headPos, fn, 'headPos')}`;
 }
 
 /* Muestra un documento de tarjetas en un iframe, escalado para que quepa en el ancho disponible */
@@ -4417,7 +4494,7 @@ function collectCardsForTarget(target){
       // Un estudiante vinculado en varios cursos lleva una sola tarjeta, con todos sus cursos
       if(s.card && seenCodes.has(s.card)) return;
       if(s.card) seenCodes.add(s.card);
-      cards.push({ studentId: s.id, name: s.name, course: s.card ? coursesLabelForCard(s.card) : g.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s) });
+      cards.push({ studentId: s.id, name: s.name, course: s.card ? coursesLabelForCard(s.card) : g.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s), design: s.cardDesign || null });
     });
   });
   return cards;
@@ -4454,10 +4531,13 @@ function closeCardDesigner(){
   const o = document.getElementById('cardDesignerOverlay');
   if(o) o.remove();
 }
+let cardDesignerOpen = { diseno: true, reverso: false }; // secciones abiertas del diseñador (se mantienen al hacer cambios)
 function renderCardDesignerForm(){
   const box = document.getElementById('cardDesignerForm');
   if(!box) return;
   const cfg = state.cardConfig;
+  const des = effectiveDesign(cfg, null);
+  const customCount = cardDesignTarget ? collectCardsForTarget(cardDesignTarget).filter(c=> c.design && c.design.custom).length : 0;
   box.innerHTML = `
     <label>Tamaño</label>
     <select onchange="updateCardConfig('size', this.value)">
@@ -4489,19 +4569,44 @@ function renderCardDesignerForm(){
       <input type="checkbox" style="width:auto;" ${cfg.showAlias ? 'checked' : ''} onchange="updateCardConfig('showAlias', this.checked)">
       Mostrar apodo o frase (se escribe por estudiante en 🪪 Tarjetas)
     </label>
-    <label style="display:flex; align-items:center; gap:8px; margin-top:6px; cursor:pointer;">
-      <input type="checkbox" style="width:auto;" ${cfg.backside !== false ? 'checked' : ''} onchange="updateCardConfig('backside', this.checked)">
-      Imprimir reverso (imagen de reverso de cada estudiante o, si no tiene, el color del marco)
-    </label>
-    <label style="margin-top:10px;">Marco de color</label>
-    <div class="row" style="gap:6px;">
-      ${CARD_FRAMES.map(([val, name])=> `
-        <button type="button" title="${name}" onclick="updateCardConfig('frame', '${val}')"
-          style="width:34px; height:34px; border-radius:50%; cursor:pointer; background:${val==='none' ? '#fff' : val}; border:${cfg.frame===val ? '3px solid var(--primary)' : '1px solid var(--border-strong)'}; font-size:0.7rem; color:#666;">${val==='none' ? '✕' : ''}</button>`).join('')}
-    </div>
+
+    <details class="mail-setup" style="margin-top:12px;" ${cardDesignerOpen.diseno ? 'open' : ''} ontoggle="cardDesignerOpen.diseno = this.open">
+      <summary>🎨 Diseño general (colores y distribución)</summary>
+      <p class="muted" style="font-size:0.78rem; margin:6px 0 0;">Se aplica a todas las tarjetas, salvo a las que tengan diseño propio${customCount ? ` (${customCount} en esta impresión)` : ''}. Cada estudiante puede personalizar la suya con el botón 🎨 de su fila.</p>
+      ${designControlsHtml(des, 'updateCardConfig')}
+    </details>
+
+    <details class="mail-setup" style="margin-top:10px;" ${cardDesignerOpen.reverso ? 'open' : ''} ontoggle="cardDesignerOpen.reverso = this.open">
+      <summary>↩️ Reverso</summary>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer;">
+        <input type="checkbox" style="width:auto;" ${cfg.backside !== false ? 'checked' : ''} onchange="updateCardConfig('backside', this.checked)">
+        Imprimir reverso (para imprimir a doble cara)
+      </label>
+      <p class="muted" style="font-size:0.75rem; margin:4px 0 0;">El reverso lleva la imagen de reverso del estudiante o, si no tiene, su color de marco o de fondo, y encima el texto que escribas aquí.</p>
+      <label style="margin-top:8px;">Texto del reverso</label>
+      <textarea id="cardBackText" rows="4" placeholder="Ej. Escanea el código QR para ver tu registro." onchange="updateCardConfig('backText', this.value)">${escapeHtml(cfg.backText || '')}</textarea>
+      <div class="row" style="gap:6px; margin-top:6px;">
+        ${CARD_BACK_PHRASES.map((ph, i)=> `<button type="button" class="btn btn-outline btn-sm" onclick="addCardBackPhrase(${i})">+ ${escapeHtml(ph.length > 34 ? ph.slice(0, 32) + '…' : ph)}</button>`).join('')}
+      </div>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:8px; cursor:pointer;">
+        <input type="checkbox" style="width:auto;" ${cfg.backCatalog ? 'checked' : ''} onchange="updateCardConfig('backCatalog', this.checked)">
+        Incluir el catálogo de premios y canjes (con su costo en puntos)
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; margin-top:6px; cursor:pointer;">
+        <input type="checkbox" style="width:auto;" ${cfg.backShowName ? 'checked' : ''} onchange="updateCardConfig('backShowName', this.checked)">
+        Mostrar el nombre del estudiante en el reverso
+      </label>
+    </details>
   `;
   refreshCardPreview();
 }
+function addCardBackPhrase(i){
+  const cur = String(state.cardConfig.backText || '').trim();
+  const ph = CARD_BACK_PHRASES[i];
+  if(cur.includes(ph)) return;
+  updateCardConfig('backText', cur ? cur + '\n' + ph : ph);
+}
+
 function updateCardConfig(field, value){
   ensureRewardsConfig();
   state.cardConfig[field] = value;
@@ -4532,13 +4637,17 @@ async function refreshCardPreview(){
   const frame = document.getElementById('cardPreviewFrame');
   if(!frame || !cardDesignTarget) return;
   const cards = collectCardsForTarget(cardDesignTarget);
-  const sample = cards.find(c=> studentHasCardImg(c.studentId)) || cards.find(c=> c.alias) || cards[0];
+  // Para ver el diseño general se prefiere una tarjeta sin diseño propio
+  const general = cards.filter(c=> !(c.design && c.design.custom));
+  const pool = general.length ? general : cards;
+  const sample = pool.find(c=> studentHasCardImg(c.studentId)) || pool.find(c=> c.alias) || pool[0];
   if(!sample) return;
   const images = await loadCardImagesFor([sample]);
   const cfg = state.cardConfig;
   const showBack = cardsNeedBack([sample], cfg, images);
   setCardPreviewFrame(frame, buildCardsDocument([sample], cfg, images, { preview:true, showBack }));
 }
+
 async function printDesignedCards(){
   if(!cardDesignTarget) return;
   const cards = collectCardsForTarget(cardDesignTarget);
@@ -4553,7 +4662,7 @@ async function printDesignedCards(){
   setTimeout(()=>{ try{ win.focus(); win.print(); }catch(e){} }, 700);
 }
 
-/* ---- Ventana para asignar las imágenes de un estudiante ---- */
+/* ---- Ventana para personalizar la tarjeta de un estudiante (diseño propio + imágenes) ---- */
 let cardImgStudent = null; // { groupId, studentId }
 
 function openStudentCardImages(studentId){
@@ -4568,10 +4677,11 @@ function openStudentCardImages(studentId){
   overlay.className = 'modal-overlay';
   overlay.id = 'cardImgOverlay';
   overlay.innerHTML = `
-    <div class="modal-box app-font" style="max-width:520px;">
+    <div class="modal-box app-font" style="max-width:560px;">
       <button class="modal-close" onclick="closeStudentCardImages()">✕</button>
-      <h2 style="border:none; padding-bottom:0;">🖼️ Fondos de la tarjeta</h2>
-      <p class="muted"><strong>${escapeHtml(s.name)}</strong> · Las imágenes se recortan al centro para llenar la tarjeta. En el frente, el QR y el texto van sobre recuadros blancos para que se puedan leer y escanear. Se guardan solo en este dispositivo.</p>
+      <h2 style="border:none; padding-bottom:0;">🎨 Personalizar tarjeta</h2>
+      <p class="muted"><strong>${escapeHtml(s.name)}</strong> · Elige colores, distribución e imágenes. Los cambios se ven al instante en la vista previa.</p>
+      <div id="cardDesignBox"></div>
       <div id="cardImgSlots"></div>
       <p class="muted" style="font-weight:600; margin:12px 0 4px;">Vista previa</p>
       <iframe id="cardImgPreview" title="Vista previa" style="width:100%; border:1px solid var(--border); border-radius:10px; background:#fff;"></iframe>
@@ -4598,13 +4708,53 @@ function stepStudentCardImages(dir){
   const next = group.students[(idx + dir + group.students.length) % group.students.length];
   openStudentCardImages(next.id);
 }
-async function renderStudentCardImages(){
-  if(!cardImgStudent) return;
+function currentCardStudent(){
+  if(!cardImgStudent) return null;
   const group = state.groups.find(g=> g.id === cardImgStudent.groupId);
   const s = group && group.students.find(x=> x.id === cardImgStudent.studentId);
+  return s ? { group, s } : null;
+}
+/* El diseño se comparte entre los registros vinculados (misma tarjeta en varios cursos) */
+function forEachLinkedStudent(s, fn){
+  const linked = linkedRecords(s);
+  (linked.length ? linked : [{ student: s }]).forEach(({ student })=> fn(student));
+}
+function setStudentDesignCustom(on){
+  const cur = currentCardStudent();
+  if(!cur) return;
+  const base = { custom: true, ...effectiveDesign(state.cardConfig, cur.s.cardDesign) };
+  forEachLinkedStudent(cur.s, st=>{ if(on) st.cardDesign = { ...base }; else delete st.cardDesign; });
+  saveState();
+  renderStudentCardImages();
+}
+function updateStudentDesign(field, value){
+  const cur = currentCardStudent();
+  if(!cur) return;
+  forEachLinkedStudent(cur.s, st=>{
+    if(!st.cardDesign || !st.cardDesign.custom) st.cardDesign = { custom: true, ...effectiveDesign(state.cardConfig, null) };
+    st.cardDesign[field] = value;
+  });
+  saveState();
+  renderStudentCardImages();
+}
+async function renderStudentCardImages(){
+  const cur = currentCardStudent();
   const box = document.getElementById('cardImgSlots');
-  if(!s || !box) return;
-  const card = { studentId: s.id, name: s.name, course: group.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s) };
+  const dbox = document.getElementById('cardDesignBox');
+  if(!cur || !box) return;
+  const { group, s } = cur;
+  const custom = !!(s.cardDesign && s.cardDesign.custom);
+  if(dbox){
+    dbox.innerHTML = `
+      <div class="row" style="gap:14px; margin:4px 0 2px;">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin:0;"><input type="radio" name="cardDesignMode" style="width:auto;" ${custom ? '' : 'checked'} onchange="setStudentDesignCustom(false)"> Usar el diseño general</label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; margin:0;"><input type="radio" name="cardDesignMode" style="width:auto;" ${custom ? 'checked' : ''} onchange="setStudentDesignCustom(true)"> Diseño propio</label>
+      </div>
+      ${custom ? designControlsHtml(effectiveDesign(state.cardConfig, s.cardDesign), 'updateStudentDesign') : '<p class="muted" style="font-size:0.78rem; margin:4px 0 0;">Usa los colores y la distribución del diseño general (se cambian en 🎨 Tarjetas de…).</p>'}
+      <p class="scan-section-label" style="margin-top:14px;">Imágenes de fondo</p>
+      <p class="muted" style="font-size:0.75rem; margin:0 0 4px;">Se recortan al centro para llenar la tarjeta. En el frente, el QR y el texto van sobre recuadros blancos para que se puedan leer y escanear. Se guardan solo en este dispositivo.</p>`;
+  }
+  const card = { studentId: s.id, name: s.name, course: s.card ? coursesLabelForCard(s.card) : group.name, code: s.card, alias: s.cardAlias || '', qr: cardQrData(s), design: s.cardDesign || null };
   const images = await loadCardImagesFor([card]);
   const imgs = images[s.id] || {};
   const slot = (side, label)=> `
@@ -5427,7 +5577,7 @@ function renderPremios(group){
       ${group.students.length === 0 ? '' : `
       <details>
         <summary style="cursor:pointer; font-weight:600;">Códigos, apodos e imágenes por estudiante (${group.students.length})</summary>
-        <p class="muted" style="font-size:0.78rem;">El apodo o frase lo elige cada estudiante y aparece impreso en su tarjeta (máx. 40 caracteres). Con 🖼️ asignas una imagen de fondo para el frente y otra para el reverso (quedan guardadas en este dispositivo).</p>
+        <p class="muted" style="font-size:0.78rem;">El apodo o frase lo elige cada estudiante y aparece impreso en su tarjeta (máx. 40 caracteres). Con 🎨 personalizas la tarjeta de cada estudiante: colores, distribución e imágenes de fondo (las imágenes quedan guardadas en este dispositivo).</p>
         <div style="overflow-x:auto;">
         <table>
           <thead><tr><th>Estudiante</th><th>Código</th><th>Apodo o frase</th><th></th></tr></thead>
@@ -5438,7 +5588,7 @@ function renderPremios(group){
                 <td style="font-family:monospace; font-weight:700;">${s.card}</td>
                 <td><input type="text" maxlength="40" value="${escapeHtml(s.cardAlias || '')}" placeholder="Opcional" style="min-width:120px;" onchange="updateStudentAlias('${s.id}', this.value)"></td>
                 <td style="white-space:nowrap;">
-                  <button class="btn ${studentHasCardImg(s.id) ? 'btn-accent' : 'btn-outline'} btn-sm" title="Imágenes de fondo (frente y reverso)" onclick="openStudentCardImages('${s.id}')">🖼️${studentHasCardImg(s.id) ? ' ✓' : ''}</button>
+                  <button class="btn ${(studentHasCardImg(s.id) || (s.cardDesign && s.cardDesign.custom)) ? 'btn-accent' : 'btn-outline'} btn-sm" title="Personalizar tarjeta (colores, distribución e imágenes)" onclick="openStudentCardImages('${s.id}')">🎨${(studentHasCardImg(s.id) || (s.cardDesign && s.cardDesign.custom)) ? ' ✓' : ''}</button>
                   <button class="btn btn-outline btn-sm" title="Imprimir solo esta tarjeta" onclick="openCardDesigner(['${group.id}'], '${s.id}')">🖨️</button>
                   ${ensurePortalConfig().enabled ? `<button class="btn btn-outline btn-sm" title="Abrir su portal (como lo verá el estudiante)" onclick="openPortalForStudent('${s.id}')">🌐</button>` : ''}
                   <button class="btn btn-outline btn-sm" title="Vincular con su registro en otro curso (misma tarjeta)" onclick="openManualLink('${s.id}')">🔗</button>
