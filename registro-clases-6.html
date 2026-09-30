@@ -6538,28 +6538,46 @@ function buildPortalPayload(group, s){
       const v = (entry.cotejo || {})[ind.id];
       if(v !== null && v !== undefined){ obt += v; max += (ind.levels || 5); }
     });
-    const c = { d: se.date || '', h: se.time || '', p: present ? 1 : 0, o: obt, m: max };
+    const c = { d: se.date || '', h: se.time || '', p: present ? 1 : 0, o: obt, m: max, pr: se.processId || '' };
     if(p.includeObs && entry.observaciones) c.obs = entry.observaciones;
     return c;
   });
-  const evaluaciones = getActiveEvaluations(group).map(e=>({
+  const evalsSorted = getActiveEvaluations(group);
+  const evalItem = e=> ({
     n: e.name, d: e.date || '', nota: computeStudentEvalGrade(e, sid),
-    dec: (e.decimasAplicadas && e.decimasAplicadas[sid]) || 0,
-  }));
+    dec: (e.decimasAplicadas && e.decimasAplicadas[sid]) || 0, pr: e.processId || '',
+  });
+  const evaluaciones = evalsSorted.map(evalItem);
+  // Notas agrupadas: cada grupo de calificaciones va con sus notas y su nota de grupo, en el orden de la primera nota del grupo
+  const groupUnits = new Map(getGradingUnits(group).filter(u=> u.type === 'group').map(u=> [u.gradeGroup.id, u]));
+  const seenGroups = new Set();
+  const unidades = [];
+  evalsSorted.forEach(e=>{
+    if(e.gradeGroupId && groupUnits.has(e.gradeGroupId)){
+      if(seenGroups.has(e.gradeGroupId)) return;
+      seenGroups.add(e.gradeGroupId);
+      const u = groupUnits.get(e.gradeGroupId);
+      unidades.push({ t: 'g', n: u.gradeGroup.name, nota: computeUnitGrade(u, sid),
+        peso: u.weightType === 'weighted' ? (u.weightPercent || 0) : null,
+        items: evalsSorted.filter(x=> x.gradeGroupId === e.gradeGroupId).map(evalItem) });
+    } else {
+      unidades.push({ t: 'e', ...evalItem(e), peso: e.weightType === 'weighted' ? (e.weightPercent || 0) : null });
+    }
+  });
   const decimasMovs = getActiveDecimas(group)
     .filter(d=> d.values && d.values[sid])
     .map(d=> ({ d: d.date || '', n: d.note || '', v: d.values[sid] }))
     .sort((a,b)=> a.d.localeCompare(b.d));
   const entregas = getActiveEntregas(group).map(e=>{
     const st = e.estados ? e.estados[sid] : null;
-    return { n: e.name, d: e.date || '', e: st || '' };
+    return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '' };
   });
   const payload = {
     nombre: s.name, curso: group.name, periodo: period ? period.name : '',
     generado: new Date().toISOString(),
     asistencia: { presentes: stats.presentCount, ausentes: stats.absentCount, logro: stats.percent, obtenido: stats.obtained, maximo: stats.maxPossible },
     clases,
-    notas: { lista: evaluaciones, final: grade.finalGrade, promedio: grade.promedioSimple },
+    notas: { lista: evaluaciones, unidades, final: grade.finalGrade, promedio: grade.promedioSimple },
     decimas: {
       total: computeStudentDecimasTotal(group, sid), aplicadas: computeStudentDecimasApplied(group, sid),
       disponibles: computeStudentDecimasAvailable(group, sid), movs: decimasMovs,
@@ -6580,6 +6598,30 @@ function buildPortalPayload(group, s){
       .map(b=> ({ d: b.date || '', c: BITACORA_CATEGORIAS[b.categoria || ''] || '', a: b.actividadPedagogica || '', o: b.observaciones || '' }));
   }
   return payload;
+}
+
+/* Un curso del estudiante, con una vista por periodo (el portal permite elegir periodo y unidad).
+   Cada vista se calcula igual que en la app con ese periodo seleccionado. */
+function buildPortalCourse(group, s){
+  const saved = state.activePeriodId;
+  const periods = state.periods || [];
+  const views = [];
+  try{
+    const list = periods.length ? periods : [null];
+    for(const per of list){
+      state.activePeriodId = per ? per.id : null;
+      const datos = buildPortalPayload(group, s);
+      const hasData = datos.clases.length || datos.notas.lista.length || datos.entregas.length || datos.puntos.movs.length || datos.decimas.movs.length;
+      const isCurrent = per ? per.id === saved : true;
+      if(!hasData && !isCurrent) continue;
+      const usedProcs = new Set([...datos.clases, ...datos.notas.lista, ...datos.entregas].map(x=> x.pr).filter(Boolean));
+      const procesos = (group.processes || []).filter(pr=> usedProcs.has(pr.id)).map(pr=> ({ id: pr.id, n: pr.name }));
+      views.push({ id: per ? per.id : '', n: per ? per.name : '', actual: isCurrent, procesos, datos });
+    }
+  } finally {
+    state.activePeriodId = saved;
+  }
+  return { curso: group.name, periodos: views };
 }
 
 async function generatePortalFile(){
@@ -6951,8 +6993,8 @@ async function buildPortalDataJson(){
     }
   }
   for(const [token, recs] of byToken){
-    const cursos = recs.map(({ g, s })=> buildPortalPayload(g, s));
-    const payload = { v: 2, nombre: recs[0].s.name, generado: new Date().toISOString(), cursos };
+    const cursos = recs.map(({ g, s })=> buildPortalCourse(g, s));
+    const payload = { v: 3, nombre: recs[0].s.name, generado: new Date().toISOString(), cursos };
     const [id, enc] = await encryptForToken(token, payload);
     entries[id] = enc;
     count++;

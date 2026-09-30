@@ -71,6 +71,16 @@
   .course-tab span{ font-size:0.75rem; font-weight:600; color:var(--dim); }
   .course-tab.active{ background:var(--primary); border-color:var(--primary); color:#fff; }
   .course-tab.active span{ color:rgba(255,255,255,0.85); }
+  .filters{ display:flex; flex-wrap:wrap; gap:8px 12px; margin-top:12px; }
+  .filters label{ display:flex; flex-direction:column; gap:3px; font-size:0.78rem; font-weight:600; color:var(--dim); flex:1 1 220px; min-width:0; }
+  .filters select{ font:inherit; font-size:0.92rem; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:8px 10px; width:100%; }
+  .ggroup{ border:1px solid var(--border); border-radius:12px; padding:0 12px; margin:8px 0; background:var(--bg); }
+  .ggroup .ghead{ border-bottom:1px solid var(--border); }
+  .gitems{ border-left:3px solid var(--primary-light); padding-left:10px; margin:2px 0 4px; }
+  .row.sm{ padding:6px 0; }
+  .row.sm .title{ font-weight:500; font-size:0.9rem; }
+  .row.sm .grade{ min-width:38px; padding:2px 6px; font-size:0.9rem; }
+  .grade.gtotal{ font-size:1.05rem; }
   .note{ font-size:0.8rem; color:var(--dim); text-align:center; margin-top:18px; line-height:1.5; }
   @media (max-width:360px){ .tile .num{ font-size:1.6rem; } }
 </style>
@@ -107,35 +117,123 @@
     return first + `<details><summary>Ver ${items.length - visible} más</summary>${items.slice(visible).map(renderItem).join('')}</details>`;
   }
 
-  /* p = { nombre, cursos: [...] }; idx = asignatura seleccionada */
-  function render(d, generado, p, idx){
+  /* Normaliza los formatos de datos: v3 (curso con periodos), v2 (un curso plano) */
+  function normCourse(c){
+    if(c && Array.isArray(c.periodos)) return c;
+    return { curso: c.curso, periodos: [{ id: '', n: c.periodo || '', actual: true, procesos: [], datos: c }] };
+  }
+  function defaultPeriodIdx(course){
+    const i = course.periodos.findIndex(x=> x.actual);
+    return i >= 0 ? i : course.periodos.length - 1;
+  }
+  function avg(list){ const v = list.filter(x=> x !== null && x !== undefined); return v.length ? Math.round(v.reduce((a,b)=> a+b, 0) / v.length * 10) / 10 : null; }
+
+  /* p = { nombre, cursos: [...] }; sel = { c: asignatura, per: periodo, proc: unidad ('' = todas) } */
+  function render(p, generado, sel){
     const cursos = p.cursos;
-    const a = d.asistencia || {};
-    const totalClases = (a.presentes || 0) + (a.ausentes || 0);
-    const asistPct = totalClases ? Math.round(a.presentes / totalClases * 100) : null;
-    const final = d.notas && d.notas.final;
+    const course = cursos[sel.c];
+    const per = course.periodos[sel.per];
+    const d = per.datos;
+    const proc = sel.proc;
+    const inProc = x=> !proc || x.pr === proc;
+    const procName = proc ? ((per.procesos || []).find(x=> x.id === proc) || {}).n || '' : '';
+
+    // Asistencia y trabajo en clases (filtrado por unidad)
+    const clasesF = (d.clases || []).filter(inProc);
+    const presentes = clasesF.filter(c=> c.p).length;
+    const totalClases = clasesF.length;
+    const obt = clasesF.reduce((s,c)=> s + (c.p ? (c.o || 0) : 0), 0);
+    const max = clasesF.reduce((s,c)=> s + (c.p ? (c.m || 0) : 0), 0);
+    const logro = max > 0 ? Math.round(obt / max * 100) : null;
+    const asistPct = totalClases ? Math.round(presentes / totalClases * 100) : null;
+
+    // Calificaciones (agrupadas por grupo de notas)
+    const baseUnits = (d.notas && d.notas.unidades) || ((d.notas && d.notas.lista) || []).map(e=> ({ t: 'e', ...e }));
+    const unidades = [];
+    baseUnits.forEach(u=>{
+      if(u.t === 'g'){
+        const items = (u.items || []).filter(inProc);
+        if(items.length) unidades.push({ ...u, items, parcial: items.length < (u.items || []).length });
+      } else if(inProc(u)) unidades.push(u);
+    });
+    const notasUnidad = unidades.flatMap(u=> u.t === 'g' ? u.items.map(i=> i.nota) : [u.nota]);
+    const final = proc ? avg(notasUnidad) : (d.notas && d.notas.final);
+    const finalLbl = proc ? 'Promedio de la unidad' : 'Nota final';
+
     const puntos = d.puntos || { disponibles:0, ganados:0, canjeados:0, movs:[] };
     const dec = d.decimas || { total:0, aplicadas:0, disponibles:0, movs:[] };
     const premios = (d.premios || []).slice().sort((x,y)=> x.c - y.c);
-    const alcanza = premios.filter(p=> p.c <= puntos.disponibles);
-    const proximo = premios.find(p=> p.c > puntos.disponibles);
+    const alcanza = premios.filter(x=> x.c <= puntos.disponibles);
+    const proximo = premios.find(x=> x.c > puntos.disponibles);
+    const coursePts = c=>{ const pp = c.periodos[defaultPeriodIdx(c)]; return num(((pp && pp.datos.puntos) || {}).disponibles || 0); };
 
+    const showPer = course.periodos.length > 1;
+    const showProc = (per.procesos || []).length > 0;
     let html = `<div class="brand">⭐ Mi registro</div>
       <div class="card hero">
-        <h1>${esc(p.nombre || d.nombre)}</h1>
+        <h1>${esc(p.nombre)}</h1>
         ${cursos.length > 1 ? `
           <div class="dim small" style="margin:6px 0 8px; font-weight:600;">Elige la asignatura</div>
-          <div class="course-tabs">${cursos.map((c, i)=> `<button class="course-tab${i === idx ? ' active' : ''}" data-idx="${i}">${esc(c.curso)}<span>${num((c.puntos || {}).disponibles || 0)} pts</span></button>`).join('')}</div>
-          ${d.periodo ? `<div class="dim small" style="margin-top:8px;">${esc(d.periodo)}</div>` : ''}
-        ` : `<div class="dim">${esc(d.curso)}${d.periodo ? ' · ' + esc(d.periodo) : ''}</div>`}
-        <div class="dim small" style="margin-top:6px;">Datos actualizados el ${fdatetime(generado)}</div>
+          <div class="course-tabs">${cursos.map((c, i)=> `<button class="course-tab${i === sel.c ? ' active' : ''}" data-idx="${i}">${esc(c.curso)}<span>${coursePts(c)} pts</span></button>`).join('')}</div>
+        ` : `<div class="dim">${esc(course.curso)}${!showPer && per.n ? ' · ' + esc(per.n) : ''}</div>`}
+        ${showPer || showProc ? `<div class="filters">
+          ${showPer ? `<label>Periodo<select id="fPer">${course.periodos.map((x, i)=> `<option value="${i}"${i === sel.per ? ' selected' : ''}>${esc(x.n || 'Periodo ' + (i+1))}</option>`).join('')}</select></label>` : ''}
+          ${showProc ? `<label>Unidad<select id="fProc"><option value="">Todas las unidades</option>${per.procesos.map(x=> `<option value="${esc(x.id)}"${x.id === proc ? ' selected' : ''}>${esc(x.n)}</option>`).join('')}</select></label>` : ''}
+        </div>` : ''}
+        <div class="dim small" style="margin-top:8px;">Datos actualizados el ${fdatetime(generado)}</div>
       </div>
       <div class="tiles">
         <div class="tile"><div class="num primary">${num(puntos.disponibles)}</div><div class="lbl">Puntos disponibles</div></div>
-        <div class="tile"><div class="num ${asistPct !== null && asistPct < 85 ? 'bad' : ''}">${asistPct === null ? '—' : asistPct + '%'}</div><div class="lbl">Asistencia</div></div>
-        <div class="tile"><div class="num ${final !== null && final !== undefined && final < 4 ? 'bad' : ''}">${nota(final)}</div><div class="lbl">Nota final</div></div>
+        <div class="tile"><div class="num ${asistPct !== null && asistPct < 85 ? 'bad' : ''}">${asistPct === null ? '—' : asistPct + '%'}</div><div class="lbl">Asistencia${proc ? ' en la unidad' : ''}</div></div>
+        <div class="tile"><div class="num ${final !== null && final !== undefined && final < 4 ? 'bad' : ''}">${nota(final)}</div><div class="lbl">${finalLbl}</div></div>
         <div class="tile"><div class="num ok">${num(dec.disponibles)}</div><div class="lbl">Décimas por aplicar</div></div>
       </div>`;
+    if(proc) html += `<p class="dim small" style="margin:-4px 2px 12px;">Mostrando la unidad <strong>${esc(procName)}</strong>. Los puntos y las décimas corresponden a todo el periodo.</p>`;
+
+    // Calificaciones
+    const gradeRow = (e, small)=>{
+      const cls = e.nota === null || e.nota === undefined ? 'none' : (e.nota < 4 ? 'bad' : '');
+      const subs = [];
+      if(e.d) subs.push(fdate(e.d));
+      if(e.peso !== null && e.peso !== undefined) subs.push('pondera ' + num(e.peso) + '%');
+      if(e.dec) subs.push('incluye ' + e.dec + ' décima(s)');
+      if(e.nota === null || e.nota === undefined) subs.push('sin nota aún');
+      return `<div class="row${small ? ' sm' : ''}"><div class="main"><div class="title">${esc(e.n)}</div>${subs.length ? `<div class="sub">${subs.join(' · ')}</div>` : ''}</div><span class="grade ${cls}">${nota(e.nota)}</span></div>`;
+    };
+    html += `<div class="card"><h2>🎯 Calificaciones</h2>`;
+    html += unidades.length ? unidades.map(u=>{
+      if(u.t !== 'g') return gradeRow(u, false);
+      const cls = u.nota === null || u.nota === undefined ? 'none' : (u.nota < 4 ? 'bad' : '');
+      return `<div class="ggroup">
+        <div class="row ghead"><div class="main"><div class="title">${esc(u.n)}</div><div class="sub">Nota del grupo · promedio de ${(u.parcial ? 'todas sus' : u.items.length) + ' notas'}${u.peso !== null && u.peso !== undefined ? ' · pondera ' + num(u.peso) + '%' : ''}</div></div><span class="grade gtotal ${cls}">${nota(u.nota)}</span></div>
+        <div class="gitems">${u.items.map(i=> gradeRow(i, true)).join('')}</div>
+        ${u.parcial ? `<div class="dim small" style="padding:4px 0 6px;">Este grupo también tiene notas de otras unidades; la nota del grupo las considera todas.</div>` : ''}
+      </div>`;
+    }).join('') : `<div class="empty">${proc ? 'No hay evaluaciones en esta unidad.' : 'Aún no hay evaluaciones.'}</div>`;
+    if(unidades.length){
+      html += proc
+        ? `<div class="summary" style="margin-top:10px;"><span>Promedio de la unidad <strong>${nota(final)}</strong></span></div>`
+        : `<div class="summary" style="margin-top:10px;"><span>Promedio simple <strong>${nota(d.notas.promedio)}</strong></span><span>Nota final <strong>${nota(final)}</strong></span></div>`;
+    }
+    html += `</div>`;
+
+    // Asistencia y trabajo en clases
+    const clases = clasesF.slice().reverse();
+    html += `<div class="card"><h2>📝 Asistencia y trabajo en clases</h2>
+      <div class="summary"><span>Presente <strong>${presentes}</strong> de <strong>${totalClases}</strong> clases</span>${logro !== null ? `<span>Logro <strong>${logro}%</strong> (${num(obt)} de ${num(max)} pts)</span>` : ''}</div>`;
+    html += clases.length ? listWithMore(clases, c=> `
+      <div class="row"><div class="main"><div class="title">${fdate(c.d)}${c.h ? ' · ' + esc(c.h) : ''}</div>${c.p && c.m ? `<div class="sub">Puntaje ${num(c.o)} de ${num(c.m)}</div>` : ''}${c.obs ? `<div class="obs">${esc(c.obs)}</div>` : ''}</div>
+      <span class="chip ${c.p ? 'ok' : 'bad'}">${c.p ? 'Presente' : 'Ausente'}</span></div>`, 8) : `<div class="empty">${proc ? 'No hay clases registradas en esta unidad.' : 'Aún no hay clases registradas.'}</div>`;
+    html += `</div>`;
+
+    // Entregas
+    const entregas = (d.entregas || []).filter(inProc).sort((x,y)=> (y.d||'').localeCompare(x.d||''));
+    html += `<div class="card"><h2>📥 Entregas</h2>`;
+    html += entregas.length ? listWithMore(entregas, e=>{
+      const st = ESTADOS[e.e] || ['Pendiente', 'neutral'];
+      return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${fdate(e.d)}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
+    }, 8) : `<div class="empty">${proc ? 'No hay entregas en esta unidad.' : 'Aún no hay entregas registradas.'}</div>`;
+    html += `</div>`;
 
     // Puntos
     html += `<div class="card"><h2>⭐ Puntos</h2>
@@ -143,7 +241,7 @@
     if(premios.length){
       html += `<div class="dim small" style="font-weight:600; margin:10px 0 6px;">Te alcanza para</div>`;
       html += alcanza.length
-        ? `<div class="chips">${alcanza.map(p=> `<span class="chip ok">${p.t === 'd' ? '➕' : '🎁'} ${esc(p.n)} · ${p.c} pts</span>`).join('')}</div>`
+        ? `<div class="chips">${alcanza.map(x=> `<span class="chip ok">${x.t === 'd' ? '➕' : '🎁'} ${esc(x.n)} · ${x.c} pts</span>`).join('')}</div>`
         : `<div class="empty">Todavía nada del catálogo. ¡Sigue sumando!</div>`;
       if(proximo) html += `<div class="dim small" style="margin-top:8px;">Te faltan <strong>${num(Math.round((proximo.c - puntos.disponibles)*10)/10)}</strong> punto(s) para: ${esc(proximo.n)} (${proximo.c} pts)</div>`;
     }
@@ -152,36 +250,6 @@
     html += pmovs.length ? listWithMore(pmovs, m=> `
       <div class="row"><div class="main"><div class="title">${esc(m.n)}</div><div class="sub">${fdate(m.d)}${m.h ? ' · ' + esc(m.h) : ''}</div></div>
       <div class="val ${m.v > 0 ? 'pos' : 'neg'}">${m.v > 0 ? '+' : ''}${num(m.v)}</div></div>`, 6) : '<div class="empty">Aún no tienes movimientos.</div>';
-    html += `</div>`;
-
-    // Notas
-    const lista = (d.notas && d.notas.lista) || [];
-    html += `<div class="card"><h2>🎯 Calificaciones</h2>`;
-    html += lista.length ? lista.map(e=>{
-      const cls = e.nota === null || e.nota === undefined ? 'none' : (e.nota < 4 ? 'bad' : '');
-      return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${e.d ? fdate(e.d) : ''}${e.dec ? (e.d ? ' · ' : '') + 'incluye ' + e.dec + ' décima(s)' : ''}${(e.nota === null || e.nota === undefined) ? (e.d || e.dec ? ' · ' : '') + 'sin nota aún' : ''}</div></div><span class="grade ${cls}">${nota(e.nota)}</span></div>`;
-    }).join('') : '<div class="empty">Aún no hay evaluaciones.</div>';
-    if(lista.length){
-      html += `<div class="summary" style="margin-top:10px;"><span>Promedio simple <strong>${nota(d.notas.promedio)}</strong></span><span>Nota final <strong>${nota(final)}</strong></span></div>`;
-    }
-    html += `</div>`;
-
-    // Asistencia y trabajo en clases
-    const clases = (d.clases || []).slice().reverse();
-    html += `<div class="card"><h2>📝 Asistencia y trabajo en clases</h2>
-      <div class="summary"><span>Presente <strong>${a.presentes || 0}</strong> de <strong>${totalClases}</strong> clases</span>${a.logro !== null && a.logro !== undefined ? `<span>Logro <strong>${a.logro}%</strong> (${num(a.obtenido)} de ${num(a.maximo)} pts)</span>` : ''}</div>`;
-    html += clases.length ? listWithMore(clases, c=> `
-      <div class="row"><div class="main"><div class="title">${fdate(c.d)}${c.h ? ' · ' + esc(c.h) : ''}</div>${c.p && c.m ? `<div class="sub">Puntaje ${num(c.o)} de ${num(c.m)}</div>` : ''}${c.obs ? `<div class="obs">${esc(c.obs)}</div>` : ''}</div>
-      <span class="chip ${c.p ? 'ok' : 'bad'}">${c.p ? 'Presente' : 'Ausente'}</span></div>`, 8) : '<div class="empty">Aún no hay clases registradas.</div>';
-    html += `</div>`;
-
-    // Entregas
-    const entregas = (d.entregas || []).slice().sort((x,y)=> (y.d||'').localeCompare(x.d||''));
-    html += `<div class="card"><h2>📥 Entregas</h2>`;
-    html += entregas.length ? listWithMore(entregas, e=>{
-      const st = ESTADOS[e.e] || ['Pendiente', 'neutral'];
-      return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${fdate(e.d)}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
-    }, 8) : '<div class="empty">Aún no hay entregas registradas.</div>';
     html += `</div>`;
 
     // Décimas
@@ -202,13 +270,15 @@
 
     html += `<p class="note">🔒 Este enlace es personal: no lo compartas ni prestes tu tarjeta.<br>Si la perdiste, avísale a tu profesor para que te entregue una nueva.<br>Si ves algo que no corresponde, conversa con tu profesor.</p>`;
     app.innerHTML = html;
+
+    const go = s=>{ try{ sessionStorage.setItem('mi-registro-sel', JSON.stringify(s)); }catch(e){} render(p, generado, s); };
     app.querySelectorAll('.course-tab').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
-        const i = Number(btn.dataset.idx);
-        try{ sessionStorage.setItem('mi-registro-curso', String(i)); }catch(e){}
-        render(cursos[i], generado, p, i);
-      });
+      btn.addEventListener('click', ()=>{ const c = Number(btn.dataset.idx); go({ c, per: defaultPeriodIdx(cursos[c]), proc: '' }); });
     });
+    const fPer = document.getElementById('fPer');
+    if(fPer) fPer.addEventListener('change', ()=> go({ c: sel.c, per: Number(fPer.value), proc: '' }));
+    const fProc = document.getElementById('fProc');
+    if(fProc) fProc.addEventListener('change', ()=> go({ c: sel.c, per: sel.per, proc: fProc.value }));
   }
 
   async function load(){
@@ -245,10 +315,15 @@
       const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(enc.iv) }, key, b64ToBytes(enc.ct));
       const payload = JSON.parse(new TextDecoder().decode(plain));
       // Formato nuevo: { nombre, cursos: [...] } (un estudiante en varios cursos). Formato antiguo: un solo curso.
-      const p = payload.cursos ? { nombre: payload.nombre, cursos: payload.cursos } : { nombre: payload.nombre, cursos: [payload] };
-      let idx = 0;
-      try{ idx = Math.min(p.cursos.length - 1, Math.max(0, Number(sessionStorage.getItem('mi-registro-curso')) || 0)); }catch(e){}
-      render(p.cursos[idx], data.generado, p, idx);
+      // v3: { nombre, cursos: [{ curso, periodos: [...] }] } · v2: { nombre, cursos: [curso plano] } · v1: un curso plano
+      const rawCursos = payload.cursos || [payload];
+      const p = { nombre: payload.nombre, cursos: rawCursos.map(normCourse) };
+      let sel = { c: 0, per: defaultPeriodIdx(p.cursos[0]), proc: '' };
+      try{
+        const saved = JSON.parse(sessionStorage.getItem('mi-registro-sel') || 'null');
+        if(saved && p.cursos[saved.c] && p.cursos[saved.c].periodos[saved.per]) sel = { c: saved.c, per: saved.per, proc: saved.proc || '' };
+      }catch(e){}
+      render(p, data.generado, sel);
     }catch(e){
       message('⚠️', 'No se pudo abrir tu registro', 'El enlace no es válido. Vuelve a escanear el QR de tu tarjeta o avísale a tu profesor.');
     }
