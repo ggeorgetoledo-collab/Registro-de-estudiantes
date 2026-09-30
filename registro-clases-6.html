@@ -5567,6 +5567,7 @@ function renderPremios(group){
 `,
     tarjetas: `
     ${linkedCardHtml()}
+    ${digitalCardSectionHtml(group)}
     <div class="card app-font">
       <h2>Tarjetas QR</h2>
       <p class="muted">Diseña e imprime las tarjetas: tamaño, logo, título, marco de color, espacio para dibujar, apodo e imágenes de fondo de cada estudiante.</p>
@@ -5590,7 +5591,9 @@ function renderPremios(group){
                 <td style="white-space:nowrap;">
                   <button class="btn ${(studentHasCardImg(s.id) || (s.cardDesign && s.cardDesign.custom)) ? 'btn-accent' : 'btn-outline'} btn-sm" title="Personalizar tarjeta (colores, distribución e imágenes)" onclick="openStudentCardImages('${s.id}')">🎨${(studentHasCardImg(s.id) || (s.cardDesign && s.cardDesign.custom)) ? ' ✓' : ''}</button>
                   <button class="btn btn-outline btn-sm" title="Imprimir solo esta tarjeta" onclick="openCardDesigner(['${group.id}'], '${s.id}')">🖨️</button>
-                  ${ensurePortalConfig().enabled ? `<button class="btn btn-outline btn-sm" title="Abrir su portal (como lo verá el estudiante)" onclick="openPortalForStudent('${s.id}')">🌐</button>` : ''}
+                  <button class="btn btn-outline btn-sm" title="Descargar tarjeta digital (imagen para el celular)" onclick="downloadDigitalCard('${s.id}')">📲</button>
+                  ${ensurePortalConfig().enabled ? `<button class="btn btn-outline btn-sm" title="Abrir su portal (como lo verá el estudiante)" onclick="openPortalForStudent('${s.id}')">🌐</button>
+                  <button class="btn btn-outline btn-sm" title="Copiar su enlace personal al portal (para WhatsApp, Classroom…)" onclick="copyPortalLink('${s.id}')">📋</button>` : ''}
                   <button class="btn btn-outline btn-sm" title="Vincular con su registro en otro curso (misma tarjeta)" onclick="openManualLink('${s.id}')">🔗</button>
                   ${linkedRecords(s).length > 1 ? `<button class="btn btn-outline btn-sm" title="Separar de la tarjeta compartida" onclick="unlinkStudent('${s.id}')">✂️</button>` : ''}
                   <button class="btn btn-outline btn-sm" title="Código nuevo (tarjeta perdida)" onclick="regenerateStudentCard('${s.id}')">🔄</button>
@@ -5984,6 +5987,17 @@ function ensureMailTemplate(){
   if(!state.mailTemplate) state.mailTemplate = { ...DEFAULT_MAIL_TEMPLATE };
   return state.mailTemplate;
 }
+const DEFAULT_CARD_MAIL_TEMPLATE = {
+  subject: 'Tu tarjeta de puntos digital – {curso}',
+  body: 'Hola {primer_nombre}:\n\nTe envío tu tarjeta de puntos digital. Guárdala en tu celular: puedes mostrarla en clases en lugar de la tarjeta impresa para sumar puntos y hacer canjes.\n\n{enlace}\n\nLa tarjeta es personal: no la compartas.\n\nSaludos cordiales.',
+};
+function ensureCardMailTemplate(){
+  if(!state.cardMailTemplate) state.cardMailTemplate = { ...DEFAULT_CARD_MAIL_TEMPLATE };
+  return state.cardMailTemplate;
+}
+/* Plantilla del envío abierto: informe (Word) o tarjeta digital (imagen) */
+function mailTpl(){ return mailSendState && mailSendState.kind === 'card' ? ensureCardMailTemplate() : ensureMailTemplate(); }
+function mailSentField(){ return mailSendState && mailSendState.kind === 'card' ? 'lastCardSent' : 'lastReportSent'; }
 function isValidEmail(email){ return /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(String(email || '').trim()); }
 function normalizePersonName(n){ return String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
 function fillMailPlaceholders(text, group, student){
@@ -5992,7 +6006,10 @@ function fillMailPlaceholders(text, group, student){
     .replace(/\{nombre\}/gi, student.name)
     .replace(/\{primer_nombre\}/gi, first)
     .replace(/\{curso\}/gi, group.name)
-    .replace(/\{fecha\}/gi, formatDate(toISODate(new Date())));
+    .replace(/\{fecha\}/gi, formatDate(toISODate(new Date())))
+    .replace(/\{enlace\}/gi, ()=> (ensurePortalConfig().enabled && student.webToken && portalBaseUrl())
+      ? 'Para ver tu registro y tu tarjeta en el celular, abre este enlace (y guárdalo en tu pantalla de inicio):\n' + portalStudentUrl(student)
+      : '');
 }
 
 /* ---- Permiso de Gmail ---- */
@@ -6039,7 +6056,8 @@ function blobToBase64(blob){
     r.readAsDataURL(blob);
   });
 }
-async function buildReportMime(to, subject, bodyText, fileName, fileBlob){
+async function buildReportMime(to, subject, bodyText, fileName, fileBlob, mimeType){
+  mimeType = mimeType || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   const boundary = 'rc_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   const asciiName = fileName.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_');
   const attachment = await blobToBase64(fileBlob);
@@ -6055,7 +6073,7 @@ async function buildReportMime(to, subject, bodyText, fileName, fileBlob){
     '',
     wrapB64(b64Utf8(bodyText.replace(/\r?\n/g, '\r\n'))),
     '--' + boundary,
-    'Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name="' + asciiName + '"',
+    'Content-Type: ' + mimeType + '; name="' + asciiName + '"',
     'Content-Disposition: attachment; filename="' + asciiName + '"; filename*=UTF-8\'\'' + encodeURIComponent(fileName),
     'Content-Transfer-Encoding: base64',
     '',
@@ -6086,16 +6104,17 @@ async function gmailSendMime(token, mime){
 function sleep(ms){ return new Promise(r=> setTimeout(r, ms)); }
 
 /* ---- Ventana de envío ---- */
-function openMailReports(onlyStudentId){
+function openMailReports(onlyStudentId, kind){
   const group = getActiveGroup();
   if(!group || group.students.length === 0){ showToast('Este curso no tiene estudiantes'); return; }
   ensureMailTemplate();
+  ensureCardMailTemplate();
   closeStudentDetail();
   const selected = new Set();
   group.students.forEach(s=>{
     if(onlyStudentId ? s.id === onlyStudentId : isValidEmail(s.email)) selected.add(s.id);
   });
-  mailSendState = { groupId: group.id, selected, status: {}, sending: false, confirming: false };
+  mailSendState = { groupId: group.id, selected, status: {}, sending: false, confirming: false, kind: kind === 'card' ? 'card' : 'report' };
   document.getElementById('mailReportsOverlay')?.remove();
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -6110,6 +6129,7 @@ function closeMailReports(){
   document.getElementById('mailReportsOverlay')?.remove();
   mailSendState = null;
   if(currentTab === 'estudiantes') renderEstudiantes(getActiveGroup());
+  else if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
 }
 function mailGroup(){ return mailSendState ? state.groups.find(g=> g.id === mailSendState.groupId) : null; }
 
@@ -6121,8 +6141,8 @@ function mailStatusHtml(s){
     if(st.state === 'error') return `<span style="color:var(--danger); font-size:0.8rem;">❌ ${escapeHtml(st.msg || 'Error')}</span>`;
     if(st.state === 'pending') return '<span class="muted">En cola</span>';
   }
-  if(s.lastReportSent){
-    const d = new Date(s.lastReportSent);
+  if(s[mailSentField()]){
+    const d = new Date(s[mailSentField()]);
     return `<span class="muted" style="font-size:0.78rem;">Último envío: ${formatDate(toISODate(d))} ${d.toTimeString().slice(0,5)}</span>`;
   }
   return '';
@@ -6132,16 +6152,19 @@ function renderMailReports(){
   const box = document.getElementById('mailReportsBox');
   const group = mailGroup();
   if(!box || !group) return;
-  const tpl = ensureMailTemplate();
+  const tpl = mailTpl();
   const ms = mailSendState;
+  const isCard = ms.kind === 'card';
   const withEmail = group.students.filter(s=> isValidEmail(s.email));
   const selectedValid = group.students.filter(s=> ms.selected.has(s.id) && isValidEmail(s.email));
   const allChecked = withEmail.length > 0 && withEmail.every(s=> ms.selected.has(s.id));
   const dis = ms.sending ? 'disabled' : '';
   box.innerHTML = `
     <button class="modal-close" onclick="closeMailReports()">✕</button>
-    <h2 style="border:none; padding-bottom:0;">✉️ Enviar informes por correo</h2>
-    <p class="muted">${escapeHtml(group.name)} · Cada estudiante recibe su propio informe en Word, adjunto a un correo enviado desde tu cuenta de Google (quedará en tu carpeta "Enviados").</p>
+    <h2 style="border:none; padding-bottom:0;">✉️ ${isCard ? 'Enviar tarjetas digitales' : 'Enviar informes por correo'}</h2>
+    <p class="muted">${escapeHtml(group.name)} · ${isCard
+      ? 'Cada estudiante recibe su tarjeta digital (imagen para guardar en el celular)' + (ensurePortalConfig().enabled ? ' y el enlace a su portal' : '') + ', en un correo enviado desde tu cuenta de Google.'
+      : 'Cada estudiante recibe su propio informe en Word, adjunto a un correo enviado desde tu cuenta de Google (quedará en tu carpeta "Enviados").'}</p>
 
     <details class="mail-setup">
       <summary>Primera vez: habilitar el envío (5 minutos)</summary>
@@ -6158,8 +6181,8 @@ function renderMailReports(){
     <input type="text" id="mailSubject" value="${escapeHtml(tpl.subject)}" ${dis} onchange="updateMailTemplate('subject', this.value)">
     <label style="margin-top:8px;">Mensaje</label>
     <textarea id="mailBody" rows="7" ${dis} onchange="updateMailTemplate('body', this.value)">${escapeHtml(tpl.body)}</textarea>
-    <p class="muted" style="font-size:0.75rem; margin-top:2px;">Se reemplazan automáticamente: {nombre} · {primer_nombre} · {curso} · {fecha}</p>
-
+    <p class="muted" style="font-size:0.75rem; margin-top:2px;">Se reemplazan automáticamente: {nombre} · {primer_nombre} · {curso} · {fecha}${isCard ? ' · {enlace} (enlace personal al portal; queda vacío si el portal no está activo)' : ''}</p>
+    ${isCard ? '' : `
     <p class="muted" style="font-size:0.8rem; margin-top:8px;">Formato: ${state.reportTemplate ? '📄 plantilla "' + escapeHtml(state.reportTemplate.name) + '"' : 'simple (sin plantilla)'} · se cambia en Cursos → Plantilla Word para informes.</p>
     <p class="scan-section-label" style="margin-top:10px;">Contenido del informe</p>
     <p class="muted" style="font-size:0.78rem; margin:0 0 4px;">Siempre incluye: resumen, asistencia y puntaje por clase, calificaciones, décimas, puntos y entregas.</p>
@@ -6170,7 +6193,7 @@ function renderMailReports(){
     <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;">
       <input type="checkbox" style="width:auto;" ${tpl.includeBitacora ? 'checked' : ''} ${dis} onchange="updateMailTemplate('includeBitacora', this.checked)">
       Incluir la bitácora (ojo: los registros generales del curso pueden mencionar a otros estudiantes)
-    </label>
+    </label>`}
 
     <div class="flex-between" style="margin-top:14px; gap:8px;">
       <p class="scan-section-label" style="margin:0;">Destinatarios (${selectedValid.length} de ${group.students.length})</p>
@@ -6178,7 +6201,7 @@ function renderMailReports(){
         <label class="btn btn-outline btn-sm" style="margin:0; cursor:pointer;" title="CSV con el nombre en una columna y el correo en otra">📁 Importar correos (CSV)
           <input type="file" accept=".csv,.txt" style="display:none;" ${dis} onchange="importMailCsv(this.files[0])">
         </label>
-        <button class="btn btn-outline btn-sm" ${dis} onclick="downloadMailPreview()">👁️ Ver un informe</button>
+        <button class="btn btn-outline btn-sm" ${dis} onclick="${isCard ? 'downloadMailCardPreview()' : 'downloadMailPreview()'}">👁️ ${isCard ? 'Ver una tarjeta' : 'Ver un informe'}</button>
       </div>
     </div>
     <div style="overflow-x:auto;">
@@ -6216,7 +6239,7 @@ function mailFooterHtml(count){
   if(count === 0) return '<div class="muted">Selecciona al menos un estudiante con correo válido.</div>';
   if(ms.confirming){
     return `
-      <div style="font-weight:600; margin-bottom:8px;">¿Enviar ${count} correo(s) con informe adjunto?</div>
+      <div style="font-weight:600; margin-bottom:8px;">¿Enviar ${count} correo(s) con ${ms.kind === 'card' ? 'tarjeta digital' : 'informe'} adjunto?</div>
       <div class="row" style="justify-content:center; gap:6px;">
         <button class="btn btn-accent" onclick="startMailSend()">✉️ Sí, enviar ahora</button>
         <button class="btn btn-outline" onclick="mailSendState.confirming=false; renderMailReports();">Cancelar</button>
@@ -6226,7 +6249,7 @@ function mailFooterHtml(count){
   return `<button class="btn btn-accent" onclick="mailSendState.confirming=true; renderMailReports();">✉️ Enviar a ${count} estudiante(s)</button>`;
 }
 function updateMailTemplate(field, value){
-  const tpl = ensureMailTemplate();
+  const tpl = mailTpl();
   tpl[field] = value;
   saveState();
 }
@@ -6309,11 +6332,18 @@ async function downloadMailPreview(){
   showToast('Descargado el informe de ' + s.name + ' (así lo recibirá)');
 }
 
+async function downloadMailCardPreview(){
+  const group = mailGroup();
+  const s = group.students.find(x=> mailSendState.selected.has(x.id)) || group.students[0];
+  await downloadDigitalCard(s.id, group.id);
+}
+
 async function startMailSend(){
   const ms = mailSendState;
   const group = mailGroup();
   if(!ms || !group || ms.sending) return;
-  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para generar los informes.'); return; }
+  const isCard = ms.kind === 'card';
+  if(!isCard && typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para generar los informes.'); return; }
   const recipients = group.students.filter(s=> ms.selected.has(s.id) && isValidEmail(s.email));
   if(recipients.length === 0) return;
   // Importante: el permiso se pide antes de cualquier espera, para que el navegador no bloquee la ventana de Google
@@ -6324,8 +6354,9 @@ async function startMailSend(){
     showToast(e.message);
     return;
   }
-  const tpl = ensureMailTemplate();
+  const tpl = mailTpl();
   const opts = reportOptionsFromTemplate();
+  if(isCard){ ensureAllCards(); if(ensurePortalConfig().enabled) ensureWebTokens(); }
   ms.sending = true; ms.confirming = false;
   ms.status = {};
   recipients.forEach(s=> ms.status[s.id] = { state: 'pending' });
@@ -6336,11 +6367,14 @@ async function startMailSend(){
     ms.status[s.id] = { state: 'sending' };
     refreshMailRow(s);
     try{
-      const blob = await buildDocxBlob(buildStudentHistoryBody(group, s, opts), { nombre: s.name, curso: group.name });
-      const mime = await buildReportMime(s.email.trim(), fillMailPlaceholders(tpl.subject, group, s), fillMailPlaceholders(tpl.body, group, s), reportFileName(s), blob);
+      const subject = fillMailPlaceholders(tpl.subject, group, s);
+      const body = fillMailPlaceholders(tpl.body, group, s).replace(/\n{3,}/g, '\n\n');
+      const mime = isCard
+        ? await buildReportMime(s.email.trim(), subject, body, digitalCardFileName(s), await renderDigitalCardBlob(digitalCardFor(group, s)), 'image/png')
+        : await buildReportMime(s.email.trim(), subject, body, reportFileName(s), await buildDocxBlob(buildStudentHistoryBody(group, s, opts), { nombre: s.name, curso: group.name }));
       await gmailSendMime(token, mime);
       ms.status[s.id] = { state: 'ok' };
-      s.lastReportSent = new Date().toISOString();
+      s[isCard ? 'lastCardSent' : 'lastReportSent'] = new Date().toISOString();
       ok++;
     }catch(e){
       ms.status[s.id] = { state: 'error', msg: e.message };
@@ -6354,7 +6388,7 @@ async function startMailSend(){
   saveState();
   renderMailReports();
   if(fatal) showToast(fatal.message);
-  else showToast(fail ? `Enviados ${ok}, con error ${fail}. Revisa el estado bajo cada correo.` : `✅ ${ok} informe(s) enviado(s)`);
+  else showToast(fail ? `Enviados ${ok}, con error ${fail}. Revisa el estado bajo cada correo.` : `✅ ${ok} ${isCard ? 'tarjeta(s) digital(es) enviada(s)' : 'informe(s) enviado(s)'}`);
 }
 function refreshMailRow(s){
   const cell = document.getElementById('mailStatus_' + s.id);
@@ -6836,6 +6870,47 @@ function updatePortalOption(field, value){
   saveState();
   if(field === 'url') renderPremios(getActiveGroup());
 }
+/* Copia el enlace personal del portal (para enviarlo por WhatsApp, Classroom, etc.) */
+async function copyPortalLink(studentId){
+  const group = getActiveGroup();
+  const s = group.students.find(x=> x.id === studentId);
+  if(!s) return;
+  const hadToken = !!s.webToken;
+  ensureWebTokens();
+  const url = portalStudentUrl(s);
+  let ok = false;
+  try{ if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(url); ok = true; } }catch(e){}
+  if(!ok){
+    // Alternativa para navegadores sin acceso al portapapeles
+    const ta = document.createElement('textarea');
+    ta.value = url; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try{ ok = document.execCommand('copy'); }catch(e){}
+    ta.remove();
+  }
+  if(ok){
+    showToast(`📋 Enlace de ${s.name} copiado. Pégalo en WhatsApp, Classroom o donde quieras.` + (hadToken ? '' : ' Es nuevo: presiona 🚀 Publicar ahora para que funcione.'));
+  } else {
+    showCopyLinkFallback(s.name, url);
+  }
+}
+function showCopyLinkFallback(name, url){
+  document.getElementById('copyLinkOverlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'copyLinkOverlay';
+  overlay.innerHTML = `
+    <div class="modal-box app-font" style="max-width:480px;">
+      <button class="modal-close" onclick="document.getElementById('copyLinkOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">📋 Enlace de ${escapeHtml(name)}</h2>
+      <p class="muted">Este navegador no permitió copiar automáticamente. Mantén presionado el enlace (o selecciónalo) y cópialo.</p>
+      <textarea readonly rows="3" style="width:100%;" onclick="this.select()">${escapeHtml(url)}</textarea>
+    </div>`;
+  overlay.addEventListener('click', e=>{ if(e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  overlay.querySelector('textarea').select();
+}
+
 function openPortalForStudent(studentId){
   const group = getActiveGroup();
   const s = group.students.find(x=> x.id === studentId);
@@ -7295,6 +7370,193 @@ function forgetGhToken(){
   document.getElementById('ghSetupOverlay')?.remove();
   if(PUNTOS_TABS.includes(currentTab)) renderPremios(getActiveGroup());
   showToast('Llave olvidada en este dispositivo');
+}
+
+/* ============ TARJETA DIGITAL (imagen PNG para el celular) ============ */
+/* Tiene el mismo QR que la tarjeta impresa: sirve en tu escáner, en el modo consulta y (si el portal está activo)
+   su QR abre el portal del estudiante. Usa los colores del diseño de la tarjeta (general o propio del estudiante). */
+function digitalCardFor(group, s){
+  return { studentId: s.id, name: s.name, course: s.card ? coursesLabelForCard(s.card) : group.name, code: s.card,
+    alias: s.cardAlias || '', qr: cardQrData(s), design: s.cardDesign || null };
+}
+function colorIsDark(hex){
+  const m = String(hex || '').match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if(!m) return false;
+  const [r, g, b] = [m[1], m[2], m[3]].map(x=> parseInt(x, 16) / 255);
+  return (0.299 * r + 0.587 * g + 0.114 * b) < 0.55;
+}
+function loadImageEl(src){
+  return new Promise(res=>{ if(!src){ res(null); return; } const i = new Image(); i.onload = ()=> res(i); i.onerror = ()=> res(null); i.src = src; });
+}
+function wrapCanvasText(ctx, text, maxW, maxLines){
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  words.forEach(w=>{
+    const test = line ? line + ' ' + w : w;
+    if(ctx.measureText(test).width <= maxW || !line) line = test;
+    else { lines.push(line); line = w; }
+  });
+  if(line) lines.push(line);
+  if(lines.length > maxLines){
+    const kept = lines.slice(0, maxLines);
+    let last = kept[maxLines - 1] + '…';
+    while(ctx.measureText(last).width > maxW && last.length > 2) last = last.slice(0, -2) + '…';
+    kept[maxLines - 1] = last;
+    return kept;
+  }
+  return lines;
+}
+function roundRectPath(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+async function renderDigitalCardBlob(card){
+  const cfg = state.cardConfig || DEFAULT_CARD_CONFIG;
+  const des = effectiveDesign(cfg, card.design);
+  const images = await loadCardImagesFor([card]);
+  const front = images[card.studentId] && images[card.studentId].front;
+  const [logoImg, frontImg] = await Promise.all([loadImageEl(cfg.logo), loadImageEl(front)]);
+  const W = 1080, H = 1620, PAD = 70;
+  const FONT = 'Calibri, Carlito, "Segoe UI", Roboto, Arial, sans-serif';
+  const accent = des.frame !== 'none' ? des.frame : '#2B2A3D';
+  const bg = des.bg !== 'none' ? des.bg : '#F6F5FB';
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+
+  // Fondo y marco
+  ctx.fillStyle = accent; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = bg; roundRectPath(ctx, 28, 28, W - 56, H - 56, 48); ctx.fill();
+
+  // Encabezado (color del marco, o la imagen de frente del estudiante)
+  const headH = 300;
+  ctx.save(); roundRectPath(ctx, 28, 28, W - 56, headH, 48); ctx.clip();
+  ctx.fillStyle = accent; ctx.fillRect(28, 28, W - 56, headH);
+  let headText = colorIsDark(accent) ? '#FFFFFF' : '#1A1A1A';
+  if(frontImg){
+    const scale = Math.max((W - 56) / frontImg.width, headH / frontImg.height);
+    const iw = frontImg.width * scale, ih = frontImg.height * scale;
+    ctx.drawImage(frontImg, 28 + (W - 56 - iw) / 2, 28 + (headH - ih) / 2, iw, ih);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(28, 28, W - 56, headH);
+    headText = '#FFFFFF';
+  }
+  ctx.restore();
+  let hx = PAD + 10;
+  if(logoImg){
+    const lh = 150, lw = Math.min(220, logoImg.width * (lh / logoImg.height));
+    ctx.fillStyle = '#FFFFFF'; roundRectPath(ctx, hx - 12, 28 + (headH - lh) / 2 - 12, lw + 24, lh + 24, 20); ctx.fill();
+    ctx.drawImage(logoImg, hx, 28 + (headH - lh) / 2, lw, lh);
+    hx += lw + 40;
+  }
+  ctx.fillStyle = headText; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const headW = W - PAD - 10 - hx;
+  ctx.font = `bold 50px ${FONT}`;
+  const titleLines = wrapCanvasText(ctx, (cfg.title || 'Tarjeta de puntos').toUpperCase(), headW, 2);
+  const schoolLines = cfg.school ? (ctx.font = `36px ${FONT}`, wrapCanvasText(ctx, cfg.school, headW, 2)) : [];
+  const blockH = titleLines.length * 58 + schoolLines.length * 44;
+  let hy = 28 + headH / 2 - blockH / 2 + 29;
+  ctx.font = `bold 50px ${FONT}`; titleLines.forEach(l=>{ ctx.fillText(l, hx, hy); hy += 58; });
+  ctx.font = `36px ${FONT}`; schoolLines.forEach(l=>{ ctx.fillText(l, hx, hy - 7); hy += 44; });
+
+  // Nombre, apodo y curso
+  ctx.textAlign = 'center'; ctx.fillStyle = '#1A1A1A';
+  let y = 28 + headH + 90;
+  ctx.font = `bold 76px ${FONT}`;
+  wrapCanvasText(ctx, card.name, W - 2 * PAD, 2).forEach(l=>{ ctx.fillText(l, W / 2, y); y += 86; });
+  if(cfg.showAlias && card.alias){
+    ctx.font = `italic 44px ${FONT}`; ctx.fillStyle = '#444444';
+    wrapCanvasText(ctx, '“' + card.alias + '”', W - 2 * PAD, 1).forEach(l=>{ ctx.fillText(l, W / 2, y); y += 56; });
+  }
+  ctx.font = `40px ${FONT}`; ctx.fillStyle = '#444444';
+  wrapCanvasText(ctx, card.course, W - 2 * PAD, 2).forEach(l=>{ ctx.fillText(l, W / 2, y); y += 50; });
+
+  // QR (siempre negro sobre blanco para que se pueda escanear)
+  const qr = qrcode(0, 'M');
+  qr.addData(card.qr || (QR_PREFIX + card.code));
+  qr.make();
+  const n = qr.getModuleCount();
+  const footerH = 170;
+  const avail = Math.min(W - 2 * PAD - 60, H - 28 - footerH - (y + 20));
+  const cell = Math.max(4, Math.floor(avail / (n + 8)));
+  const qrSize = cell * (n + 8);
+  const qx = Math.round((W - qrSize) / 2), qy = Math.round(y + 20 + (avail - qrSize) / 2);
+  ctx.fillStyle = '#FFFFFF'; roundRectPath(ctx, qx, qy, qrSize, qrSize, 28); ctx.fill();
+  ctx.fillStyle = '#000000';
+  for(let r = 0; r < n; r++) for(let col = 0; col < n; col++){
+    if(qr.isDark(r, col)) ctx.fillRect(qx + (col + 4) * cell, qy + (r + 4) * cell, cell, cell);
+  }
+
+  // Código y pie
+  ctx.fillStyle = '#1A1A1A'; ctx.font = `bold 46px Consolas, "Courier New", monospace`;
+  ctx.fillText(card.code || '', W / 2, H - 28 - footerH + 45);
+  ctx.fillStyle = '#555555'; ctx.font = `32px ${FONT}`;
+  ctx.fillText('Muestra este código para sumar puntos o canjear.', W / 2, H - 28 - footerH + 105);
+  ctx.fillText('Tarjeta personal: no la compartas.', W / 2, H - 28 - footerH + 145);
+
+  return new Promise(res=> c.toBlob(b=> res(b), 'image/png'));
+}
+function digitalCardFileName(s){
+  // Sin tildes ni ñ: algunos programas muestran mal esos caracteres en nombres de archivo dentro de un ZIP
+  const ascii = s.name.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return `Tarjeta_${ascii || 'estudiante'}.png`;
+}
+
+async function downloadDigitalCard(studentId, groupId){
+  const group = groupId ? state.groups.find(g=> g.id === groupId) : getActiveGroup();
+  const s = group && group.students.find(x=> x.id === studentId);
+  if(!s) return;
+  ensureAllCards();
+  if(ensurePortalConfig().enabled) ensureWebTokens();
+  const blob = await renderDigitalCardBlob(digitalCardFor(group, s));
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = digitalCardFileName(s);
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  showToast('Tarjeta digital de ' + s.name + ' descargada');
+}
+async function downloadDigitalCardsZip(groupId){
+  const group = state.groups.find(g=> g.id === groupId) || getActiveGroup();
+  if(!group || group.students.length === 0){ showToast('Este curso no tiene estudiantes'); return; }
+  if(typeof JSZip === 'undefined'){ showToast('Se necesita conexión a internet para armar el ZIP.'); return; }
+  ensureAllCards();
+  if(ensurePortalConfig().enabled) ensureWebTokens();
+  showToastQuick('Generando tarjetas digitales…');
+  const zip = new JSZip();
+  const used = new Set();
+  for(const s of group.students){
+    let name = digitalCardFileName(s);
+    if(used.has(name)) name = name.replace('.png', '_' + s.card + '.png');
+    used.add(name);
+    zip.file(name, await renderDigitalCardBlob(digitalCardFor(group, s)));
+  }
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `Tarjetas_digitales_${safeFileName(group.name)}.zip`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  showToast(`${group.students.length} tarjeta(s) digital(es) descargada(s) en un ZIP`);
+}
+
+function digitalCardSectionHtml(group){
+  const portal = ensurePortalConfig().enabled;
+  return `
+    <div class="card app-font">
+      <h2>Tarjeta digital</h2>
+      <p class="muted">Una imagen de la tarjeta para guardar en el celular, con el mismo QR que la impresa: funciona en tu escáner y en el modo consulta${portal ? ', y abre el portal del estudiante' : ''}. Usa los colores de su diseño.${portal ? ' En el portal, el botón <strong>🪪 Mi tarjeta</strong> también muestra su QR.' : ''}</p>
+      <div class="row" style="gap:6px;">
+        <button class="btn btn-accent btn-sm" onclick="openMailReports(null, 'card')">✉️ Enviar por correo</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadDigitalCardsZip('${group.id}')">⬇️ Descargar las de ${escapeHtml(group.name)} (ZIP)</button>
+      </div>
+      <p class="muted" style="font-size:0.78rem; margin:6px 0 0;">Para una sola, usa el botón 📲 de su fila en "Códigos, apodos e imágenes".</p>
+    </div>`;
 }
 
 /* ============ TAB: ENTREGAS (guías/trabajos: en plazo, fuera de plazo, no entregado) ============ */
