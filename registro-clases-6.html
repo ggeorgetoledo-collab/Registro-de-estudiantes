@@ -548,6 +548,14 @@
   .scan-disabled{ opacity:0.45; cursor:not-allowed; }
   .scan-flash{ margin-top:8px; font-weight:700; color:var(--success); min-height:1.2em; opacity:0; }
   .scan-flash.show{ animation: scanFlash 2.4s ease forwards; }
+  .link-qr-box{ max-width:460px; text-align:center; }
+  .link-qr-name{ font-family:'Poppins','Inter',sans-serif; font-weight:800; font-size:1.4rem; line-height:1.2; margin-top:6px; color:var(--text); }
+  .link-qr-code{ position:relative; width:min(78vw, 360px); margin:14px auto 4px; background:#fff; padding:14px; border-radius:16px; border:1px solid var(--border); }
+  .link-qr-code svg{ width:100%; height:auto; display:block; }
+  .link-qr-code.hidden-qr{ cursor:pointer; }
+  .link-qr-code.hidden-qr svg{ filter:blur(14px); opacity:0.35; }
+  .link-qr-cover{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:700; color:#2B2A3D; font-size:1.05rem; gap:4px; }
+  .link-qr-cover span{ font-weight:500; font-size:0.78rem; color:#666; }
   .input-invalid{ border-color:var(--danger) !important; background:var(--danger-light) !important; }
   .mail-setup{ margin-top:10px; border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:var(--primary-light); }
   .mail-setup summary{ cursor:pointer; font-weight:600; font-size:0.88rem; }
@@ -5593,7 +5601,8 @@ function renderPremios(group){
                   <button class="btn btn-outline btn-sm" title="Imprimir solo esta tarjeta" onclick="openCardDesigner(['${group.id}'], '${s.id}')">🖨️</button>
                   <button class="btn btn-outline btn-sm" title="Descargar tarjeta digital (imagen para el celular)" onclick="downloadDigitalCard('${s.id}')">📲</button>
                   ${ensurePortalConfig().enabled ? `<button class="btn btn-outline btn-sm" title="Abrir su portal (como lo verá el estudiante)" onclick="openPortalForStudent('${s.id}')">🌐</button>
-                  <button class="btn btn-outline btn-sm" title="Copiar su enlace personal al portal (para WhatsApp, Classroom…)" onclick="copyPortalLink('${s.id}')">📋</button>` : ''}
+                  <button class="btn btn-outline btn-sm" title="Copiar su enlace personal al portal (para WhatsApp, Classroom…)" onclick="copyPortalLink('${s.id}')">📋</button>
+                  <button class="btn btn-outline btn-sm" title="Mostrar en pantalla el QR de su enlace, para que lo escanee con su celular" onclick="openLinkQr('${s.id}')">📱</button>` : ''}
                   <button class="btn btn-outline btn-sm" title="Vincular con su registro en otro curso (misma tarjeta)" onclick="openManualLink('${s.id}')">🔗</button>
                   ${linkedRecords(s).length > 1 ? `<button class="btn btn-outline btn-sm" title="Separar de la tarjeta compartida" onclick="unlinkStudent('${s.id}')">✂️</button>` : ''}
                   <button class="btn btn-outline btn-sm" title="Código nuevo (tarjeta perdida)" onclick="regenerateStudentCard('${s.id}')">🔄</button>
@@ -6870,6 +6879,77 @@ function updatePortalOption(field, value){
   saveState();
   if(field === 'url') renderPremios(getActiveGroup());
 }
+/* ---- Repartir enlaces con QR en pantalla: el estudiante lo escanea con su celular y abre su portal ---- */
+let linkQrState = null; // { groupId, studentId, shown }
+function openLinkQr(studentId){
+  const group = getActiveGroup();
+  if(!ensurePortalConfig().enabled){ showToast('Activa primero el portal en 🌐 Portal'); return; }
+  if(!group || group.students.length === 0){ showToast('Este curso no tiene estudiantes'); return; }
+  ensureAllCards();
+  ensureWebTokens();
+  const sid = studentId || group.students[0].id;
+  linkQrState = { groupId: group.id, studentId: sid, shown: false };
+  renderLinkQr();
+}
+function closeLinkQr(){
+  document.getElementById('linkQrOverlay')?.remove();
+  linkQrState = null;
+}
+function stepLinkQr(dir){
+  const group = state.groups.find(g=> g.id === linkQrState.groupId);
+  const idx = group.students.findIndex(s=> s.id === linkQrState.studentId);
+  const next = group.students[(idx + dir + group.students.length) % group.students.length];
+  linkQrState = { ...linkQrState, studentId: next.id, shown: false };
+  renderLinkQr();
+}
+function jumpLinkQr(studentId){
+  linkQrState = { ...linkQrState, studentId, shown: false };
+  renderLinkQr();
+}
+function revealLinkQr(){
+  linkQrState.shown = !linkQrState.shown;
+  renderLinkQr();
+}
+function renderLinkQr(){
+  if(!linkQrState) return;
+  const group = state.groups.find(g=> g.id === linkQrState.groupId);
+  const s = group && group.students.find(x=> x.id === linkQrState.studentId);
+  if(!s){ closeLinkQr(); return; }
+  const idx = group.students.indexOf(s);
+  let overlay = document.getElementById('linkQrOverlay');
+  if(!overlay){
+    overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'linkQrOverlay';
+    overlay.addEventListener('click', e=>{ if(e.target === overlay) closeLinkQr(); });
+    document.body.appendChild(overlay);
+  }
+  const shown = linkQrState.shown;
+  overlay.innerHTML = `
+    <div class="modal-box app-font link-qr-box">
+      <button class="modal-close" onclick="closeLinkQr()">✕</button>
+      <div class="muted" style="font-weight:600;">📲 Enlace personal al portal · ${idx + 1} de ${group.students.length}</div>
+      <div class="link-qr-name">${escapeHtml(s.name)}</div>
+      <div class="muted">${escapeHtml(s.card ? coursesLabelForCard(s.card) : group.name)}</div>
+      <div class="link-qr-code${shown ? '' : ' hidden-qr'}" onclick="${shown ? '' : 'revealLinkQr()'}">
+        ${qrSvgForData(portalStudentUrl(s))}
+        ${shown ? '' : '<div class="link-qr-cover">👁️ Toca para mostrar el QR<br><span>Solo cuando el estudiante esté frente a la pantalla</span></div>'}
+      </div>
+      <p class="muted" style="font-size:0.85rem; margin:6px 0 0;">${shown
+        ? 'Escanea con la cámara de tu celular y abre el enlace. Luego guárdalo en tu <strong>pantalla de inicio</strong> para entrar siempre.'
+        : 'Al mostrarlo, el estudiante lo escanea con la cámara de su celular y abre su registro.'}</p>
+      <div class="row" style="justify-content:center; gap:6px; margin-top:12px; flex-wrap:wrap;">
+        <button class="btn btn-outline btn-sm" onclick="stepLinkQr(-1)">← Anterior</button>
+        ${shown ? '<button class="btn btn-outline btn-sm" onclick="revealLinkQr()">🙈 Ocultar</button>' : '<button class="btn btn-accent btn-sm" onclick="revealLinkQr()">👁️ Mostrar QR</button>'}
+        <button class="btn btn-accent btn-sm" onclick="stepLinkQr(1)">Siguiente →</button>
+      </div>
+      <select style="margin-top:10px; width:100%;" onchange="jumpLinkQr(this.value)">
+        ${group.students.map(st=> `<option value="${st.id}"${st.id === s.id ? ' selected' : ''}>${escapeHtml(st.name)}</option>`).join('')}
+      </select>
+      <p class="muted" style="font-size:0.75rem; margin:8px 0 0;">Muestra los datos de tu última publicación (🚀 Publicar ahora).</p>
+    </div>`;
+}
+
 /* Copia el enlace personal del portal (para enviarlo por WhatsApp, Classroom, etc.) */
 async function copyPortalLink(studentId){
   const group = getActiveGroup();
@@ -7554,8 +7634,9 @@ function digitalCardSectionHtml(group){
       <div class="row" style="gap:6px;">
         <button class="btn btn-accent btn-sm" onclick="openMailReports(null, 'card')">✉️ Enviar por correo</button>
         <button class="btn btn-outline btn-sm" onclick="downloadDigitalCardsZip('${group.id}')">⬇️ Descargar las de ${escapeHtml(group.name)} (ZIP)</button>
+        ${portal ? `<button class="btn btn-outline btn-sm" onclick="openLinkQr()">📱 Repartir enlaces con QR en pantalla</button>` : ''}
       </div>
-      <p class="muted" style="font-size:0.78rem; margin:6px 0 0;">Para una sola, usa el botón 📲 de su fila en "Códigos, apodos e imágenes".</p>
+      <p class="muted" style="font-size:0.78rem; margin:6px 0 0;">Para una sola, usa el botón 📲 de su fila en "Códigos, apodos e imágenes".${portal ? ' Con 📱 muestras en tu pantalla el QR de su enlace personal, para que lo escanee con su celular y abra su portal.' : ''}</p>
     </div>`;
 }
 
