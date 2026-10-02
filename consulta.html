@@ -77,6 +77,15 @@
   .ggroup{ border:1px solid var(--border); border-radius:12px; padding:0 12px; margin:8px 0; background:var(--bg); }
   .ggroup .ghead{ border-bottom:1px solid var(--border); }
   .gitems{ border-left:3px solid var(--primary-light); padding-left:10px; margin:2px 0 4px; }
+  .ent-unit{ border:1px solid var(--border); border-radius:12px; padding:0 12px; margin:8px 0; background:var(--bg); }
+  .ent-unit > summary{ display:flex; align-items:center; gap:10px; padding:10px 0; color:var(--text); font-size:1rem; font-weight:400; }
+  .ent-unit[open] > summary{ border-bottom:1px solid var(--border); }
+  .ent-unit > summary .main{ flex:1; min-width:0; }
+  .ent-unit > summary .title{ font-weight:700; overflow-wrap:anywhere; }
+  .ent-unit > summary .sub{ font-size:0.8rem; color:var(--dim); margin-top:2px; }
+  .ent-unit .gitems .row:last-child{ border-bottom:none; }
+  .ent-unit .caret{ color:var(--primary); font-weight:700; transition:transform .15s; }
+  .ent-unit:not([open]) .caret{ transform:rotate(-90deg); }
   .row.sm{ padding:6px 0; }
   .row.sm .title{ font-weight:500; font-size:0.9rem; }
   .row.sm .grade{ min-width:38px; padding:2px 6px; font-size:0.9rem; }
@@ -263,13 +272,41 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       <span class="chip ${c.p ? 'ok' : 'bad'}">${c.p ? 'Presente' : 'Ausente'}</span></div>`, 8) : `<div class="empty">${proc ? 'No hay clases registradas en esta unidad.' : 'Aún no hay clases registradas.'}</div>`;
     html += `</div>`;
 
-    // Entregas
+    // Entregas, agrupadas por unidad (las de una misma unidad forman una nota)
     const entregas = (d.entregas || []).filter(inProc).sort((x,y)=> (y.d||'').localeCompare(x.d||''));
-    html += `<div class="card"><h2>📥 Entregas</h2>`;
-    html += entregas.length ? listWithMore(entregas, e=>{
+    const notasEnt = d.notasEntregas || [];
+    const entregaRow = e=>{
       const st = ESTADOS[e.e] || ['Pendiente', 'neutral'];
       return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${fdate(e.d)}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
-    }, 8) : `<div class="empty">${proc ? 'No hay entregas en esta unidad.' : 'Aún no hay entregas registradas.'}</div>`;
+    };
+    const unitLabel = n=> /^unidad\b/i.test(String(n || '').trim()) ? n : 'Unidad ' + n;
+    const procNames = new Map((per.procesos || []).map(x=> [x.id, x.n]));
+    const byUnit = new Map();
+    entregas.forEach(e=>{ const k = procNames.has(e.pr) ? e.pr : ''; if(!byUnit.has(k)) byUnit.set(k, []); byUnit.get(k).push(e); });
+    const grupos = [...byUnit.entries()].map(([pr, list])=> ({ pr, list }))
+      .sort((a,b)=> (!a.pr) - (!b.pr) || (b.list[0].d || '').localeCompare(a.list[0].d || ''));
+    html += `<div class="card"><h2>📥 Entregas</h2>`;
+    if(!entregas.length){
+      html += `<div class="empty">${proc ? 'No hay entregas en esta unidad.' : 'Aún no hay entregas registradas.'}</div>`;
+    } else if(grupos.length === 1 && !grupos[0].pr){
+      const general = notasEnt.filter(x=> !x.pr);
+      if(general.length) html += `<div class="summary">${general.map(x=> `<span>${esc(x.n)} <span class="grade ${x.nota === null || x.nota === undefined ? 'none' : (x.nota < 4 ? 'bad' : '')}">${nota(x.nota)}</span></span>`).join('')}</div>`;
+      html += listWithMore(entregas, entregaRow, 8);
+    } else {
+      html += grupos.map((g, i)=>{
+        const notas = notasEnt.filter(x=> x.pr === g.pr);
+        const ok = g.list.filter(e=> e.e === 'en_plazo').length;
+        const title = g.pr ? 'Entregas ' + unitLabel(procNames.get(g.pr)) : 'Otras entregas';
+        const n = notas[0];
+        const cls = !n || n.nota === null || n.nota === undefined ? 'none' : (n.nota < 4 ? 'bad' : '');
+        return `<details class="ent-unit"${i === 0 || proc ? ' open' : ''}>
+          <summary><div class="main"><div class="title">${esc(title)}</div>
+            <div class="sub">${g.list.length} entrega(s) · ${ok} a tiempo${n ? ' · forman la nota "' + esc(n.n) + '"' : (g.pr ? '' : ' · no forman parte de una nota de unidad')}</div></div>
+            ${n ? `<span class="grade gtotal ${cls}">${nota(n.nota)}</span>` : ''}<span class="caret">▾</span></summary>
+          <div class="gitems">${g.list.map(entregaRow).join('')}</div>
+        </details>`;
+      }).join('');
+    }
     html += `</div>`;
 
     // Puntos

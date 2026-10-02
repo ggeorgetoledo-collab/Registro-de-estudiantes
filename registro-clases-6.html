@@ -557,6 +557,13 @@
   .link-qr-cover{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:700; color:#2B2A3D; font-size:1.05rem; gap:4px; }
   .link-qr-cover span{ font-weight:500; font-size:0.78rem; color:#666; }
   .input-invalid{ border-color:var(--danger) !important; background:var(--danger-light) !important; }
+  .entrega-unit{ border:1px solid var(--border); border-radius:12px; margin:10px 0; overflow:hidden; }
+  .entrega-unit > summary{ cursor:pointer; list-style:none; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:10px 12px; background:var(--primary-light); }
+  .entrega-unit > summary::-webkit-details-marker{ display:none; }
+  .entrega-unit > summary::after{ content:'▾'; margin-left:auto; color:var(--primary); font-weight:700; }
+  .entrega-unit:not([open]) > summary::after{ content:'▸'; }
+  .entrega-unit .eu-title{ font-weight:700; }
+  .entrega-unit .eu-body{ padding:0 12px; }
   .mail-setup{ margin-top:10px; border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:var(--primary-light); }
   .mail-setup summary{ cursor:pointer; font-weight:600; font-size:0.88rem; }
   .mail-setup ol{ margin:8px 0 0; padding-left:20px; font-size:0.85rem; line-height:1.45; }
@@ -6765,6 +6772,10 @@ function buildPortalPayload(group, s){
     const st = e.estados ? e.estados[sid] : null;
     return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '' };
   });
+  // Nota que forman las entregas de cada unidad (evaluaciones vinculadas a entregas)
+  const notasEntregas = evalsSorted.filter(e=> e.entregaLink).map(e=> ({
+    pr: e.entregaLink.processId || '', n: e.name, nota: computeStudentEvalGrade(e, sid),
+  }));
   const payload = {
     nombre: s.name, curso: group.name, periodo: period ? period.name : '',
     generado: new Date().toISOString(),
@@ -6782,6 +6793,7 @@ function buildPortalPayload(group, s){
     },
     premios: (state.premios || []).map(x=> ({ n: x.name, c: x.cost, t: x.type === 'decimas' ? 'd' : 'p' })),
     entregas,
+    notasEntregas,
   };
   if(p.includeBitacora){
     // Solo registros dirigidos a este estudiante (los generales del curso pueden mencionar a otros)
@@ -7750,9 +7762,9 @@ function renderEntregas(group){
           <input type="date" id="entDate" value="${today}">
         </div>
       </div>
-      <label style="margin-top:6px;">Proceso</label>
+      <label style="margin-top:6px;">Unidad (proceso) <span class="muted" style="font-weight:400;">— las entregas de una misma unidad se agrupan y forman una nota</span></label>
       <select id="entProcess">
-        <option value="">Ninguno (sin proceso)</option>
+        <option value="">Sin unidad</option>
         ${getActiveProcesses(group).map(p=>`<option value="${p.id}" ${p.id===group.activeProcessId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
       </select>
       <div style="margin-top:10px;">
@@ -7786,28 +7798,7 @@ function renderEntregas(group){
 
     <div class="card app-font">
       <h2>Entregas registradas (${entregas.length})</h2>
-      ${entregas.length === 0 ? '<div class="empty-state">Aún no has registrado entregas.</div>' :
-        entregas.map(e=>{
-          const estados = e.estados || {};
-          const counts = { en_plazo:0, fuera_plazo:0, no_entregada:0 };
-          Object.values(estados).forEach(v=>{ if(counts[v] !== undefined) counts[v]++; });
-          return `
-            <div class="student-list-item" style="align-items:flex-start;">
-              <div>
-                <strong>${escapeHtml(e.name)}</strong>
-                ${(()=>{ const dl = getEntregaDeadline(e); return dl ? `<span class="pill" style="margin-left:6px;">🔔 ${formatDate(dl.fecha)} ${dl.hora}</span>` : ''; })()}
-                <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada</div>
-              </div>
-              <div class="row" style="gap:6px;">
-                <button class="btn btn-accent btn-sm" onclick="openEntregaValues('${e.id}')">Completar</button>
-                <button class="btn btn-outline btn-sm" onclick="openEntregaEditForm('${e.id}')">✎ Datos</button>
-                <button class="btn btn-outline btn-sm" onclick="openEntregaDeadlineForm('${e.id}')">🔔 Plazo</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteEntrega('${e.id}')">Eliminar</button>
-              </div>
-            </div>
-          `;
-        }).join('')
-      }
+      ${entregas.length === 0 ? '<div class="empty-state">Aún no has registrado entregas.</div>' : entregasByUnitHtml(group, entregas)}
     </div>
 
     ${entregas.length > 0 ? `
@@ -7917,6 +7908,96 @@ function renderEntregas(group){
     renderEntregas(group);
     showToast('Entrega creada, marca el estado de cada estudiante');
   });
+}
+
+/* ---- Entregas agrupadas por unidad (proceso): cada unidad muestra su nota vinculada ---- */
+let entregaUnitOpen = {}; // unidades desplegadas en la lista (se recuerda mientras la app está abierta)
+function entregaUnitLabel(name){
+  return /^unidad\b/i.test(String(name || '').trim()) ? name : 'Unidad ' + name;
+}
+// Agrupa las entregas por unidad, en el orden de la entrega más reciente de cada unidad. Las sin unidad van al final.
+function groupEntregasByUnit(group, entregas){
+  const byId = new Map();
+  entregas.forEach(e=>{
+    const k = e.processId && (group.processes || []).some(p=> p.id === e.processId) ? e.processId : '';
+    if(!byId.has(k)) byId.set(k, []);
+    byId.get(k).push(e);
+  });
+  const out = [...byId.entries()].map(([pid, list])=>{
+    const proc = pid ? group.processes.find(p=> p.id === pid) : null;
+    return { pid, name: proc ? proc.name : '', list, last: list.reduce((m, e)=> (e.date || '') > m ? (e.date || '') : m, '') };
+  });
+  out.sort((a,b)=> (!a.pid) - (!b.pid) || b.last.localeCompare(a.last));
+  return out;
+}
+// Notas vinculadas a las entregas de una unidad (pid '' = notas que cuentan todas las entregas del periodo)
+function entregaUnitGradeEvals(group, pid){
+  return getActiveEvaluations(group).filter(ev=> ev.entregaLink && (ev.entregaLink.processId || '') === pid);
+}
+function entregasByUnitHtml(group, entregas){
+  const units = groupEntregasByUnit(group, entregas);
+  const procs = getActiveProcesses(group);
+  const onlyNoUnit = units.length === 1 && !units[0].pid;
+  const rowHtml = e=>{
+    const estados = e.estados || {};
+    const counts = { en_plazo:0, fuera_plazo:0, no_entregada:0 };
+    Object.values(estados).forEach(v=>{ if(counts[v] !== undefined) counts[v]++; });
+    const dl = getEntregaDeadline(e);
+    return `
+      <div class="student-list-item" style="align-items:flex-start;">
+        <div style="min-width:0;">
+          <strong>${escapeHtml(e.name)}</strong>
+          ${dl ? `<span class="pill" style="margin-left:6px;">🔔 ${formatDate(dl.fecha)} ${dl.hora}</span>` : ''}
+          <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada</div>
+          ${procs.length ? `<label class="muted" style="font-size:0.74rem; display:flex; align-items:center; gap:6px; margin-top:4px;">📂
+            <select style="width:auto; max-width:220px; font-size:0.78rem; padding:3px 6px;" onchange="setEntregaUnit('${e.id}', this.value)">
+              <option value="">Sin unidad</option>
+              ${procs.map(p=>`<option value="${p.id}" ${p.id===e.processId?'selected':''}>${escapeHtml(entregaUnitLabel(p.name))}</option>`).join('')}
+            </select></label>` : ''}
+        </div>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-accent btn-sm" onclick="openEntregaValues('${e.id}')">Completar</button>
+          <button class="btn btn-outline btn-sm" onclick="openEntregaEditForm('${e.id}')">✎ Datos</button>
+          <button class="btn btn-outline btn-sm" onclick="openEntregaDeadlineForm('${e.id}')">🔔 Plazo</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteEntrega('${e.id}')">Eliminar</button>
+        </div>
+      </div>`;
+  };
+  const hint = procs.length === 0
+    ? `<p class="muted" style="font-size:0.78rem;">💡 Para agrupar las entregas por unidad, crea las unidades con <strong>+ Proceso</strong> (en "Más opciones") y asígnaselas a cada entrega.</p>`
+    : (onlyNoUnit ? `<p class="muted" style="font-size:0.78rem;">💡 Asigna una unidad a cada entrega (📂) para agruparlas: las de una misma unidad forman una nota.</p>` : '');
+  if(onlyNoUnit) return hint + units[0].list.map(rowHtml).join('');
+  return hint + units.map((u, i)=>{
+    const evs = entregaUnitGradeEvals(group, u.pid);
+    const key = u.pid || '_none';
+    const open = entregaUnitOpen[key] !== undefined ? entregaUnitOpen[key] : i === 0;
+    const title = u.pid ? 'Entregas ' + entregaUnitLabel(u.name) : 'Entregas sin unidad';
+    const gradeInfo = !u.pid
+      ? '<span class="muted">No forman parte de la nota de ninguna unidad</span>'
+      : (evs.length
+          ? `<span class="pill" style="background:var(--primary-light); color:var(--primary); border-color:var(--primary-border);">🎯 Nota: ${evs.map(ev=> escapeHtml(ev.name)).join(', ')}</span>`
+          : `<button class="btn btn-ink btn-sm" onclick="event.preventDefault(); openEntregasToGradeForm('${u.pid}')">🎯 Convertir en nota</button>`);
+    return `
+      <details class="entrega-unit" ${open ? 'open' : ''} ontoggle="entregaUnitOpen['${key}'] = this.open">
+        <summary>
+          <span class="eu-title">📂 ${escapeHtml(title)}</span>
+          <span class="muted" style="font-size:0.8rem;">${u.list.length} entrega(s)</span>
+          ${gradeInfo}
+        </summary>
+        <div class="eu-body">${u.list.map(rowHtml).join('')}</div>
+      </details>`;
+  }).join('');
+}
+function setEntregaUnit(entregaId, processId){
+  const group = getActiveGroup();
+  const entrega = group.entregas.find(e=> e.id === entregaId);
+  if(!entrega) return;
+  entrega.processId = processId || null;
+  if(processId) entregaUnitOpen[processId] = true;
+  saveState();
+  renderEntregas(group);
+  const proc = processId ? group.processes.find(p=> p.id === processId) : null;
+  showToast(proc ? '"' + entrega.name + '" quedó en ' + entregaUnitLabel(proc.name) : '"' + entrega.name + '" quedó sin unidad');
 }
 
 function computeStudentEntregaStats(group, studentId, entregasList){
@@ -8122,11 +8203,18 @@ function markAllEntregaDeliveredInline(entregaId){
   showToast('Se marcó a todos como "' + ENTREGA_ESTADOS[estado].label + '"');
 }
 
-function openEntregasToGradeForm(){
+let entregasGradeFormProcessId = undefined; // unidad elegida desde la lista agrupada (undefined = usar el filtro actual)
+function entregasForGradeForm(group){
+  if(entregasGradeFormProcessId === undefined) return { entregas: getActiveProcessEntregas(group), pid: group.activeProcessId || null };
+  const pid = entregasGradeFormProcessId || null;
+  return { entregas: getActiveEntregas(group).filter(e=> !pid || e.processId === pid), pid };
+}
+function openEntregasToGradeForm(processId){
   const group = getActiveGroup();
-  const entregas = getActiveProcessEntregas(group);
+  entregasGradeFormProcessId = typeof processId === 'string' ? processId : undefined;
+  const { entregas, pid } = entregasForGradeForm(group);
   if(entregas.length === 0){ showToast('No hay entregas para convertir'); return; }
-  const procName = group.activeProcessId ? ((group.processes.find(p=>p.id===group.activeProcessId)||{}).name) : null;
+  const procName = pid ? ((group.processes.find(p=>p.id===pid)||{}).name) : null;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.id = 'entregasGradeFormOverlay';
@@ -8134,12 +8222,12 @@ function openEntregasToGradeForm(){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="closeEntregasToGradeForm()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🎯 Convertir entregas en nota</h2>
-      <p class="muted">Se creará una evaluación en Calificaciones con el cumplimiento de entregas${procName ? ' de "' + escapeHtml(procName) + '"' : ''} (${entregas.length} entrega(s) en este filtro). En plazo = 1 punto, fuera de plazo = 0,5 punto, no entregada = 0.</p>
+      <p class="muted">Se creará una evaluación en Calificaciones con el cumplimiento de entregas${procName ? ' de "' + escapeHtml(procName) + '"' : ''} (${entregas.length} entrega(s)). En plazo = 1 punto, fuera de plazo = 0,5 punto, no entregada = 0.</p>
       <label style="margin-top:8px;">Nombre de la evaluación</label>
-      <input type="text" id="entGradeName" value="${procName ? 'Entregas - ' + escapeHtml(procName) : 'Entregas'}">
+      <input type="text" id="entGradeName" value="${procName ? 'Entregas ' + escapeHtml(entregaUnitLabel(procName)) : 'Entregas'}">
       <label style="margin-top:10px;">Total de entregas para el cálculo</label>
       <input type="number" id="entGradeTotal" min="1" step="0.5" value="${entregas.length}">
-      <p class="muted" style="font-size:0.74rem; margin-top:4px;">Por defecto es la cantidad real de entregas en este filtro (${entregas.length}). Cámbialo si quieres que el cálculo considere un total distinto (por ejemplo, para no perjudicar a quienes tuvieron menos guías, o para dar margen).</p>
+      <p class="muted" style="font-size:0.74rem; margin-top:4px;">Por defecto es la cantidad real de entregas${procName ? ' de esta unidad' : ''} (${entregas.length}). Cámbialo si quieres que el cálculo considere un total distinto (por ejemplo, para no perjudicar a quienes tuvieron menos guías, o para dar margen).</p>
       <label style="margin-top:10px;">% de exigencia (aprobación = 4.0)</label>
       <input type="number" id="entGradeExigencia" min="1" max="99" value="60">
       <label style="margin-top:10px;">Tipo</label>
@@ -8167,7 +8255,7 @@ function closeEntregasToGradeForm(){
 }
 function saveEntregasToGradeForm(){
   const group = getActiveGroup();
-  const entregas = getActiveProcessEntregas(group);
+  const { entregas, pid } = entregasForGradeForm(group);
   const name = document.getElementById('entGradeName').value.trim();
   if(!name){ showToast('Ingresa un nombre para la evaluación'); return; }
   const totalEntregas = Number(document.getElementById('entGradeTotal').value) || entregas.length;
@@ -8182,7 +8270,7 @@ function saveEntregasToGradeForm(){
     // Vínculo con las entregas: la nota se recalcula sola cada vez que cambian las entregas
     entregaLink: {
       periodId: state.activePeriodId || null,
-      processId: group.activeProcessId || null,
+      processId: pid,
       totalFixed: totalEntregas !== entregas.length ? totalEntregas : null
     }
   });
@@ -8419,9 +8507,9 @@ function openEntregaEditForm(id){
       <input type="text" id="entEditName" value="${escapeHtml(entrega.name)}">
       <label style="margin-top:10px;">Fecha de entrega</label>
       <input type="date" id="entEditDate" value="${entrega.date}">
-      <label style="margin-top:10px;">Proceso</label>
+      <label style="margin-top:10px;">Unidad (proceso)</label>
       <select id="entEditProcess">
-        <option value="">Ninguno (sin proceso)</option>
+        <option value="">Sin unidad</option>
         ${processes.map(p=>`<option value="${p.id}" ${p.id===entrega.processId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
       </select>
       <label style="margin-top:10px; display:flex; align-items:center; gap:8px;">
