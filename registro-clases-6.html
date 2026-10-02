@@ -7666,9 +7666,9 @@ function getActiveEntregas(group){
 // Devuelve {fecha, hora} del plazo de una entrega, o null si no tiene uno configurado.
 // Compatible con entregas antiguas que solo guardaban "horaLimite" (implícitamente en la fecha de la guía).
 function getEntregaDeadline(entrega){
-  const fecha = entrega.plazoFecha || (entrega.horaLimite ? entrega.date : null);
-  const hora = entrega.plazoHora || entrega.horaLimite || null;
-  if(!fecha || !hora) return null;
+  const fecha = entrega.plazoFecha || (entrega.horaLimite || entrega.plazoHora ? entrega.date : null);
+  if(!fecha) return null;
+  const hora = entrega.plazoHora || entrega.horaLimite || '23:59'; // fecha límite sin hora = hasta el final de ese día
   return { fecha, hora };
 }
 
@@ -7695,7 +7695,17 @@ function autoMarkOverdueEntregas(){
   let changed = false;
   (state.groups || []).forEach(group=>{
     (group.entregas || []).forEach(entrega=>{
-      if(getEntregaEffectiveDeadlineTimestamp(entrega) > now) return;
+      if(getEntregaEffectiveDeadlineTimestamp(entrega) > now){
+        // Plazo vigente (o extendido): nadie puede estar "No entregada" todavía → vuelve a "En plazo" (sin marcar)
+        Object.keys(entrega.estados || {}).forEach(sid=>{
+          if(entrega.estados[sid] === 'no_entregada'){
+            delete entrega.estados[sid];
+            if(entrega.fechas) delete entrega.fechas[sid];
+            changed = true;
+          }
+        });
+        return;
+      }
       if(!entrega.estados) entrega.estados = {};
       if(!entrega.fechas) entrega.fechas = {};
       (group.students || []).forEach(s=>{
@@ -7838,7 +7848,7 @@ function renderEntregas(group){
                       <option value="" ${!estado?'selected':''}>${entregaIsOpen(e) ? '⏳ En plazo' : '— Sin marcar'}</option>
                       <option value="en_plazo" ${estado==='en_plazo'?'selected':''}>✅ Entregada en plazo</option>
                       <option value="fuera_plazo" ${estado==='fuera_plazo'?'selected':''}>🟠 Entregada fuera de plazo</option>
-                      <option value="no_entregada" ${estado==='no_entregada'?'selected':''}>🔴 No entregada</option>
+                      ${entregaIsOpen(e) ? '' : `<option value="no_entregada" ${estado==='no_entregada'?'selected':''}>🔴 No entregada</option>`}
                     </select>
                   </td>`;
                 }).join('')}
@@ -8024,7 +8034,7 @@ function closeEntregaValues(){
 function renderEntregaValues(group, entrega){
   const main = document.getElementById('main');
   const todayISO = toISODate(new Date());
-  const willBeLate = todayISO > entrega.date;
+  const willBeLate = !entregaIsOpen(entrega);
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
@@ -8104,7 +8114,7 @@ function applyEntregaToggle(entregaId, studentId){
     syncEntregaDecimaBonus(group, entrega, studentId, false);
   } else {
     const todayISO = toISODate(new Date());
-    const estado = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
+    const estado = entregaIsOpen(entrega) ? 'en_plazo' : 'fuera_plazo';
     entrega.estados[studentId] = estado;
     entrega.fechas[studentId] = todayISO;
     syncEntregaDecimaBonus(group, entrega, studentId, estado === 'en_plazo');
@@ -8156,7 +8166,7 @@ function applyEntregaMarkAll(entregaId){
   if(!entrega.estados) entrega.estados = {};
   if(!entrega.fechas) entrega.fechas = {};
   const todayISO = toISODate(new Date());
-  const estado = todayISO > entrega.date ? 'fuera_plazo' : 'en_plazo';
+  const estado = entregaIsOpen(entrega) ? 'en_plazo' : 'fuera_plazo';
   group.students.forEach(s=>{
     entrega.estados[s.id] = estado;
     entrega.fechas[s.id] = todayISO;
@@ -8605,10 +8615,11 @@ function saveEntregaDeadlineForm(id){
   entrega.plazoFecha = fecha;
   entrega.plazoHora = hora;
   entrega.horaLimite = null; // limpiar formato antiguo si existía
+  autoMarkOverdueEntregas();
   saveState();
   closeEntregaDeadlineForm();
   renderEntregas(group);
-  showToast((fecha && hora) ? 'Plazo y recordatorio guardado' : 'Sin plazo configurado');
+  showToast(fecha ? 'Plazo guardado: ' + formatDate(fecha) + ' a las ' + (hora || '23:59') + (hora ? ' (con recordatorio)' : '') : 'Sin plazo configurado');
 }
 function clearEntregaDeadline(id){
   const group = getActiveGroup();
@@ -10823,6 +10834,7 @@ function checkEntregaReminders(){
 
   state.groups.forEach(group=>{
     (group.entregas || []).forEach(entrega=>{
+      if(!entrega.plazoHora && !entrega.horaLimite) return; // la alarma solo suena si se fijó una hora
       const dl = getEntregaDeadline(entrega);
       if(!dl || dl.fecha !== todayISO) return;
       const [hh, mm] = dl.hora.split(':').map(Number);
