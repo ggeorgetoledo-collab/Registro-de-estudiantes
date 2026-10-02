@@ -3425,7 +3425,7 @@ function entregaCellHtml(entrega, studentId){
   return `
     <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
       <button class="btn btn-sm" style="${info ? `background:${info.color.bg}; color:${info.color.text}; border:1px solid ${info.color.border};` : ''}" onclick="toggleEntregaDeliveredInline('${entrega.id}','${studentId}')">
-        ${info ? info.label : '⬜ Marcar'}
+        ${info ? info.label : (entregaIsOpen(entrega) ? '⏳ En plazo · Marcar' : '⬜ Marcar')}
       </button>
       ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaExceptionInline('${entrega.id}','${studentId}')" title="Marcar en plazo por excepción">🔓</button>` : ''}
     </div>
@@ -6770,7 +6770,7 @@ function buildPortalPayload(group, s){
     .sort((a,b)=> a.d.localeCompare(b.d));
   const entregas = getActiveEntregas(group).map(e=>{
     const st = e.estados ? e.estados[sid] : null;
-    return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '' };
+    return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '', lim: getEntregaEffectiveDeadlineTimestamp(e) };
   });
   // Nota que forman las entregas de cada unidad (evaluaciones vinculadas a entregas)
   const notasEntregas = evalsSorted.filter(e=> e.entregaLink).map(e=> ({
@@ -7654,8 +7654,8 @@ function digitalCardSectionHtml(group){
 
 /* ============ TAB: ENTREGAS (guías/trabajos: en plazo, fuera de plazo, no entregado) ============ */
 const ENTREGA_ESTADOS = {
-  en_plazo: { label:'En plazo', color:{bg:'#E6F8EF', text:'#1F9D64', border:'#B9EBD1'} },
-  fuera_plazo: { label:'Fuera de plazo', color:{bg:'#FDF3DE', text:'#C6871A', border:'#F5DFA8'} },
+  en_plazo: { label:'Entregada en plazo', color:{bg:'#E6F8EF', text:'#1F9D64', border:'#B9EBD1'} },
+  fuera_plazo: { label:'Entregada fuera de plazo', color:{bg:'#FDF3DE', text:'#C6871A', border:'#F5DFA8'} },
   no_entregada: { label:'No entregada', color:{bg:'#FDECEA', text:'#D8493E', border:'#F5C4BE'} },
 };
 
@@ -7684,6 +7684,9 @@ function getEntregaEffectiveDeadlineTimestamp(entrega){
   }
   return new Date(entrega.date + 'T23:59:59').getTime();
 }
+
+// ¿Sigue abierto el plazo de la entrega? (sin estado + plazo vigente = "En plazo")
+function entregaIsOpen(entrega){ return getEntregaEffectiveDeadlineTimestamp(entrega) > Date.now(); }
 
 // Marca automáticamente como "No entregada" a quien no tenga ningún estado una vez vencido el plazo.
 // No toca a quien ya tiene un estado (marcado manual o automático previo) — eso se puede seguir editando a mano.
@@ -7832,9 +7835,9 @@ function renderEntregas(group){
                   const info = estado ? ENTREGA_ESTADOS[estado] : null;
                   return `<td style="padding:3px;">
                     <select onchange="setEntregaEstadoDirect('${e.id}','${s.id}', this.value)" style="width:100%; text-align:center; font-size:0.78rem; padding:5px 4px; ${info ? `background:${info.color.bg}; color:${info.color.text}; font-weight:700; border-color:${info.color.border};` : ''}">
-                      <option value="" ${!estado?'selected':''}>— Sin marcar</option>
-                      <option value="en_plazo" ${estado==='en_plazo'?'selected':''}>✅ En plazo</option>
-                      <option value="fuera_plazo" ${estado==='fuera_plazo'?'selected':''}>🟠 Fuera de plazo</option>
+                      <option value="" ${!estado?'selected':''}>${entregaIsOpen(e) ? '⏳ En plazo' : '— Sin marcar'}</option>
+                      <option value="en_plazo" ${estado==='en_plazo'?'selected':''}>✅ Entregada en plazo</option>
+                      <option value="fuera_plazo" ${estado==='fuera_plazo'?'selected':''}>🟠 Entregada fuera de plazo</option>
                       <option value="no_entregada" ${estado==='no_entregada'?'selected':''}>🔴 No entregada</option>
                     </select>
                   </td>`;
@@ -8051,7 +8054,7 @@ function renderEntregaValues(group, entrega){
                 <td>${escapeHtml(s.name)}</td>
                 <td>
                   <button class="btn btn-sm" style="${info ? `background:${info.color.bg}; color:${info.color.text}; border:1px solid ${info.color.border};` : ''}" onclick="toggleEntregaDelivered('${entrega.id}','${s.id}')">
-                    ${info ? `${info.label}${isException ? ' ⭐' : ''}${fecha ? ' · ' + formatDate(fecha) : ''} (deshacer)` : '⬜ Marcar entregada'}
+                    ${info ? `${info.label}${isException ? ' ⭐' : ''}${fecha ? ' · ' + formatDate(fecha) : ''} (deshacer)` : (entregaIsOpen(entrega) ? '⏳ En plazo · Marcar entregada' : '⬜ Marcar entregada')}
                   </button>
                 </td>
                 <td>
@@ -8434,7 +8437,7 @@ function openEntregaGradeDetail(evalId, studentId){
               <td style="white-space:nowrap;">${e.date ? formatDate(e.date) : '-'}</td>
               <td>
                 <select class="score-select" style="width:auto; min-width:140px; ${c ? `background:${c.bg}; color:${c.text}; border-color:${c.border}; font-weight:700;` : ''}" onchange="changeEntregaEstadoFromGrade('${e.id}','${studentId}', this.value)">
-                  <option value="" ${!est?'selected':''}>— Sin marcar</option>
+                  <option value="" ${!est?'selected':''}>${entregaIsOpen(e) ? '⏳ En plazo' : '— Sin marcar'}</option>
                   ${Object.keys(ENTREGA_ESTADOS).map(k=>`<option value="${k}" ${est===k?'selected':''}>${ENTREGA_ESTADOS[k].label}</option>`).join('')}
                 </select>
               </td>

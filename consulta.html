@@ -53,6 +53,7 @@
   .chip.ok{ background:var(--ok-bg); color:var(--ok); }
   .chip.warn{ background:var(--warn-bg); color:var(--warn); }
   .chip.bad{ background:var(--bad-bg); color:var(--bad); }
+  .chip.open{ background:var(--primary-light); color:var(--primary-dark); }
   .chip.neutral{ background:var(--neutral-bg); color:var(--dim); }
   .chips{ display:flex; flex-wrap:wrap; gap:6px; }
   .grade{ display:inline-block; min-width:44px; text-align:center; padding:4px 8px; border-radius:10px; font-weight:800; font-family:'Poppins','Inter',sans-serif; font-variant-numeric:tabular-nums; background:var(--primary-light); color:var(--primary-dark); }
@@ -137,7 +138,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     document.body.appendChild(ov);
   }
   const ESTADOS = {
-    en_plazo: ['Entregada a tiempo', 'ok'],
+    en_plazo: ['Entregada en plazo', 'ok'],
     fuera_plazo: ['Entregada fuera de plazo', 'warn'],
     no_entregada: ['No entregada', 'bad'],
   };
@@ -275,9 +276,11 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     // Entregas, agrupadas por unidad (las de una misma unidad forman una nota)
     const entregas = (d.entregas || []).filter(inProc).sort((x,y)=> (y.d||'').localeCompare(x.d||''));
     const notasEnt = d.notasEntregas || [];
+    const abierta = e=> !e.e && e.lim && Date.now() < e.lim;
     const entregaRow = e=>{
-      const st = ESTADOS[e.e] || ['Pendiente', 'neutral'];
-      return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${fdate(e.d)}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
+      const st = ESTADOS[e.e] || (abierta(e) ? ['En plazo', 'open'] : ['Pendiente', 'neutral']);
+      const sub = abierta(e) ? 'Plazo: ' + fdatetime(new Date(e.lim).toISOString()) : fdate(e.d);
+      return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${sub}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
     };
     const unitLabel = n=> /^unidad\b/i.test(String(n || '').trim()) ? n : 'Unidad ' + n;
     const procNames = new Map((per.procesos || []).map(x=> [x.id, x.n]));
@@ -301,7 +304,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         const cls = !n || n.nota === null || n.nota === undefined ? 'none' : (n.nota < 4 ? 'bad' : '');
         return `<details class="ent-unit"${i === 0 || proc ? ' open' : ''}>
           <summary><div class="main"><div class="title">${esc(title)}</div>
-            <div class="sub">${g.list.length} entrega(s) · ${ok} a tiempo${n ? ' · forman la nota "' + esc(n.n) + '"' : (g.pr ? '' : ' · no forman parte de una nota de unidad')}</div></div>
+            <div class="sub">${g.list.length} entrega(s) · ${ok} entregada(s) en plazo${g.list.some(abierta) ? ' · ' + g.list.filter(abierta).length + ' en plazo' : ''}${n ? ' · forman la nota "' + esc(n.n) + '"' : (g.pr ? '' : ' · no forman parte de una nota de unidad')}</div></div>
             ${n ? `<span class="grade gtotal ${cls}">${nota(n.nota)}</span>` : ''}<span class="caret">▾</span></summary>
           <div class="gitems">${g.list.map(entregaRow).join('')}</div>
         </details>`;
