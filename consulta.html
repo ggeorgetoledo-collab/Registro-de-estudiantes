@@ -279,7 +279,18 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     const abierta = e=> !e.e && e.lim && Date.now() < e.lim;
     const entregaRow = e=>{
       const st = ESTADOS[e.e] || (abierta(e) ? ['En plazo', 'open'] : ['Pendiente', 'neutral']);
-      const sub = abierta(e) ? 'Plazo: ' + fdatetime(new Date(e.lim).toISOString()) : fdate(e.d);
+      const parts = [];
+      if(e.lim){
+        parts.push('Plazo: ' + fdatetime(new Date(e.lim).toISOString()));
+        if(abierta(e)){
+          const hoy = new Date(); hoy.setHours(0,0,0,0);
+          const lim = new Date(e.lim); lim.setHours(0,0,0,0);
+          const dias = Math.round((lim - hoy) / 86400000);
+          parts.push(dias <= 0 ? '<strong>vence hoy</strong>' : dias === 1 ? '<strong>vence mañana</strong>' : 'quedan ' + dias + ' días');
+        }
+      } else if(e.d) parts.push(fdate(e.d));
+      if(e.f) parts.push('entregada el ' + fdate(e.f));
+      const sub = parts.join(' · ');
       return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${sub}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
     };
     const unitLabel = n=> /^unidad\b/i.test(String(n || '').trim()) ? n : 'Unidad ' + n;

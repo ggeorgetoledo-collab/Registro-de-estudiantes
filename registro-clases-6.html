@@ -6770,7 +6770,8 @@ function buildPortalPayload(group, s){
     .sort((a,b)=> a.d.localeCompare(b.d));
   const entregas = getActiveEntregas(group).map(e=>{
     const st = e.estados ? e.estados[sid] : null;
-    return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '', lim: getEntregaEffectiveDeadlineTimestamp(e) };
+    const f = (st === 'en_plazo' || st === 'fuera_plazo') && e.fechas ? (e.fechas[sid] || '') : '';
+    return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '', lim: getEntregaEffectiveDeadlineTimestamp(e), f };
   });
   // Nota que forman las entregas de cada unidad (evaluaciones vinculadas a entregas)
   const notasEntregas = evalsSorted.filter(e=> e.entregaLink).map(e=> ({
