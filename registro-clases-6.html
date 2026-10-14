@@ -557,6 +557,8 @@
   .link-qr-cover{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:700; color:#2B2A3D; font-size:1.05rem; gap:4px; }
   .link-qr-cover span{ font-weight:500; font-size:0.78rem; color:#666; }
   .input-invalid{ border-color:var(--danger) !important; background:var(--danger-light) !important; }
+  .rem-anulado{ text-decoration:line-through; color:var(--text-dim); }
+  .pill-rem{ background:#FDF3DE; color:#A86B0C; border-color:#F5DFA8; }
   .entrega-unit{ border:1px solid var(--border); border-radius:12px; margin:10px 0; overflow:hidden; }
   .entrega-unit > summary{ cursor:pointer; list-style:none; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:10px 12px; background:var(--primary-light); }
   .entrega-unit > summary::-webkit-details-marker{ display:none; }
@@ -1229,8 +1231,10 @@ function mergeGroupData(localGroup, importedGroup, periodIdMap){
 
   // Evaluaciones: por nombre. Si ya existe, solo se completan puntajes de estudiantes que no tenían nota (sin sobrescribir).
   let evalsAdded = 0, evalsFilled = 0;
+  const evalIdMap = new Map(), addedEvals = [];
   (importedGroup.evaluations || []).forEach(ev=>{
     const existing = localGroup.evaluations.find(le=> le.name.trim().toLowerCase() === (ev.name||'').trim().toLowerCase());
+    if(existing) evalIdMap.set(ev.id, existing.id);
     if(existing){
       if(!existing.scores) existing.scores = {};
       Object.keys(ev.scores || {}).forEach(oldSid=>{
@@ -1256,9 +1260,13 @@ function mergeGroupData(localGroup, importedGroup, periodIdMap){
         } : undefined,
         scores: newScores, overrides: newOverrides
       });
+      const added = localGroup.evaluations[localGroup.evaluations.length - 1];
+      evalIdMap.set(ev.id, added.id);
+      addedEvals.push(added);
       evalsAdded++;
     }
   });
+  addedEvals.forEach(e=>{ if(e.remedialOf) e.remedialOf = evalIdMap.get(e.remedialOf) || null; });
 
   // Décimas: por fecha+motivo. Si ya existe, se completan valores de estudiantes que no tenían (sin sobrescribir).
   let decimasAdded = 0;
@@ -1523,7 +1531,7 @@ function gradeGroupColor(groupId){
 // las evaluaciones que pertenecen a un grupo de notas se promedian y forman UNA sola
 // unidad ("nota sumativa"), que usa el tipo/ponderación del grupo (no de cada evaluación).
 function getGradingUnits(group){
-  const evals = getActiveEvaluations(group);
+  const evals = gradedEvaluations(group);
   const gradeGroups = getActiveGradeGroups(group);
   const units = [];
   evals.filter(e=> !e.gradeGroupId).forEach(e=>{
@@ -1538,8 +1546,74 @@ function getGradingUnits(group){
   return units;
 }
 
+/* ---- Remediales ----
+   Una evaluación puede ser "remedial de" otra (ev.remedialOf = id de la prueba). Para cada estudiante:
+   - si la nota del remedial es MÁS BAJA que la de la prueba, el remedial se anula y vale la prueba;
+   - si es igual o más alta, se PROMEDIA con la prueba (o se pondera: ev.remedialPct = % del remedial);
+   - si no rindió el remedial, vale la prueba.
+   El remedial no cuenta como nota aparte: ocupa el lugar de la prueba (mismo grupo y ponderación). */
+function findEvaluationById(id){
+  if(!id) return null;
+  for(const g of (state.groups || [])){
+    const e = (g.evaluations || []).find(x=> x.id === id);
+    if(e) return e;
+  }
+  return null;
+}
+function remedialBaseOf(ev){ return ev && ev.remedialOf ? findEvaluationById(ev.remedialOf) : null; }
+function isActiveRemedial(ev){ return !!remedialBaseOf(ev); }
+function remedialOfEval(ev){
+  if(!ev) return null;
+  for(const g of (state.groups || [])){
+    const r = (g.evaluations || []).find(x=> x.remedialOf === ev.id);
+    if(r) return r;
+  }
+  return null;
+}
+// Resultado del remedial para un estudiante: null si no lo rindió
+function remedialOutcome(remEv, studentId){
+  const base = remedialBaseOf(remEv);
+  if(!base) return null;
+  const nr = computeStudentEvalGrade(remEv, studentId);
+  if(nr === null) return null;
+  const nb = computeStudentEvalGrade(base, studentId);
+  return { base, nb, nr, anulado: nb !== null && nr < nb, vale: computeStudentEffectiveEvalGrade(base, studentId) };
+}
+// Peso del remedial al combinarse con la prueba (0,5 = promedio simple)
+function remedialWeight(remEv){
+  if(remEv && remEv.remedialMode === 'pondera'){
+    const p = Number(remEv.remedialPct);
+    if(p > 0 && p < 100) return p / 100;
+  }
+  return 0.5;
+}
+function remedialModeLabel(remEv){
+  const w = remedialWeight(remEv);
+  return w === 0.5 ? 'se promedia con la prueba' : `pondera ${Math.round(w*100)}% (prueba ${Math.round((1-w)*100)}%)`;
+}
+// Nota que vale para la prueba, considerando su remedial
+function computeStudentEffectiveEvalGrade(ev, studentId){
+  const nb = computeStudentEvalGrade(ev, studentId);
+  const rem = remedialOfEval(ev);
+  if(!rem) return nb;
+  const nr = computeStudentEvalGrade(rem, studentId);
+  if(nr === null) return nb;
+  if(nb === null) return nr;           // no rindió la prueba: vale el remedial
+  if(nr < nb) return nb;               // remedial más bajo: se anula
+  const w = remedialWeight(rem);
+  return Math.round((nb * (1 - w) + nr * w) * 10) / 10;
+}
+// Texto corto para informes: "(anulado: menor que Prueba 1)" o "(reemplaza a Prueba 1)"
+function remedialNoteText(ev, studentId){
+  const o = isActiveRemedial(ev) ? remedialOutcome(ev, studentId) : null;
+  if(!o) return '';
+  return o.anulado ? ` (anulado: menor que ${o.base.name})` : ` (${remedialModeLabel(ev)}: ${o.base.name} queda en ${o.vale.toFixed(1)})`;
+}
+// Evaluaciones que cuentan como nota (sin los remediales, que ocupan el lugar de su prueba)
+function gradedEvaluations(group){ return getActiveEvaluations(group).filter(e=> !isActiveRemedial(e)); }
+
 function computeUnitGrade(unit, studentId){
-  const notas = unit.evals.map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
+  const notas = unit.evals.map(e=> computeStudentEffectiveEvalGrade(e, studentId)).filter(n=> n !== null);
   if(notas.length === 0) return null;
   return Math.round((notas.reduce((a,b)=>a+b,0)/notas.length) * 10) / 10;
 }
@@ -1590,7 +1664,7 @@ function computeStudentFinalGrade(group, studentId){
   }
   if(finalGrade !== null) finalGrade = Math.round(Math.min(7, Math.max(1, finalGrade)) * 10) / 10;
 
-  const allNotas = getActiveEvaluations(group).map(e=> computeStudentEvalGrade(e, studentId)).filter(n=> n !== null);
+  const allNotas = gradedEvaluations(group).map(e=> computeStudentEffectiveEvalGrade(e, studentId)).filter(n=> n !== null);
   const promedioSimple = allNotas.length ? Math.round((allNotas.reduce((a,b)=>a+b,0)/allNotas.length) * 10) / 10 : null;
 
   return { finalGrade, promedioSimple, count: allNotas.length };
@@ -2370,7 +2444,8 @@ function openStudentDetail(studentId){
         evals.map(e=>{
           const nota = computeStudentEvalGrade(e, studentId);
           const decimasEnEsta = e.decimasAplicadas ? e.decimasAplicadas[studentId] : null;
-          return `<div class="stat-row"><span>${escapeHtml(e.name)}${decimasEnEsta ? ` <span class="muted" style="font-size:0.74rem;">(+${decimasEnEsta} déc.)</span>` : ''}</span>${e.entregaLink ? entregaGradeButtonHtml(e, studentId, nota, 'font-weight:800;' + (nota!==null && nota<4 ? 'color:var(--danger);' : '')) : `<strong style="${nota!==null && nota<4 ? 'color:var(--danger);' : ''}">${nota !== null ? nota.toFixed(1) : '-'}</strong>`}</div>`;
+          const remTxt = remedialNoteText(e, studentId);
+          return `<div class="stat-row"><span>${escapeHtml(e.name)}${decimasEnEsta ? ` <span class="muted" style="font-size:0.74rem;">(+${decimasEnEsta} déc.)</span>` : ''}${remTxt ? ` <span class="muted" style="font-size:0.74rem;">${escapeHtml(remTxt)}</span>` : ''}</span>${e.entregaLink ? entregaGradeButtonHtml(e, studentId, nota, 'font-weight:800;' + (nota!==null && nota<4 ? 'color:var(--danger);' : '')) : `<strong style="${nota!==null && nota<4 ? 'color:var(--danger);' : ''}">${nota !== null ? nota.toFixed(1) : '-'}</strong>`}</div>`;
         }).join('')
       }
       <div class="stat-row"><span>Promedio simple</span><strong>${gradeResult.promedioSimple !== null ? gradeResult.promedioSimple.toFixed(1) : '-'}</strong></div>
@@ -6743,23 +6818,31 @@ function buildPortalPayload(group, s){
     return c;
   });
   const evalsSorted = getActiveEvaluations(group);
-  const evalItem = e=> ({
-    n: e.name, d: e.date || '', nota: computeStudentEvalGrade(e, sid),
-    dec: (e.decimasAplicadas && e.decimasAplicadas[sid]) || 0, pr: e.processId || '',
-  });
-  const evaluaciones = evalsSorted.map(evalItem);
+  const evalItem = e=>{
+    const it = { n: e.name, d: e.date || '', nota: computeStudentEvalGrade(e, sid),
+      dec: (e.decimasAplicadas && e.decimasAplicadas[sid]) || 0, pr: e.processId || '' };
+    const rem = remedialOfEval(e);
+    if(rem){ // la prueba tiene remedial: se incluye su resultado junto a ella
+      const nr = computeStudentEvalGrade(rem, sid);
+      it.ef = computeStudentEffectiveEvalGrade(e, sid);
+      if(nr !== null) it.rem = { n: rem.name, d: rem.date || '', nota: nr, anul: it.nota !== null && nr < it.nota, modo: remedialModeLabel(rem) };
+    }
+    return it;
+  };
+  const evaluaciones = evalsSorted.filter(e=> !isActiveRemedial(e)).map(evalItem);
   // Notas agrupadas: cada grupo de calificaciones va con sus notas y su nota de grupo, en el orden de la primera nota del grupo
   const groupUnits = new Map(getGradingUnits(group).filter(u=> u.type === 'group').map(u=> [u.gradeGroup.id, u]));
   const seenGroups = new Set();
   const unidades = [];
   evalsSorted.forEach(e=>{
+    if(isActiveRemedial(e)) return; // va junto a su prueba
     if(e.gradeGroupId && groupUnits.has(e.gradeGroupId)){
       if(seenGroups.has(e.gradeGroupId)) return;
       seenGroups.add(e.gradeGroupId);
       const u = groupUnits.get(e.gradeGroupId);
       unidades.push({ t: 'g', n: u.gradeGroup.name, nota: computeUnitGrade(u, sid),
         peso: u.weightType === 'weighted' ? (u.weightPercent || 0) : null,
-        items: evalsSorted.filter(x=> x.gradeGroupId === e.gradeGroupId).map(evalItem) });
+        items: evalsSorted.filter(x=> x.gradeGroupId === e.gradeGroupId && !isActiveRemedial(x)).map(evalItem) });
     } else {
       unidades.push({ t: 'e', ...evalItem(e), peso: e.weightType === 'weighted' ? (e.weightPercent || 0) : null });
     }
@@ -8951,6 +9034,13 @@ function renderCalificaciones(group){
           <input type="number" id="evalExigencia" min="1" max="99" value="60">
         </div>
         <div>
+          <label>¿Es remedial de otra evaluación?</label>
+          <select id="evalRemedialOf">
+            <option value="">No</option>
+            ${remedialCandidates(group, null).map(e=>`<option value="${e.id}">🔁 Remedial de: ${escapeHtml(e.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="eval-nonrem">
           <label>Grupo de notas (opcional)</label>
           <select id="evalGradeGroup">
             <option value="">Ninguno (evaluación suelta)</option>
@@ -8985,6 +9075,7 @@ function renderCalificaciones(group){
         </div>
       </div>
       <p class="muted" id="evalGroupedNotice" style="display:none; margin-top:8px;">Esta evaluación pasará a ponderarse según la configuración de su grupo de notas, no la suya propia.</p>
+      <div id="evalRemedialNotice" style="display:none; margin-top:8px; background:var(--primary-light); border:1px solid var(--primary-border); border-radius:10px; padding:8px 10px;"><p class="muted" style="color:var(--text); margin:0;">${REMEDIAL_HELP}</p>${remedialModeFieldsHtml('eval', null)}</div>
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addEvalBtn">+ Agregar evaluación</button>
       </div>
@@ -9042,15 +9133,22 @@ function renderCalificaciones(group){
             <div>
               <strong>${escapeHtml(e.name)}</strong>
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
+              ${isActiveRemedial(e) ? `<span class="pill pill-rem" style="margin-left:6px;">🔁 Remedial de ${escapeHtml(remedialBaseOf(e).name)}</span>` : ''}
+              ${remedialOfEval(e) ? `<span class="pill pill-rem" style="margin-left:6px;">🔁 Con remedial</span>` : ''}
               ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
               ${e.processId ? `<span class="pill" style="margin-left:6px;">📂 ${escapeHtml((group.processes.find(p=>p.id===e.processId)||{}).name || '—')}</span>` : ''}
               ${e.entregaLink ? `<span class="pill" style="margin-left:6px; background:var(--primary-light); color:var(--primary); border-color:var(--primary-border);" title="Se recalcula sola al editar las entregas">🔄 Vinculada a entregas${e.entregaLink.processId ? ' · ' + escapeHtml((group.processes.find(p=>p.id===e.entregaLink.processId)||{}).name || '—') : ''}</span>` : ''}
               <div class="muted">Puntaje total: ${e.totalScore} · Exigencia: ${e.exigencia}% ·
-                ${gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple')}
+                ${isActiveRemedial(e) ? 'Si es igual o mayor, ' + remedialModeLabel(e) + '; si es menor, se anula' : (gg ? 'Pondera según su grupo de notas' : (e.weightType === 'weighted' ? `Pondera ${e.weightPercent}%` : 'Promedio simple'))}
               </div>
               <div class="muted" style="margin-top:2px;">
+                ${isActiveRemedial(e) ? (()=>{
+                  const outs = group.students.map(st=> remedialOutcome(e, st.id)).filter(Boolean);
+                  const anul = outs.filter(o=> o.anulado).length;
+                  return `<span style="font-weight:700;">${outs.length} rindieron</span> · <span style="color:var(--success); font-weight:700;">✔ ${outs.length - anul} mejoran la prueba</span> · <span style="color:var(--text-dim); font-weight:700;">${anul} anulado(s)</span>`;
+                })() : `
                 ${reprobados > 0 ? `<span style="color:var(--danger); font-weight:700;">🔴 ${reprobados} reprobado(s)</span>` : '<span style="color:var(--success);">✅ Sin reprobados</span>'}
-                ${pendientes > 0 ? ` · <span style="color:var(--text-dim); font-weight:700;">⏳ ${pendientes} pendiente(s)</span>` : ''}
+                ${pendientes > 0 ? ` · <span style="color:var(--text-dim); font-weight:700;">⏳ ${pendientes} pendiente(s)</span>` : ''}`}
               </div>
             </div>
             <div class="row" style="gap:6px;">
@@ -9099,7 +9197,7 @@ function renderCalificaciones(group){
             <th>Estudiante</th>
             ${evaluations.filter(e=> !e.gradeGroupId || !collapsedGradeGroups.has(e.gradeGroupId)).map(e=>{
               const color = e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null;
-              return `<th ${color ? `style="background:${color.bg}; color:${color.text};"` : ''}>${escapeHtml(e.name)}</th>`;
+              return `<th ${color ? `style="background:${color.bg}; color:${color.text};"` : ''}>${isActiveRemedial(e) ? '🔁 ' : ''}${escapeHtml(e.name)}</th>`;
             }).join('')}
             ${gradeGroups.map(gg=>{
               const color = gradeGroupColor(gg.id);
@@ -9123,7 +9221,7 @@ function renderCalificaciones(group){
             return `
               <tr>
                 <td><button class="student-name-link" onclick="openStudentDetail('${s.id}')">${escapeHtml(s.name)}</button></td>
-                ${notas.map(n=> `<td ${n.color ? `style="background:${n.color.bg};"` : ''}>${n.ev.entregaLink ? entregaGradeButtonHtml(n.ev, s.id, n.nota, n.nota!==null && n.nota<4 ? 'color:var(--danger);' : '') : (n.nota !== null ? n.nota.toFixed(1) : '-')}${n.decimas > 0 ? `<br><span class="muted" style="font-size:0.68rem; color:var(--primary); font-weight:700;" title="${n.decimas} décima(s) aplicada(s) a esta evaluación">+${n.decimas} déc.</span>` : ''}</td>`).join('')}
+                ${notas.map(n=> `<td ${n.color ? `style="background:${n.color.bg};"` : ''}>${isActiveRemedial(n.ev) ? remedialCellHtml(n.ev, s.id, n.nota) : n.ev.entregaLink ? entregaGradeButtonHtml(n.ev, s.id, n.nota, n.nota!==null && n.nota<4 ? 'color:var(--danger);' : '') : (n.nota !== null ? n.nota.toFixed(1) : '-')}${n.decimas > 0 ? `<br><span class="muted" style="font-size:0.68rem; color:var(--primary); font-weight:700;" title="${n.decimas} décima(s) aplicada(s) a esta evaluación">+${n.decimas} déc.</span>` : ''}</td>`).join('')}
                 ${groupUnits.map(u=>{
                   const color = gradeGroupColor(u.gradeGroup.id);
                   const nota = computeUnitGrade(u, s.id);
@@ -9148,6 +9246,21 @@ function renderCalificaciones(group){
     });
   }
 
+  const evalRemedialSelect = document.getElementById('evalRemedialOf');
+  if(evalRemedialSelect){
+    evalRemedialSelect.addEventListener('change', ()=>{
+      const rem = !!evalRemedialSelect.value;
+      document.querySelectorAll('.eval-nonrem').forEach(el=> el.style.display = rem ? 'none' : '');
+      document.getElementById('evalStandaloneWeight').style.display = rem || document.getElementById('evalGradeGroup').value ? 'none' : 'block';
+      document.getElementById('evalRemedialNotice').style.display = rem ? 'block' : 'none';
+      if(rem){
+        const base = group.evaluations.find(e=> e.id === evalRemedialSelect.value);
+        const nameInput = document.getElementById('evalName');
+        if(base && !nameInput.value.trim()) nameInput.value = 'Remedial ' + base.name;
+        if(base){ document.getElementById('evalTotalScore').value = base.totalScore; document.getElementById('evalExigencia').value = base.exigencia; }
+      }
+    });
+  }
   const evalGradeGroupSelect = document.getElementById('evalGradeGroup');
   if(evalGradeGroupSelect){
     evalGradeGroupSelect.addEventListener('change', ()=>{
@@ -9190,11 +9303,15 @@ function renderCalificaciones(group){
       const processId = document.getElementById('evalProcess').value || null;
       const weightType = document.getElementById('evalWeightType').value;
       const weightPercent = weightType === 'weighted' ? Number(document.getElementById('evalWeightPercent').value) : null;
+      const remedialOf = (document.getElementById('evalRemedialOf') || {}).value || null;
       if(!name || !totalScore || totalScore <= 0){ showToast('Completa el nombre y un puntaje total válido'); return; }
+      const base = remedialOf ? group.evaluations.find(e=> e.id === remedialOf) : null;
       group.evaluations.push({
         id: uid(), name, totalScore, exigencia: exigencia || 60,
-        gradeGroupId, date, processId,
-        weightType, weightPercent: weightPercent || 0,
+        gradeGroupId: base ? null : gradeGroupId, date, processId: base ? (processId || base.processId || null) : processId,
+        weightType: base ? 'simple' : weightType, weightPercent: base ? 0 : (weightPercent || 0),
+        remedialOf: base ? base.id : null,
+        ...(base ? readRemedialMode('eval') : {}),
         scores: {}, overrides: {}, periodId: state.activePeriodId
       });
       saveState();
@@ -9271,6 +9388,38 @@ function deleteGradeGroup(id){
   renderCalificaciones(group);
 }
 
+const REMEDIAL_HELP = '🔁 <strong>Remedial:</strong> si la nota del remedial es <strong>más baja</strong> que la de la prueba, el remedial se anula y vale la nota de la prueba. Si es igual o más alta, se <strong>promedia</strong> (o pondera) con la nota de la prueba. Quien no lo rinda conserva la nota de la prueba. No cuenta como una nota aparte.';
+function remedialModeFieldsHtml(prefix, ev){
+  const mode = ev && ev.remedialMode === 'pondera' ? 'pondera' : 'promedio';
+  return `<div class="grid-2" style="margin-top:8px;">
+    <div><label>Si el remedial es igual o mayor</label>
+      <select id="${prefix}RemMode" onchange="document.getElementById('${prefix}RemPctWrap').style.display = this.value==='pondera' ? 'block' : 'none'">
+        <option value="promedio" ${mode==='promedio'?'selected':''}>Promediar con la prueba (50% y 50%)</option>
+        <option value="pondera" ${mode==='pondera'?'selected':''}>Ponderar con la prueba</option>
+      </select></div>
+    <div id="${prefix}RemPctWrap" style="display:${mode==='pondera'?'block':'none'};"><label>% que pondera el remedial</label>
+      <input type="number" id="${prefix}RemPct" min="1" max="99" value="${(ev && ev.remedialPct) || 50}">
+      <p class="muted" style="font-size:0.72rem; margin-top:2px;">La prueba pondera el resto.</p></div>
+  </div>`;
+}
+function readRemedialMode(prefix){
+  const m = document.getElementById(prefix + 'RemMode');
+  if(!m) return { remedialMode: 'promedio', remedialPct: 50 };
+  const pct = Math.min(99, Math.max(1, Number(document.getElementById(prefix + 'RemPct').value) || 50));
+  return { remedialMode: m.value === 'pondera' ? 'pondera' : 'promedio', remedialPct: m.value === 'pondera' ? pct : 50 };
+}
+// Evaluaciones que pueden recibir un remedial: del mismo periodo, que no sean remediales ni tengan ya uno
+function remedialCandidates(group, currentEv){
+  return getActiveEvaluations(group).filter(e=> e !== currentEv && !e.remedialOf && !e.entregaLink &&
+    (!remedialOfEval(e) || (currentEv && remedialOfEval(e) === currentEv)));
+}
+function remedialCellHtml(ev, studentId, nota){
+  if(nota === null) return '-';
+  const o = remedialOutcome(ev, studentId);
+  if(o && o.anulado) return `<span class="rem-anulado" title="Anulado: es menor que la nota de ${escapeHtml(o.base.name)} (${o.nb.toFixed(1)})">${nota.toFixed(1)}</span><br><span class="muted" style="font-size:0.68rem;">anulado</span>`;
+  return `<strong style="${nota<4 ? 'color:var(--danger);' : ''}">${nota.toFixed(1)}</strong><br><span class="muted" style="font-size:0.68rem; color:var(--success); font-weight:700;" title="${o ? escapeHtml(o.base.name) + ' ' + escapeHtml(remedialModeLabel(ev)) : ''}">→ vale ${o && o.vale !== null ? o.vale.toFixed(1) : nota.toFixed(1)}</span>`;
+}
+
 function openEvaluationForm(id){
   const group = getActiveGroup();
   const ev = group.evaluations.find(e=>e.id===id);
@@ -9295,11 +9444,20 @@ function openEvaluationForm(id){
           <input type="number" id="evFormExigencia" min="1" max="99" value="${ev.exigencia}">
         </div>
       </div>
+      ${remedialOfEval(ev) ? `<p class="muted" style="margin-top:10px;">🔁 Esta evaluación tiene un remedial: <strong>${escapeHtml(remedialOfEval(ev).name)}</strong>.</p>` : `
+      <label style="margin-top:10px;">¿Es remedial de otra evaluación?</label>
+      <select id="evFormRemedialOf">
+        <option value="">No</option>
+        ${remedialCandidates(group, ev).map(e=>`<option value="${e.id}" ${e.id===ev.remedialOf?'selected':''}>🔁 Remedial de: ${escapeHtml(e.name)}</option>`).join('')}
+      </select>
+      <div id="evFormRemedialNotice" style="display:${ev.remedialOf?'block':'none'}; margin-top:6px;"><p class="muted" style="font-size:0.8rem;">${REMEDIAL_HELP}</p>${remedialModeFieldsHtml('evForm', ev)}</div>`}
+      <div id="evFormNonRem" style="display:${isActiveRemedial(ev)?'none':'block'};">
       <label style="margin-top:10px;">Grupo de notas (opcional)</label>
       <select id="evFormGradeGroup">
         <option value="">Ninguno (evaluación suelta)</option>
         ${availableGroups.map(g=>`<option value="${g.id}" ${g.id===ev.gradeGroupId?'selected':''}>${escapeHtml(g.name)}</option>`).join('')}
       </select>
+      </div>
       <label style="margin-top:10px;">Fecha (opcional — aparece en el resumen semanal)</label>
       <input type="date" id="evFormDate" value="${ev.date || ''}">
       <label style="margin-top:10px;">Proceso (opcional)</label>
@@ -9307,7 +9465,7 @@ function openEvaluationForm(id){
         <option value="">Ninguno (sin proceso)</option>
         ${getActiveProcesses(group).map(p=>`<option value="${p.id}" ${p.id===ev.processId?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
       </select>
-      <div id="evFormStandaloneWeight" style="display:${ev.gradeGroupId?'none':'block'};">
+      <div id="evFormStandaloneWeight" style="display:${ev.gradeGroupId || isActiveRemedial(ev) ?'none':'block'};">
         <div class="grid-2" style="margin-top:10px;">
           <div>
             <label>Tipo</label>
@@ -9328,6 +9486,12 @@ function openEvaluationForm(id){
     </div>
   `;
   document.body.appendChild(overlay);
+  const remSel = document.getElementById('evFormRemedialOf');
+  if(remSel) remSel.addEventListener('change', function(){
+    document.getElementById('evFormNonRem').style.display = this.value ? 'none' : 'block';
+    document.getElementById('evFormStandaloneWeight').style.display = this.value || document.getElementById('evFormGradeGroup').value ? 'none' : 'block';
+    document.getElementById('evFormRemedialNotice').style.display = this.value ? 'block' : 'none';
+  });
   document.getElementById('evFormGradeGroup').addEventListener('change', function(){
     document.getElementById('evFormStandaloneWeight').style.display = this.value ? 'none' : 'block';
   });
@@ -9349,13 +9513,21 @@ function saveEvaluationForm(id){
   const gradeGroupId = document.getElementById('evFormGradeGroup').value || null;
   const date = document.getElementById('evFormDate').value || null;
   const processId = document.getElementById('evFormProcess').value || null;
+  const remSel = document.getElementById('evFormRemedialOf');
+  const remedialOf = remSel ? (remSel.value || null) : (ev.remedialOf || null);
   if(name) ev.name = name;
   if(totalScore > 0) ev.totalScore = totalScore;
   if(exigencia > 0) ev.exigencia = exigencia;
-  ev.gradeGroupId = gradeGroupId;
   ev.date = date;
   ev.processId = processId;
-  if(!gradeGroupId){
+  ev.remedialOf = remedialOf;
+  if(remedialOf){
+    ev.gradeGroupId = null; ev.weightType = 'simple'; ev.weightPercent = 0;
+    Object.assign(ev, readRemedialMode('evForm'));
+  } else {
+    ev.gradeGroupId = gradeGroupId;
+  }
+  if(!remedialOf && !gradeGroupId){
     ev.weightType = document.getElementById('evFormWeightType').value;
     ev.weightPercent = ev.weightType === 'weighted' ? (Number(document.getElementById('evFormWeightPercent').value) || 0) : 0;
   }
@@ -9368,8 +9540,9 @@ function editEvaluation(id){ openEvaluationForm(id); }
 
 function deleteEvaluation(id){
   const group = getActiveGroup();
-  if(!confirm('¿Eliminar esta evaluación y todos los puntajes registrados?')) return;
-  group.evaluations = group.evaluations.filter(e=>e.id!==id);
+  const rem = remedialOfEval(group.evaluations.find(e=> e.id === id));
+  if(!confirm('¿Eliminar esta evaluación y todos los puntajes registrados?' + (rem ? '\n\nSu remedial "' + rem.name + '" se eliminará también.' : ''))) return;
+  group.evaluations = group.evaluations.filter(e=> e.id !== id && !(rem && e.id === rem.id));
   saveState();
   renderCalificaciones(group);
 }
@@ -9489,7 +9662,9 @@ function addCalificacionesSheet(workbook, group){
   let standaloneColorIdx = 0;
   const blocks = evals.map((ev)=>{
     const scoreCol = col, totalCol = col+1, exigCol = col+2, notaCol = col+3;
-    col += 4;
+    const isRem = isActiveRemedial(ev) && evals.includes(remedialBaseOf(ev));
+    const validaCol = isRem ? col+4 : null; // remedial: columna extra con la nota que vale (la mayor)
+    col += isRem ? 5 : 4;
     let color;
     if(ev.gradeGroupId){
       const gg = gradeGroups.find(g=>g.id===ev.gradeGroupId);
@@ -9498,12 +9673,13 @@ function addCalificacionesSheet(workbook, group){
       color = blockColors[standaloneColorIdx % blockColors.length];
       standaloneColorIdx++;
     }
-    return { ev, scoreCol, totalCol, exigCol, notaCol, color };
+    return { ev, scoreCol, totalCol, exigCol, notaCol, validaCol, isRem, color };
   });
+  const remBlockFor = baseEv=> blocks.find(b=> b.isRem && b.ev.remedialOf === baseEv.id);
 
   // Una columna extra por cada grupo de notas: su "nota sumativa" (promedio de sus evaluaciones miembro)
   const groupSummaryCols = gradeGroups
-    .map(gg=>({ gg, memberBlocks: blocks.filter(b=> b.ev.gradeGroupId === gg.id) }))
+    .map(gg=>({ gg, memberBlocks: blocks.filter(b=> !b.isRem && b.ev.gradeGroupId === gg.id) }))
     .filter(g=> g.memberBlocks.length > 0)
     .map(g=>{ const c = col; col++; return { ...g, col: c }; });
 
@@ -9518,18 +9694,21 @@ function addCalificacionesSheet(workbook, group){
   studentHeader.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE9E6F5'} };
 
   blocks.forEach(b=>{
-    ws.mergeCells(1, b.scoreCol, 1, b.notaCol);
+    const lastCol = b.validaCol || b.notaCol;
+    ws.mergeCells(1, b.scoreCol, 1, lastCol);
     const header = ws.getCell(1, b.scoreCol);
     const gg = b.ev.gradeGroupId ? gradeGroups.find(g=>g.id===b.ev.gradeGroupId) : null;
-    header.value = `${b.ev.name}${gg ? ' (' + gg.name + ')' : ' (' + (b.ev.weightType === 'weighted' ? 'pondera ' + b.ev.weightPercent + '%' : 'promedio simple') + ')'}`;
+    header.value = b.isRem
+      ? `${b.ev.name} (remedial de ${remedialBaseOf(b.ev).name}: si es menor se anula; si no, ${remedialModeLabel(b.ev)})`
+      : `${b.ev.name}${gg ? ' (' + gg.name + ')' : ' (' + (b.ev.weightType === 'weighted' ? 'pondera ' + b.ev.weightPercent + '%' : 'promedio simple') + ')'}`;
     header.font = { bold:true, size:10, color:{argb:'FF2B2A3D'} };
     header.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
-    for(let c=b.scoreCol; c<=b.notaCol; c++){
+    for(let c=b.scoreCol; c<=lastCol; c++){
       ws.getCell(1,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+b.color} };
       ws.getCell(2,c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+b.color} };
     }
-    const subHeaders = ['Puntaje','Total','% Exig.','Nota'];
-    [b.scoreCol,b.totalCol,b.exigCol,b.notaCol].forEach((c,i)=>{
+    const subHeaders = ['Puntaje','Total','% Exig.','Nota','Nota que vale'];
+    [b.scoreCol,b.totalCol,b.exigCol,b.notaCol,b.validaCol].filter(Boolean).forEach((c,i)=>{
       const cell = ws.getCell(2,c);
       cell.value = subHeaders[i];
       cell.font = { bold:true, size:9, color:{argb:'FF2B2A3D'} };
@@ -9595,14 +9774,27 @@ function addCalificacionesSheet(workbook, group){
       notaCell.font = { bold:true };
       notaCellByEvalId[b.ev.id] = colLetter(b.notaCol) + rowNum;
     });
+    // Remediales: "Nota que vale" = la mayor entre la prueba y el remedial; reemplaza a la prueba en los promedios
+    const effRefByEvalId = {};
+    blocks.forEach(b=>{
+      if(!b.isRem) return;
+      const baseRef = notaCellByEvalId[b.ev.remedialOf], remRef = notaCellByEvalId[b.ev.id];
+      const vCell = ws.getCell(rowNum, b.validaCol);
+      const w = remedialWeight(b.ev);
+      vCell.value = { formula: `IF(COUNT(${baseRef},${remRef})=0,"",IF(COUNT(${remRef})=0,${baseRef},IF(COUNT(${baseRef})=0,${remRef},IF(${remRef}<${baseRef},${baseRef},ROUND(${baseRef}*${1-w}+${remRef}*${w},1)))))` };
+      vCell.alignment = { horizontal:'center', vertical:'middle' };
+      vCell.font = { bold:true, color:{argb:'FF1F9D64'} };
+      effRefByEvalId[b.ev.remedialOf] = colLetter(b.validaCol) + rowNum;
+    });
+    const refOf = ev=> effRefByEvalId[ev.id] || notaCellByEvalId[ev.id];
 
     // Unidades de calificación: evaluaciones sueltas (su propia Nota) + grupos de notas (su columna "sumativa")
     const units = [];
-    blocks.filter(b=> !b.ev.gradeGroupId).forEach(b=>{
-      units.push({ ref: notaCellByEvalId[b.ev.id], weighted: b.ev.weightType === 'weighted', weightPercent: b.ev.weightPercent || 0 });
+    blocks.filter(b=> !b.isRem && !b.ev.gradeGroupId).forEach(b=>{
+      units.push({ ref: refOf(b.ev), weighted: b.ev.weightType === 'weighted', weightPercent: b.ev.weightPercent || 0 });
     });
     groupSummaryCols.forEach(g=>{
-      const memberRefs = g.memberBlocks.map(b=> notaCellByEvalId[b.ev.id]);
+      const memberRefs = g.memberBlocks.map(b=> refOf(b.ev));
       const sumCell = ws.getCell(rowNum, g.col);
       sumCell.value = { formula: `IFERROR(ROUND(AVERAGE(${memberRefs.join(',')}),1),"")` };
       sumCell.alignment = { horizontal:'center', vertical:'middle' };
@@ -9611,7 +9803,7 @@ function addCalificacionesSheet(workbook, group){
     });
 
     // Promedio simple: promedio de TODAS las notas individuales (no de las unidades), igual que en la app
-    const allNotaRefs = Object.values(notaCellByEvalId);
+    const allNotaRefs = blocks.filter(b=> !b.isRem).map(b=> refOf(b.ev));
     const promCell = ws.getCell(rowNum, promedioCol);
     promCell.value = { formula: `IFERROR(ROUND(AVERAGE(${allNotaRefs.join(',')}),1),"")` };
     promCell.alignment = { horizontal:'center', vertical:'middle' };
@@ -9670,7 +9862,7 @@ async function exportCalificacionesToWord(group){
     evals.forEach(e=>{
       const nota = computeStudentEvalGrade(e, student.id);
       const score = e.scores ? e.scores[student.id] : null;
-      rows.push([student.name, e.name, (score !== null && score !== undefined) ? String(score) : '-', nota !== null ? nota.toFixed(1) : '-']);
+      rows.push([student.name, e.name, (score !== null && score !== undefined) ? String(score) : '-', (nota !== null ? nota.toFixed(1) : '-') + remedialNoteText(e, student.id)]);
     });
   });
 
@@ -10379,7 +10571,7 @@ function buildStudentHistoryBody(group, student, opts){
       ['Evaluación','Nota'],
       evals.map(e=>{
         const nota = computeStudentEvalGrade(e, studentId);
-        return [e.name, nota !== null ? nota.toFixed(1) : '-'];
+        return [e.name, (nota !== null ? nota.toFixed(1) : '-') + remedialNoteText(e, studentId)];
       }),
       [3500,1500]
     );
@@ -10578,7 +10770,7 @@ async function exportAllToExcelPerStudent(group){
       writeTableHeader(['Evaluación','Nota']);
       evals.forEach(e=>{
         const nota = computeStudentEvalGrade(e, student.id);
-        writeRow([e.name, nota !== null ? nota.toFixed(1) : '-']);
+        writeRow([e.name, (nota !== null ? nota.toFixed(1) : '-') + remedialNoteText(e, student.id)]);
       });
     }
     row += 1;

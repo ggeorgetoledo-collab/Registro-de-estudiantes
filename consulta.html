@@ -87,6 +87,9 @@
   .ent-unit .gitems .row:last-child{ border-bottom:none; }
   .ent-unit .caret{ color:var(--primary); font-weight:700; transition:transform .15s; }
   .ent-unit:not([open]) .caret{ transform:rotate(-90deg); }
+  .row.has-rem{ border-bottom:none; }
+  .rem-row{ margin-left:14px; border-left:3px solid #F5DFA8; padding-left:10px !important; }
+  .grade.struck{ text-decoration:line-through; opacity:0.55; }
   .row.sm{ padding:6px 0; }
   .row.sm .title{ font-weight:500; font-size:0.9rem; }
   .row.sm .grade{ min-width:38px; padding:2px 6px; font-size:0.9rem; }
@@ -203,7 +206,8 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         if(items.length) unidades.push({ ...u, items, parcial: items.length < (u.items || []).length });
       } else if(inProc(u)) unidades.push(u);
     });
-    const notasUnidad = unidades.flatMap(u=> u.t === 'g' ? u.items.map(i=> i.nota) : [u.nota]);
+    const vale = i=> i.ef !== undefined ? i.ef : i.nota; // con remedial: la nota que vale
+    const notasUnidad = unidades.flatMap(u=> u.t === 'g' ? u.items.map(vale) : [vale(u)]);
     const final = proc ? avg(notasUnidad) : (d.notas && d.notas.final);
     const finalLbl = proc ? 'Promedio de la unidad' : 'Nota final';
 
@@ -245,7 +249,13 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       if(e.peso !== null && e.peso !== undefined) subs.push('pondera ' + num(e.peso) + '%');
       if(e.dec) subs.push('incluye ' + e.dec + ' décima(s)');
       if(e.nota === null || e.nota === undefined) subs.push('sin nota aún');
-      return `<div class="row${small ? ' sm' : ''}"><div class="main"><div class="title">${esc(e.n)}</div>${subs.length ? `<div class="sub">${subs.join(' · ')}</div>` : ''}</div><span class="grade ${cls}">${nota(e.nota)}</span></div>`;
+      let html = `<div class="row${small ? ' sm' : ''}${e.rem ? ' has-rem' : ''}"><div class="main"><div class="title">${esc(e.n)}</div>${subs.length ? `<div class="sub">${subs.join(' · ')}</div>` : ''}</div><span class="grade ${cls}">${nota(e.nota)}</span></div>`;
+      if(e.rem){
+        const r = e.rem, rcls = r.anul ? 'none struck' : (r.nota < 4 ? 'bad' : '');
+        html += `<div class="row sm rem-row"><div class="main"><div class="title">🔁 ${esc(r.n)}</div><div class="sub">${r.d ? fdate(r.d) + ' · ' : ''}${r.anul ? 'Anulado: es menor que la nota de la prueba, vale ' + nota(e.nota) : 'Mejora la prueba: ' + esc(r.modo || 'se promedia con la prueba')}</div></div><span class="grade ${rcls}">${nota(r.nota)}</span></div>`;
+        if(!r.anul && e.ef !== undefined && e.ef !== null) html += `<div class="row sm rem-row"><div class="main"><div class="title">Nota que vale para ${esc(e.n)}</div></div><span class="grade ${e.ef < 4 ? 'bad' : ''}">${nota(e.ef)}</span></div>`;
+      }
+      return html;
     };
     html += `<div class="card"><h2>🎯 Calificaciones</h2>`;
     html += unidades.length ? unidades.map(u=>{
