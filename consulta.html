@@ -5,32 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#6C4EE3">
+<meta name="theme-color" content="#4453C4">
 <title>Mi registro</title>
 <link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap">
 <style>
   :root{
-    --primary:#6C4EE3; --primary-dark:#5638C4; --primary-light:#F1ECFC;
-    --bg:#F6F5FB; --card:#FFFFFF; --text:#2B2A3D; --dim:#7C7A94; --border:#E9E6F5;
-    --ok:#1F9D64; --ok-bg:#E6F8EF; --warn:#B7791F; --warn-bg:#FDF3DE; --bad:#D9453B; --bad-bg:#FDECEA; --neutral-bg:#F1F0F6;
-    --shadow:0 6px 20px rgba(76,60,150,0.08); --radius:14px;
+    --primary:#4453C4; --primary-dark:#2F3B99; --primary-light:#ECEEFB; --primary-line:#C9CEF2;
+    --bg:#F4F5F7; --card:#FFFFFF; --text:#1B2130; --dim:#586174; --border:#E2E5EA;
+    --ok:#1C6B44; --ok-bg:#E5F4EC; --warn:#7A4F00; --warn-bg:#FBF0D9; --bad:#A3241C; --bad-bg:#FBE9E7; --neutral-bg:#ECEEF1;
+    --shadow:none; --radius:16px;
   }
   @media (prefers-color-scheme: dark){
     :root{
-      --primary:#A78BFA; --primary-dark:#C4B5FD; --primary-light:rgba(167,139,250,0.16);
-      --bg:#17141F; --card:#221E2E; --text:#EDEAF5; --dim:#A79FC4; --border:#332C47;
+      --primary:#9AA6F2; --primary-dark:#C3CAF7; --primary-light:rgba(154,166,242,0.16); --primary-line:rgba(154,166,242,0.4);
+      --bg:#15181E; --card:#1E222A; --text:#E8EAEF; --dim:#A3AAB8; --border:#2D323C;
       --ok:#34D399; --ok-bg:rgba(52,211,153,0.14); --warn:#FBBF24; --warn-bg:rgba(251,191,36,0.14); --bad:#F87171; --bad-bg:rgba(248,113,113,0.14); --neutral-bg:rgba(255,255,255,0.06);
-      --shadow:0 6px 20px rgba(0,0,0,0.45);
+      --shadow:none;
     }
   }
   *{ box-sizing:border-box; }
   html{ -webkit-text-size-adjust:100%; }
-  body{ margin:0; background:var(--bg); color:var(--text); font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size:15px; line-height:1.45; }
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size:16px; line-height:1.45; }
   main{ max-width:640px; margin:0 auto; padding:16px 16px 40px; }
-  h1, h2, .num{ font-family:'Poppins', 'Inter', sans-serif; }
-  .brand{ font-family:'Poppins','Inter',sans-serif; font-weight:800; color:var(--primary-dark); font-size:1rem; margin:4px 0 12px; }
+  h1, h2, .num{ font-family:Manrope,'Source Sans 3',sans-serif; }
+  .brand{ font-family:Manrope,'Source Sans 3',sans-serif; font-weight:800; color:var(--primary-dark); font-size:1rem; margin:4px 0 12px; }
   .card{ background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px; margin-bottom:14px; }
   .hero h1{ margin:0; font-size:1.5rem; line-height:1.2; font-weight:800; overflow-wrap:anywhere; }
   .dim{ color:var(--dim); }
@@ -40,6 +40,22 @@
   .tile .num{ font-size:1.9rem; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; }
   .tile .lbl{ color:var(--dim); font-size:0.8rem; font-weight:600; margin-top:2px; }
   .num.ok{ color:var(--ok); } .num.bad{ color:var(--bad); } .num.primary{ color:var(--primary); }
+  .tile.accent{ background:var(--primary); border-color:var(--primary); color:#fff; }
+  .tile.accent .lbl{ color:rgba(255,255,255,0.9); }
+  .hero-actions{ display:flex; gap:8px; flex:none; }
+  .icon-btn{ width:44px; height:44px; border-radius:12px; border:1px solid var(--border); background:var(--card); color:var(--text); display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
+  .pal-sheet{ position:fixed; inset:0; z-index:60; background:rgba(15,18,25,0.45); display:flex; align-items:flex-end; justify-content:center; }
+  .pal-box{ width:100%; max-width:520px; background:var(--card); color:var(--text); border-radius:20px 20px 0 0; padding:18px 16px calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .pal-box h2{ margin:0 0 4px; }
+  .pal-list{ display:flex; flex-direction:column; gap:2px; margin-top:12px; border:1px solid var(--border); border-radius:16px; padding:6px; }
+  .pal-opt{ display:flex; align-items:center; gap:12px; min-height:50px; padding:8px 12px; border:none; border-radius:12px; background:transparent; color:var(--text); font:inherit; font-weight:600; cursor:pointer; text-align:left; }
+  .pal-opt.active{ background:var(--primary-light); }
+  .pal-dots{ display:flex; gap:4px; }
+  .pal-dots span{ width:22px; height:22px; border-radius:50%; box-sizing:border-box; }
+  .pal-name{ flex:1; }
+  .pal-radio{ width:20px; height:20px; border-radius:50%; border:2px solid var(--border); box-sizing:border-box; }
+  .pal-opt.active .pal-radio{ border-color:var(--primary); background:var(--primary); box-shadow: inset 0 0 0 4px var(--card); }
+  .pal-close{ margin-top:12px; width:100%; min-height:48px; font:inherit; font-weight:700; border-radius:12px; border:1px solid var(--border); background:var(--bg); color:var(--text); cursor:pointer; }
   h2{ font-size:1.08rem; margin:0 0 10px; font-weight:700; display:flex; align-items:center; gap:8px; }
   .row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
   .row:last-child{ border-bottom:none; }
@@ -56,7 +72,7 @@
   .chip.open{ background:var(--primary-light); color:var(--primary-dark); }
   .chip.neutral{ background:var(--neutral-bg); color:var(--dim); }
   .chips{ display:flex; flex-wrap:wrap; gap:6px; }
-  .grade{ display:inline-block; min-width:44px; text-align:center; padding:4px 8px; border-radius:10px; font-weight:800; font-family:'Poppins','Inter',sans-serif; font-variant-numeric:tabular-nums; background:var(--primary-light); color:var(--primary-dark); }
+  .grade{ display:inline-block; min-width:44px; text-align:center; padding:4px 8px; border-radius:10px; font-weight:800; font-family:Manrope,'Source Sans 3',sans-serif; font-variant-numeric:tabular-nums; background:var(--primary-light); color:var(--primary-dark); }
   .grade.bad{ background:var(--bad-bg); color:var(--bad); }
   .grade.none{ background:var(--neutral-bg); color:var(--dim); }
   .summary{ display:flex; flex-wrap:wrap; gap:6px 16px; font-size:0.88rem; margin-bottom:6px; }
@@ -88,7 +104,7 @@
   .ent-unit .caret{ color:var(--primary); font-weight:700; transition:transform .15s; }
   .ent-unit:not([open]) .caret{ transform:rotate(-90deg); }
   .row.has-rem{ border-bottom:none; }
-  .rem-row{ margin-left:14px; border-left:3px solid #F5DFA8; padding-left:10px !important; }
+  .rem-row{ margin-left:14px; border-left:3px solid var(--primary-line); padding-left:10px !important; }
   .grade.struck{ text-decoration:line-through; opacity:0.55; }
   .row.sm{ padding:6px 0; }
   .row.sm .title{ font-weight:500; font-size:0.9rem; }
@@ -98,8 +114,8 @@
   .mycard-btn{ font:inherit; font-weight:700; font-size:0.85rem; padding:8px 12px; border-radius:12px; border:none; background:var(--primary); color:#fff; cursor:pointer; white-space:nowrap; flex:none; }
   .mycard{ position:fixed; inset:0; z-index:50; background:#fff; color:#111; display:flex; align-items:center; justify-content:center; padding:20px; overflow:auto; }
   .mycard-inner{ width:100%; max-width:440px; text-align:center; }
-  .mycard-kicker{ font-weight:700; color:#6C4EE3; font-size:0.95rem; }
-  .mycard-name{ font-family:'Poppins','Inter',sans-serif; font-weight:800; font-size:1.6rem; line-height:1.2; margin-top:6px; overflow-wrap:anywhere; }
+  .mycard-kicker{ font-weight:700; color:var(--primary); font-size:0.95rem; }
+  .mycard-name{ font-family:Manrope,'Source Sans 3',sans-serif; font-weight:800; font-size:1.6rem; line-height:1.2; margin-top:6px; overflow-wrap:anywhere; }
   .mycard-course{ color:#555; margin-top:4px; }
   .mycard-qr{ width:min(84vw, 380px); margin:18px auto 10px; }
   .mycard-qr svg{ width:100%; height:auto; display:block; }
@@ -140,6 +156,50 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     ov.querySelector('.mycard-close').addEventListener('click', ()=> ov.remove());
     document.body.appendChild(ov);
   }
+  /* Paleta de color elegida por el estudiante (se guarda solo en este celular) */
+  const PALETAS = {
+    indigo:   ['Índigo',    '#4453C4', '#2F3B99', '#ECEEFB', '#C9CEF2', '#9AA6F2', '#C3CAF7'],
+    bosque:   ['Bosque',    '#2E7553', '#1F573D', '#E6F2EC', '#BFDCCD', '#6FC49A', '#A3DCC0'],
+    oceano:   ['Océano',    '#1D6A88', '#134E66', '#E4F0F5', '#BBD7E3', '#6BB8D6', '#A3D4E8'],
+    ciruela:  ['Ciruela',   '#764689', '#573266', '#F2EBF5', '#DCC8E4', '#C29AD4', '#DCC3E6'],
+    terracota:['Terracota', '#A9512F', '#7F3B21', '#F8EBE5', '#EBCBBE', '#E39A7C', '#EFC0AC'],
+    rosa:     ['Rosa',      '#B4386C', '#86264F', '#FBEAF1', '#F0C6D8', '#EE8FB5', '#F5BCD3'],
+    grafito:  ['Grafito',   '#3A4250', '#232933', '#ECEEF1', '#CDD2DA', '#AEB6C4', '#D2D7E0'],
+  };
+  function paletaActual(){ try{ const k = localStorage.getItem('mi-registro-paleta'); return PALETAS[k] ? k : 'indigo'; }catch(e){ return 'indigo'; } }
+  function aplicarPaleta(key){
+    const v = PALETAS[key] || PALETAS.indigo;
+    const dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    const rgba = (h, a)=> `rgba(${parseInt(h.slice(1,3),16)},${parseInt(h.slice(3,5),16)},${parseInt(h.slice(5,7),16)},${a})`;
+    const r = document.documentElement.style;
+    r.setProperty('--primary', dark ? v[5] : v[1]);
+    r.setProperty('--primary-dark', dark ? v[6] : v[2]);
+    r.setProperty('--primary-light', dark ? rgba(v[5], 0.16) : v[3]);
+    r.setProperty('--primary-line', dark ? rgba(v[5], 0.4) : v[4]);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if(meta) meta.setAttribute('content', v[1]);
+  }
+  aplicarPaleta(paletaActual());
+  function showPalettePicker(){
+    const cur = paletaActual();
+    const ov = document.createElement('div');
+    ov.className = 'pal-sheet';
+    ov.innerHTML = `<div class="pal-box" role="dialog" aria-label="Paleta de color">
+      <h2>Paleta de color</h2>
+      <div class="dim small">Se guarda en este celular. Los colores de estados (en plazo, atrasada, bajo 4,0) no cambian.</div>
+      <div class="pal-list" role="radiogroup">${Object.keys(PALETAS).map(k=>{ const v = PALETAS[k]; return `<button type="button" role="radio" aria-checked="${k === cur}" class="pal-opt${k === cur ? ' active' : ''}" data-k="${k}"><span class="pal-dots" aria-hidden="true"><span style="background:${v[1]}"></span><span style="background:${v[3]}; border:1px solid ${v[4]}"></span></span><span class="pal-name">${v[0]}</span><span class="pal-radio" aria-hidden="true"></span></button>`; }).join('')}</div>
+      <button type="button" class="pal-close">Listo</button>
+    </div>`;
+    ov.addEventListener('click', e=>{ if(e.target === ov) ov.remove(); });
+    ov.querySelector('.pal-close').addEventListener('click', ()=> ov.remove());
+    ov.querySelectorAll('.pal-opt').forEach(b=> b.addEventListener('click', ()=>{
+      try{ localStorage.setItem('mi-registro-paleta', b.dataset.k); }catch(e){}
+      aplicarPaleta(b.dataset.k);
+      ov.querySelectorAll('.pal-opt').forEach(x=>{ const on = x === b; x.classList.toggle('active', on); x.setAttribute('aria-checked', on); });
+    }));
+    document.body.appendChild(ov);
+  }
+
   const ESTADOS = {
     en_plazo: ['Entregada en plazo', 'ok'],
     fuera_plazo: ['Entregada fuera de plazo', 'warn'],
@@ -222,7 +282,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     const showProc = (per.procesos || []).length > 0;
     let html = `<div class="brand">⭐ Mi registro</div>
       <div class="card hero">
-        <div class="hero-top"><h1>${esc(p.nombre)}</h1><button class="mycard-btn" type="button" id="myCardBtn">🪪 Mi tarjeta</button></div>
+        <div class="hero-top"><h1>${esc(p.nombre)}</h1><div class="hero-actions"><button class="icon-btn" type="button" id="palBtn" aria-label="Paleta de color" title="Paleta de color"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="1.5"></circle><circle cx="17.5" cy="10.5" r="1.5"></circle><circle cx="8.5" cy="7.5" r="1.5"></circle><circle cx="6.5" cy="12.5" r="1.5"></circle><path d="M12 2a10 10 0 0 0 0 20c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1.1.9-2 2-2h2.4A5.6 5.6 0 0 0 22 10c0-4.4-4.5-8-10-8z"></path></svg></button><button class="mycard-btn" type="button" id="myCardBtn">🪪 Mi tarjeta</button></div></div>
         ${cursos.length > 1 ? `
           <div class="dim small" style="margin:6px 0 8px; font-weight:600;">Elige la asignatura</div>
           <div class="course-tabs">${cursos.map((c, i)=> `<button class="course-tab${i === sel.c ? ' active' : ''}" data-idx="${i}">${esc(c.curso)}<span>${coursePts(c)} pts</span></button>`).join('')}</div>
@@ -234,7 +294,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         <div class="dim small" style="margin-top:8px;">Datos actualizados el ${fdatetime(generado)}</div>
       </div>
       <div class="tiles">
-        <div class="tile"><div class="num primary">${num(puntos.disponibles)}</div><div class="lbl">Puntos disponibles</div></div>
+        <div class="tile accent"><div class="num">${num(puntos.disponibles)}</div><div class="lbl">Puntos disponibles</div></div>
         <div class="tile"><div class="num ${asistPct !== null && asistPct < 85 ? 'bad' : ''}">${asistPct === null ? '—' : asistPct + '%'}</div><div class="lbl">Asistencia${proc ? ' en la unidad' : ''}</div></div>
         <div class="tile"><div class="num ${final !== null && final !== undefined && final < 4 ? 'bad' : ''}">${nota(final)}</div><div class="lbl">${finalLbl}</div></div>
         <div class="tile"><div class="num ok">${num(dec.disponibles)}</div><div class="lbl">Décimas por aplicar</div></div>
@@ -372,6 +432,8 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 
     const myBtn = document.getElementById('myCardBtn');
     if(myBtn) myBtn.addEventListener('click', ()=> showMyCard(p.nombre, cursos.map(c=> c.curso).join(' / ')));
+    const palBtn = document.getElementById('palBtn');
+    if(palBtn) palBtn.addEventListener('click', showPalettePicker);
     const go = s=>{ try{ sessionStorage.setItem('mi-registro-sel', JSON.stringify(s)); }catch(e){} render(p, generado, s); };
     app.querySelectorAll('.course-tab').forEach(btn=>{
       btn.addEventListener('click', ()=>{ const c = Number(btn.dataset.idx); go({ c, per: defaultPeriodIdx(cursos[c]), proc: '' }); });
