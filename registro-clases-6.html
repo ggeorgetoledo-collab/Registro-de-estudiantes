@@ -191,7 +191,7 @@
   .page-head .muted{ margin-top:4px; font-size:0.98rem; }
   @media (max-width: 900px){
     .app-shell{ flex-direction:column; }
-    .sidebar{ width:auto; height:auto; position:static; overflow:visible; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 8px; padding:12px 14px 0; border-right:none; border-bottom:1px solid var(--border); }
+    .sidebar{ width:auto; height:auto; position:sticky; top:0; z-index:60; box-shadow:0 1px 3px rgba(15,18,25,0.08); overflow:visible; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px 8px; padding:12px 14px 0; border-right:none; border-bottom:1px solid var(--border); }
     .side-brand{ grid-column:1; grid-row:1; padding:0; }
     .side-footer{ grid-column:2; grid-row:1; margin:0; border:none; padding:0; flex-direction:row; align-items:center; }
     .side-nav{ grid-column:1 / -1; grid-row:2; flex-direction:row; overflow-x:auto; gap:4px; padding-bottom:10px; scrollbar-width:none; }
