@@ -197,24 +197,10 @@
   .an-ind-top{ display:flex; justify-content:space-between; gap:10px; font-size:0.92rem; }
   .an-bar{ height:8px; border-radius:6px; background:var(--bg); overflow:hidden; }
   .an-bar div{ height:100%; border-radius:6px; }
-  .nav-badge{ margin-left:auto; min-width:22px; height:22px; padding:0 6px; border-radius:999px; background:var(--danger); color:#fff; font-size:0.76rem; font-weight:800; display:inline-flex; align-items:center; justify-content:center; }
-  .nav-badge[hidden]{ display:none; }
-  @media (max-width: 900px){ .nav-badge{ margin-left:2px; } }
-  .alerts-strip{ display:flex; align-items:center; gap:12px; width:100%; margin-bottom:18px; padding:12px 16px; border:1px solid var(--danger-border); border-radius:var(--radius); background:var(--danger-light); color:var(--text); font:inherit; font-size:0.98rem; text-align:left; cursor:pointer; }
-  .alerts-strip-ico{ width:26px; height:26px; border-radius:50%; background:var(--danger); color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; flex:none; }
-  .alerts-strip-go{ margin-left:auto; color:var(--danger); font-weight:700; white-space:nowrap; }
-  .alert-list{ display:flex; flex-direction:column; }
-  .alert-row{ display:flex; flex-wrap:wrap; gap:6px 14px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--border); }
-  .alert-name{ font-weight:700; min-width:180px; flex:0 0 200px; padding-top:6px; }
-  .alert-courses{ flex:1 1 320px; display:flex; flex-direction:column; gap:6px; min-width:0; }
-  .alert-course{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--border); border-radius:10px; background:var(--card-bg); color:var(--text); font:inherit; text-align:left; cursor:pointer; }
-  .alert-course:hover{ border-color:var(--primary-border); background:var(--primary-light); }
-  .alert-course-name{ font-size:0.86rem; font-weight:700; color:var(--text-dim); margin-right:2px; }
   .alert-chip{ display:inline-block; padding:2px 9px; border-radius:999px; font-size:0.8rem; font-weight:700; }
   .alert-chip.bad{ background:var(--danger-light); color:var(--danger); }
   .alert-chip.warn{ background:#FBF0D9; color:#7A4F00; }
   :root[data-theme="dark"] .alert-chip.warn{ background:rgba(251,191,36,0.16); color:#FBBF24; }
-  @media (max-width: 600px){ .alert-name{ flex-basis:100%; padding-top:0; } }
   .side-search{ position:relative; }
   .side-search input{ width:100%; padding:9px 12px 9px 34px; border-radius:10px; border:1px solid var(--border-strong); background:var(--bg); color:var(--text); font-size:0.92rem; }
   .side-search .ico{ position:absolute; left:10px; top:50%; transform:translateY(-50%); width:17px; height:17px; color:var(--text-dim); pointer-events:none; }
@@ -756,7 +742,6 @@
   </div>
   <nav class="side-nav" id="modulesNav" aria-label="Módulos">
     <button data-module="inicio" class="active"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Inicio</span></button>
-    <button data-module="alertas"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5L2.8 19.5h18.4z"/><path d="M12 10v4.5"/><path d="M12 17.2v.1"/></svg><span>Alertas</span><span class="nav-badge" id="alertsBadge" hidden></span></button>
     <button data-module="horario"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg><span>Horario</span></button>
     <button data-module="cursos"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.4 3.4-5.5 6.5-5.5s5.7 2.1 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18.5 14.8c1.6.8 2.7 2.6 3 5.2"/></svg><span>Cursos</span></button>
     <button data-module="trabajo"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6"/><path d="M9 14h6"/><path d="M9 18h3"/></svg><span>Trabajo en clases</span></button>
@@ -2378,7 +2363,6 @@ document.getElementById('newGroupBtn').addEventListener('click', ()=>{
 /* ============ MÓDULOS Y PESTAÑAS ============ */
 const MODULE_TABS = {
   inicio: ['inicio'],
-  alertas: ['alertas'],
   horario: ['horario'],
   cursos: ['estudiantes'],
   trabajo: ['indicadores','registrar','entregas','historial','decimas'],
@@ -2388,7 +2372,7 @@ const MODULE_TABS = {
   bitacora: ['bitacora'],
 };
 const MODULE_LABELS = {
-  inicio: 'Inicio', alertas: 'Alertas', horario: 'Horario', cursos: 'Cursos', trabajo: 'Trabajo en clases',
+  inicio: 'Inicio', horario: 'Horario', cursos: 'Cursos', trabajo: 'Trabajo en clases',
   calificaciones: 'Calificaciones', puntos: 'Puntos', tarjetas: 'Tarjetas y portal', bitacora: 'Bitácora',
 };
 const SUBTAB_LABELS = {
@@ -2413,7 +2397,6 @@ let currentModule = 'inicio';
 let currentTab = 'inicio';
 
 function renderNav(){
-  updateAlertsBadge();
   document.querySelectorAll('#modulesNav button').forEach(b=> b.classList.toggle('active', b.dataset.module === currentModule));
   const subNav = document.getElementById('subTabsNav');
   const tabs = MODULE_TABS[currentModule] || [];
@@ -2513,7 +2496,6 @@ function renderMain(){
   try{ recomputeEntregaLinkedGrades(); }catch(e){}
   if(currentTab !== 'escanear' && !kioskActive){ qrScanner.wanted = false; stopQrScanner(); }
   if(currentTab === 'inicio') return renderInicio();
-  if(currentTab === 'alertas') return renderAlertas();
   if(currentTab === 'estudiantes') return renderEstudiantes(group);
   if(currentTab === 'indicadores') return renderIndicadores(group);
   if(currentTab === 'horario') return renderHorario();
@@ -3153,91 +3135,11 @@ function buildWeekSummary(){
   return days;
 }
 
-/* ============ ALERTAS TEMPRANAS (todos los cursos) ============ */
-const ALERT_RULES = { nota: 4.0, asistencia: 85, minClases: 4, racha: 3, atrasadas: 2 };
-let alertsShowAll = false;
-function computeStudentAlerts(group, s){
-  const out = [];
-  const g = computeStudentFinalGrade(group, s.id).finalGrade;
-  if(g !== null && g < ALERT_RULES.nota) out.push({ k:'nota', w:3, t:'Nota final ' + g.toFixed(1).replace('.', ',') });
-  const sessions = getActiveSessions(group)
-    .filter(se=> (se.entries || []).some(e=> e.studentId === s.id))
-    .sort((a,b)=> ((a.date||'') + (a.time||'')).localeCompare((b.date||'') + (b.time||'')));
-  const pres = sessions.map(se=> isEntryPresent(se.entries.find(e=> e.studentId === s.id)));
-  if(pres.length >= ALERT_RULES.minClases){
-    const pct = Math.round(pres.filter(Boolean).length / pres.length * 100);
-    if(pct < ALERT_RULES.asistencia) out.push({ k:'asis', w:2, t:'Asistencia ' + pct + '%' });
-  }
-  let racha = 0; for(let i = pres.length - 1; i >= 0 && !pres[i]; i--) racha++;
-  if(racha >= ALERT_RULES.racha) out.push({ k:'racha', w:2, t: racha + ' ausencias seguidas' });
-  let noEnt = 0, atr = 0;
-  getActiveEntregas(group).forEach(e=>{ const st = e.estados && e.estados[s.id]; if(st === 'no_entregada') noEnt++; if(st === 'fuera_plazo') atr++; });
-  if(noEnt > 0) out.push({ k:'noent', w: noEnt > 1 ? 2 : 1, t: noEnt + (noEnt === 1 ? ' entrega no entregada' : ' entregas no entregadas') });
-  if(atr >= ALERT_RULES.atrasadas) out.push({ k:'atr', w:1, t: atr + ' entregas atrasadas' });
-  return out;
-}
-function collectAlerts(){
-  const byPerson = new Map();
-  (state.groups || []).forEach(group=>{
-    (group.students || []).forEach(s=>{
-      const al = computeStudentAlerts(group, s);
-      if(!al.length) return;
-      const key = s.card ? 'c:' + s.card : 'n:' + s.name.trim().toLowerCase();
-      if(!byPerson.has(key)) byPerson.set(key, { name: s.name, items: [], score: 0 });
-      const p = byPerson.get(key);
-      p.items.push({ groupId: group.id, groupName: group.name, studentId: s.id, alerts: al });
-      p.score += al.reduce((a,x)=> a + x.w, 0);
-    });
-  });
-  return [...byPerson.values()].sort((a,b)=> b.score - a.score || a.name.localeCompare(b.name));
-}
-function alertsCardHtml(){
-  const list = collectAlerts();
-  const visible = alertsShowAll ? list : list.slice(0, 8);
-  const chipCls = k=> (k === 'nota' || k === 'racha' || k === 'noent') ? 'alert-chip bad' : 'alert-chip warn';
-  return `
-  <div class="card app-font">
-    <div class="flex-between" style="gap:8px; flex-wrap:wrap;">
-      <h2 style="border:none; margin:0; padding:0;">Estudiantes que necesitan atención</h2>
-      <span class="muted" style="font-size:0.85rem;">${list.length ? list.length + ' estudiante(s) · todos tus cursos' : ''}</span>
-    </div>
-    <p class="muted" style="font-size:0.84rem; margin:6px 0 10px;">Nota final bajo ${ALERT_RULES.nota.toFixed(1).replace('.', ',')} · asistencia bajo ${ALERT_RULES.asistencia}% · ${ALERT_RULES.racha} ausencias seguidas · entregas no entregadas o atrasadas${state.activePeriodId ? ' · solo el periodo elegido' : ''}.</p>
-    ${list.length === 0 ? '<div class="empty-state" style="padding:14px;">Sin alertas por ahora. Todo en orden.</div>' : `
-    <div class="alert-list">
-      ${visible.map(p=>`
-        <div class="alert-row">
-          <div class="alert-name">${escapeHtml(p.name)}</div>
-          <div class="alert-courses">
-            ${p.items.map(it=>`
-              <button type="button" class="alert-course" onclick="openStudentInGroup('${it.groupId}','${it.studentId}')" title="Abrir ficha en ${escapeHtml(it.groupName)}">
-                <span class="alert-course-name">${escapeHtml(it.groupName)}</span>
-                ${it.alerts.map(a=> `<span class="${chipCls(a.k)}">${escapeHtml(a.t)}</span>`).join('')}
-              </button>`).join('')}
-          </div>
-        </div>`).join('')}
-    </div>
-    ${list.length > 8 ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;" onclick="alertsShowAll=!alertsShowAll; renderAlertas();">${alertsShowAll ? 'Ver menos' : 'Ver los ' + list.length}</button>` : ''}`}
-  </div>`;
-}
-function renderAlertas(){
-  const main = document.getElementById('main');
-  const per = (state.periods || []).find(p=> p.id === state.activePeriodId);
-  main.innerHTML = `<div class="page-head app-font"><h1>Alertas</h1><div class="muted">Todos tus cursos${per ? ' · ' + escapeHtml(per.name) : ''}</div></div>` + alertsCardHtml();
-  updateAlertsBadge();
-}
-function updateAlertsBadge(){
-  const b = document.getElementById('alertsBadge');
-  if(!b) return;
-  let n = 0; try{ n = collectAlerts().length; }catch(e){}
-  b.hidden = !n; b.textContent = n > 99 ? '99+' : String(n);
-}
 function inicioTopHtml(){
   const name = teacherDisplayName();
   const d = new Date();
   const fecha = d.toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long' });
-  const n = collectAlerts().length;
-  return `<div class="page-head app-font"><h1>Inicio</h1><div class="muted">${name ? 'Hola ' + escapeHtml(name) + ' · ' : ''}${escapeHtml(fecha.charAt(0).toUpperCase() + fecha.slice(1))}</div></div>`
-    + (n ? `<button type="button" class="alerts-strip app-font" onclick="goToModule('alertas')"><span class="alerts-strip-ico" aria-hidden="true">!</span><span><strong>${n} estudiante(s)</strong> necesitan atención</span><span class="alerts-strip-go">Ver alertas →</span></button>` : '');
+  return `<div class="page-head app-font"><h1>Inicio</h1><div class="muted">${name ? 'Hola ' + escapeHtml(name) + ' · ' : ''}${escapeHtml(fecha.charAt(0).toUpperCase() + fecha.slice(1))}</div></div>`;
 }
 // Abre la ficha de un estudiante en su curso (desde alertas o el buscador)
 function openStudentInGroup(groupId, studentId){
