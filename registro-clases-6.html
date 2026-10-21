@@ -175,6 +175,49 @@
   .status-dot{ position:absolute; left:20px; top:8px; width:9px; height:9px; border-radius:50%; border:2px solid var(--card-bg); background:var(--text-dim); }
   #driveSettingsBtn.on .status-dot{ background:var(--success); }
   #driveSettingsBtn.off .status-dot{ background:var(--danger); }
+  .rubric-legend{ background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:12px; display:flex; flex-direction:column; gap:3px; font-size:0.9rem; }
+  .rubric-sel{ width:auto; min-width:74px; padding:5px 6px; font-size:0.84rem; font-weight:700; text-align:center; }
+  .rubric-sel.rl-3{ background:var(--success-light); color:var(--success); border-color:var(--success-border); }
+  .rubric-sel.rl-2{ background:var(--primary-light); color:var(--primary-dark); border-color:var(--primary-border); }
+  .rubric-sel.rl-1{ background:#FBF0D9; color:#7A4F00; border-color:#F0D9A8; }
+  .rubric-sel.rl-0{ background:var(--danger-light); color:var(--danger); border-color:var(--danger-border); }
+  .an-h{ font-size:1rem; margin:18px 0 8px; }
+  .an-tiles{ display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; }
+  .an-tiles div{ border:1px solid var(--border); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:2px; }
+  .an-tiles b{ font-family:'Manrope', sans-serif; font-size:1.25rem; font-variant-numeric:tabular-nums; }
+  .an-tiles span{ font-size:0.8rem; color:var(--text-dim); font-weight:600; }
+  @media (max-width:520px){ .an-tiles{ grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .an-hist{ display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:8px; height:160px; align-items:end; border-bottom:1px solid var(--border); padding-bottom:4px; }
+  .an-col{ display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; gap:4px; }
+  .an-colbar{ width:100%; border-radius:6px 6px 0 0; min-height:2px; }
+  .an-n{ font-size:0.82rem; font-weight:700; }
+  .an-lbl{ font-size:0.74rem; color:var(--text-dim); white-space:nowrap; margin-bottom:-22px; }
+  .an-hist{ margin-bottom:24px; }
+  .an-ind{ display:flex; flex-direction:column; gap:4px; padding:8px 0; border-top:1px solid var(--border); }
+  .an-ind-top{ display:flex; justify-content:space-between; gap:10px; font-size:0.92rem; }
+  .an-bar{ height:8px; border-radius:6px; background:var(--bg); overflow:hidden; }
+  .an-bar div{ height:100%; border-radius:6px; }
+  .alert-list{ display:flex; flex-direction:column; }
+  .alert-row{ display:flex; flex-wrap:wrap; gap:6px 14px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--border); }
+  .alert-name{ font-weight:700; min-width:180px; flex:0 0 200px; padding-top:6px; }
+  .alert-courses{ flex:1 1 320px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .alert-course{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--border); border-radius:10px; background:var(--card-bg); color:var(--text); font:inherit; text-align:left; cursor:pointer; }
+  .alert-course:hover{ border-color:var(--primary-border); background:var(--primary-light); }
+  .alert-course-name{ font-size:0.86rem; font-weight:700; color:var(--text-dim); margin-right:2px; }
+  .alert-chip{ display:inline-block; padding:2px 9px; border-radius:999px; font-size:0.8rem; font-weight:700; }
+  .alert-chip.bad{ background:var(--danger-light); color:var(--danger); }
+  .alert-chip.warn{ background:#FBF0D9; color:#7A4F00; }
+  :root[data-theme="dark"] .alert-chip.warn{ background:rgba(251,191,36,0.16); color:#FBBF24; }
+  @media (max-width: 600px){ .alert-name{ flex-basis:100%; padding-top:0; } }
+  .side-search{ position:relative; }
+  .side-search input{ width:100%; padding:9px 12px 9px 34px; border-radius:10px; border:1px solid var(--border-strong); background:var(--bg); color:var(--text); font-size:0.92rem; }
+  .side-search .ico{ position:absolute; left:10px; top:50%; transform:translateY(-50%); width:17px; height:17px; color:var(--text-dim); pointer-events:none; }
+  .search-results{ position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:80; background:var(--card-bg); border:1px solid var(--border); border-radius:12px; box-shadow:0 8px 24px rgba(15,18,25,0.16); max-height:340px; overflow-y:auto; padding:4px; }
+  .search-results[hidden]{ display:none; }
+  .search-item{ display:flex; flex-direction:column; width:100%; padding:8px 10px; border:none; border-radius:8px; background:none; color:var(--text); font:inherit; text-align:left; cursor:pointer; }
+  .search-item:hover, .search-item.sel{ background:var(--primary-light); }
+  .search-item small{ color:var(--text-dim); font-size:0.8rem; }
+  .search-empty{ padding:10px; color:var(--text-dim); font-size:0.88rem; }
   .side-greeting{ display:block; width:100%; margin-top:-8px; padding:8px 10px; border:none; border-radius:10px; background:var(--bg); color:var(--text); font:inherit; font-size:0.88rem; line-height:1.35; text-align:left; cursor:pointer; }
   .side-greeting:hover{ background:var(--primary-light); }
   .side-greeting strong{ color:var(--primary-dark); }
@@ -206,7 +249,9 @@
     .side-brand{ grid-column:1; grid-row:1; padding:0; }
     .side-footer{ grid-column:2; grid-row:1; margin:0; border:none; padding:0; flex-direction:row; align-items:center; }
     .side-greeting{ grid-column:1 / -1; grid-row:2; margin:0; padding:6px 10px; font-size:0.84rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .side-nav{ grid-column:1 / -1; grid-row:3; flex-direction:row; overflow-x:auto; gap:4px; padding-bottom:10px; scrollbar-width:none; }
+    .side-search{ grid-column:1 / -1; grid-row:3; }
+    .side-search input{ padding-top:7px; padding-bottom:7px; }
+    .side-nav{ grid-column:1 / -1; grid-row:4; flex-direction:row; overflow-x:auto; gap:4px; padding-bottom:10px; scrollbar-width:none; }
     .side-nav::-webkit-scrollbar{ display:none; }
     .side-nav button{ flex:none; white-space:nowrap; min-height:40px; padding:0 12px; }
     .side-palette{ display:none; }
@@ -698,6 +743,11 @@
     </div>
   </div>
   <button type="button" class="side-greeting" id="userGreeting" onclick="editTeacherName()" title="Toca para cambiar tu nombre"></button>
+  <div class="side-search" role="search">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+    <input type="search" id="studentSearch" placeholder="Buscar estudiante…" aria-label="Buscar estudiante" autocomplete="off">
+    <div class="search-results" id="studentSearchResults" hidden></div>
+  </div>
   <nav class="side-nav" id="modulesNav" aria-label="Módulos">
     <button data-module="inicio" class="active"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Inicio</span></button>
     <button data-module="horario"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg><span>Horario</span></button>
@@ -1047,6 +1097,86 @@ async function uploadStateSnapshot(){
   const snapshotBody = JSON.stringify(state);
   driveFileId = await uploadDriveFile(driveFileId, snapshotBody);
   saveLastSyncedRemoteTimestamp(snapshotTs);
+  try{ await maybeDailyDriveBackup(snapshotBody); }catch(e){ console.warn('No se pudo guardar la copia diaria', e); }
+}
+
+/* ---- Copias automáticas en Drive: una por día, se guardan los últimos 30 días ---- */
+const DRIVE_BACKUP_PREFIX = 'registro-clases-respaldo-';
+const DRIVE_BACKUP_KEEP = 30;
+async function listDriveBackups(){
+  const q = encodeURIComponent(`name contains '${DRIVE_BACKUP_PREFIX}'`);
+  const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id,name,modifiedTime,size)&pageSize=200`);
+  const data = await res.json();
+  return (data.files || []).filter(f=> f.name.startsWith(DRIVE_BACKUP_PREFIX)).sort((a,b)=> b.name.localeCompare(a.name));
+}
+async function maybeDailyDriveBackup(body){
+  const day = toISODate(new Date());
+  const key = currentStorageKey + '::drive_backup_at';
+  const last = Number(localStorage.getItem(key) || 0);
+  if(Date.now() - last < 60 * 60 * 1000) return; // como máximo, una actualización por hora
+  const name = DRIVE_BACKUP_PREFIX + day + '.json';
+  const files = await listDriveBackups();
+  const todayFile = files.find(f=> f.name === name);
+  if(todayFile){
+    await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${todayFile.id}?uploadType=media`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body });
+  } else {
+    const boundary = 'registroClasesBackup';
+    const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents:['appDataFolder'] })}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+    await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method:'POST', headers:{'Content-Type': `multipart/related; boundary=${boundary}`}, body: multipart });
+    // Elimina las copias más antiguas que los últimos 30 días
+    const old = files.slice(DRIVE_BACKUP_KEEP - 1);
+    for(const f of old){ try{ await driveFetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method:'DELETE' }); }catch(e){} }
+  }
+  localStorage.setItem(key, String(Date.now()));
+}
+async function showDriveBackups(){
+  const box = document.getElementById('driveBackupsBox');
+  if(!box) return;
+  if(!isDriveTokenValid(loadStoredDriveToken())){ box.innerHTML = '<p class="muted">Conecta Google Drive para ver las copias.</p>'; return; }
+  box.innerHTML = '<p class="muted">Buscando copias…</p>';
+  try{
+    const files = await listDriveBackups();
+    if(!files.length){ box.innerHTML = '<p class="muted">Todavía no hay copias. La primera se guarda la próxima vez que se sincronicen tus cambios.</p>'; return; }
+    box.innerHTML = files.map(f=>{
+      const d = f.name.slice(DRIVE_BACKUP_PREFIX.length, DRIVE_BACKUP_PREFIX.length + 10);
+      const when = new Date(f.modifiedTime);
+      return `<div class="stat-row" style="align-items:center; gap:8px;">
+        <span><strong>${formatDate(d)}</strong> <span class="muted" style="font-size:0.8rem;">· última copia ${when.toLocaleTimeString('es-CL', { hour:'2-digit', minute:'2-digit' })} · ${Math.max(1, Math.round((Number(f.size) || 0) / 1024))} KB</span></span>
+        <span class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="downloadDriveBackup('${f.id}','${escapeHtml(f.name)}')">⬇️ Descargar</button>
+          <button class="btn btn-accent btn-sm" onclick="restoreDriveBackup('${f.id}','${d}')">Restaurar</button>
+        </span>
+      </div>`;
+    }).join('');
+  }catch(e){
+    box.innerHTML = '<p class="muted">No se pudieron leer las copias (' + escapeHtml(String(e.message || e)) + ').</p>';
+  }
+}
+async function downloadDriveBackup(fileId, name){
+  try{
+    const res = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    const blob = new Blob([await res.text()], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  }catch(e){ showToast('No se pudo descargar la copia'); }
+}
+async function restoreDriveBackup(fileId, day){
+  if(!confirm('¿Restaurar la copia del ' + formatDate(day) + '?\n\nTodos tus datos actuales se reemplazan por los de esa copia (en todos tus dispositivos). Antes se guarda en este equipo una copia de lo que tienes ahora.')) return;
+  try{
+    const data = await downloadDriveFile(fileId);
+    if(!data || !Array.isArray(data.groups)){ showToast('Esa copia no es válida'); return; }
+    try{ localStorage.setItem(currentStorageKey + '::respaldo_conflicto', JSON.stringify({ savedAt: Date.now(), state })); }catch(e){}
+    state = data;
+    if(!state.schedule) state.schedule = [];
+    if(!state.periods) state.periods = [];
+    if(state.activePeriodId === undefined) state.activePeriodId = null;
+    ensureDefaultGroup();
+    saveState();
+    closeDriveSettings();
+    renderAll();
+    showToast('Copia del ' + formatDate(day) + ' restaurada');
+  }catch(e){ showToast('No se pudo restaurar la copia'); }
 }
 
 async function syncFromDrive(){
@@ -1153,6 +1283,11 @@ function openDriveSettings(){
         <button class="btn btn-outline btn-sm" onclick="syncFromDrive()">🔄 Sincronizar ahora</button>
         <button class="btn btn-danger btn-sm" onclick="disconnectDrive()">Desconectar</button>
       </div>
+      <hr class="divider">
+      <p class="muted" style="font-weight:600; margin-bottom:4px;">Copias automáticas en Drive</p>
+      <p class="muted" style="font-size:0.78rem; margin-bottom:6px;">Mientras estés conectado, la app guarda sola una copia por día de todos tus datos y conserva los últimos ${DRIVE_BACKUP_KEEP} días. Si borras algo por error, puedes volver a una copia anterior.</p>
+      <button class="btn btn-outline btn-sm" onclick="showDriveBackups()">🗂️ Ver copias guardadas</button>
+      <div id="driveBackupsBox" style="margin-top:8px;"></div>
       <hr class="divider">
       <p class="muted" style="font-weight:600; margin-bottom:4px;">Respaldo completo (todos los cursos y periodos)</p>
       <div class="row">
@@ -2306,6 +2441,47 @@ document.getElementById('subTabsNav').addEventListener('click', e=>{
   goToTab(btn.dataset.tab);
 });
 
+/* ============ BUSCADOR DE ESTUDIANTES ============ */
+function normSearch(t){ return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function renderStudentSearch(q){
+  const box = document.getElementById('studentSearchResults');
+  if(!box) return;
+  const nq = normSearch(q).trim();
+  if(!nq){ box.hidden = true; box.innerHTML = ''; return; }
+  const words = nq.split(/\s+/);
+  const hits = [];
+  (state.groups || []).forEach(g=> (g.students || []).forEach(s=>{
+    const hay = normSearch(s.name + ' ' + (s.cardAlias || '') + ' ' + (s.card || ''));
+    if(words.every(w=> hay.includes(w))) hits.push({ g, s });
+  }));
+  hits.sort((a,b)=> a.s.name.localeCompare(b.s.name) || a.g.name.localeCompare(b.g.name));
+  box.innerHTML = hits.length
+    ? hits.slice(0, 30).map((h, i)=> `<button type="button" class="search-item${i === 0 ? ' sel' : ''}" data-g="${h.g.id}" data-s="${h.s.id}"><span>${escapeHtml(h.s.name)}</span><small>${escapeHtml(h.g.name)}</small></button>`).join('')
+    : '<div class="search-empty">No hay estudiantes con ese nombre.</div>';
+  box.hidden = false;
+}
+(function(){
+  const input = document.getElementById('studentSearch');
+  const box = document.getElementById('studentSearchResults');
+  if(!input || !box) return;
+  const pick = btn=>{ input.value = ''; box.hidden = true; openStudentInGroup(btn.dataset.g, btn.dataset.s); };
+  input.addEventListener('input', ()=> renderStudentSearch(input.value));
+  input.addEventListener('focus', ()=>{ if(input.value) renderStudentSearch(input.value); });
+  input.addEventListener('keydown', e=>{
+    const items = [...box.querySelectorAll('.search-item')];
+    let i = items.findIndex(x=> x.classList.contains('sel'));
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if(!items.length) return;
+      i = e.key === 'ArrowDown' ? Math.min(items.length - 1, i + 1) : Math.max(0, i - 1);
+      items.forEach((x,k)=> x.classList.toggle('sel', k === i)); items[i].scrollIntoView({ block:'nearest' });
+    } else if(e.key === 'Enter'){ if(items[i]) pick(items[i]); }
+    else if(e.key === 'Escape'){ input.value = ''; box.hidden = true; input.blur(); }
+  });
+  box.addEventListener('mousedown', e=> e.preventDefault()); // no perder el foco antes del clic
+  box.addEventListener('click', e=>{ const b = e.target.closest('.search-item'); if(b) pick(b); });
+  input.addEventListener('blur', ()=> setTimeout(()=>{ box.hidden = true; }, 150));
+})();
+
 /* ============ RENDER PRINCIPAL ============ */
 function renderAll(){
   renderGreeting();
@@ -2967,6 +3143,89 @@ function buildWeekSummary(){
   return days;
 }
 
+/* ============ ALERTAS TEMPRANAS (todos los cursos) ============ */
+const ALERT_RULES = { nota: 4.0, asistencia: 85, minClases: 4, racha: 3, atrasadas: 2 };
+let alertsShowAll = false;
+function computeStudentAlerts(group, s){
+  const out = [];
+  const g = computeStudentFinalGrade(group, s.id).finalGrade;
+  if(g !== null && g < ALERT_RULES.nota) out.push({ k:'nota', w:3, t:'Nota final ' + g.toFixed(1).replace('.', ',') });
+  const sessions = getActiveSessions(group)
+    .filter(se=> (se.entries || []).some(e=> e.studentId === s.id))
+    .sort((a,b)=> ((a.date||'') + (a.time||'')).localeCompare((b.date||'') + (b.time||'')));
+  const pres = sessions.map(se=> isEntryPresent(se.entries.find(e=> e.studentId === s.id)));
+  if(pres.length >= ALERT_RULES.minClases){
+    const pct = Math.round(pres.filter(Boolean).length / pres.length * 100);
+    if(pct < ALERT_RULES.asistencia) out.push({ k:'asis', w:2, t:'Asistencia ' + pct + '%' });
+  }
+  let racha = 0; for(let i = pres.length - 1; i >= 0 && !pres[i]; i--) racha++;
+  if(racha >= ALERT_RULES.racha) out.push({ k:'racha', w:2, t: racha + ' ausencias seguidas' });
+  let noEnt = 0, atr = 0;
+  getActiveEntregas(group).forEach(e=>{ const st = e.estados && e.estados[s.id]; if(st === 'no_entregada') noEnt++; if(st === 'fuera_plazo') atr++; });
+  if(noEnt > 0) out.push({ k:'noent', w: noEnt > 1 ? 2 : 1, t: noEnt + (noEnt === 1 ? ' entrega no entregada' : ' entregas no entregadas') });
+  if(atr >= ALERT_RULES.atrasadas) out.push({ k:'atr', w:1, t: atr + ' entregas atrasadas' });
+  return out;
+}
+function collectAlerts(){
+  const byPerson = new Map();
+  (state.groups || []).forEach(group=>{
+    (group.students || []).forEach(s=>{
+      const al = computeStudentAlerts(group, s);
+      if(!al.length) return;
+      const key = s.card ? 'c:' + s.card : 'n:' + s.name.trim().toLowerCase();
+      if(!byPerson.has(key)) byPerson.set(key, { name: s.name, items: [], score: 0 });
+      const p = byPerson.get(key);
+      p.items.push({ groupId: group.id, groupName: group.name, studentId: s.id, alerts: al });
+      p.score += al.reduce((a,x)=> a + x.w, 0);
+    });
+  });
+  return [...byPerson.values()].sort((a,b)=> b.score - a.score || a.name.localeCompare(b.name));
+}
+function alertsCardHtml(){
+  const list = collectAlerts();
+  const visible = alertsShowAll ? list : list.slice(0, 8);
+  const chipCls = k=> (k === 'nota' || k === 'racha' || k === 'noent') ? 'alert-chip bad' : 'alert-chip warn';
+  return `
+  <div class="card app-font">
+    <div class="flex-between" style="gap:8px; flex-wrap:wrap;">
+      <h2 style="border:none; margin:0; padding:0;">Estudiantes que necesitan atención</h2>
+      <span class="muted" style="font-size:0.85rem;">${list.length ? list.length + ' estudiante(s) · todos tus cursos' : ''}</span>
+    </div>
+    <p class="muted" style="font-size:0.84rem; margin:6px 0 10px;">Nota final bajo ${ALERT_RULES.nota.toFixed(1).replace('.', ',')} · asistencia bajo ${ALERT_RULES.asistencia}% · ${ALERT_RULES.racha} ausencias seguidas · entregas no entregadas o atrasadas${state.activePeriodId ? ' · solo el periodo elegido' : ''}.</p>
+    ${list.length === 0 ? '<div class="empty-state" style="padding:14px;">Sin alertas por ahora. Todo en orden.</div>' : `
+    <div class="alert-list">
+      ${visible.map(p=>`
+        <div class="alert-row">
+          <div class="alert-name">${escapeHtml(p.name)}</div>
+          <div class="alert-courses">
+            ${p.items.map(it=>`
+              <button type="button" class="alert-course" onclick="openStudentInGroup('${it.groupId}','${it.studentId}')" title="Abrir ficha en ${escapeHtml(it.groupName)}">
+                <span class="alert-course-name">${escapeHtml(it.groupName)}</span>
+                ${it.alerts.map(a=> `<span class="${chipCls(a.k)}">${escapeHtml(a.t)}</span>`).join('')}
+              </button>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>
+    ${list.length > 8 ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;" onclick="alertsShowAll=!alertsShowAll; renderInicio();">${alertsShowAll ? 'Ver menos' : 'Ver los ' + list.length}</button>` : ''}`}
+  </div>`;
+}
+function inicioTopHtml(){
+  const name = teacherDisplayName();
+  const d = new Date();
+  const fecha = d.toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long' });
+  return `<div class="page-head app-font"><h1>Inicio</h1><div class="muted">${name ? 'Hola ' + escapeHtml(name) + ' · ' : ''}${escapeHtml(fecha.charAt(0).toUpperCase() + fecha.slice(1))}</div></div>` + alertsCardHtml();
+}
+// Abre la ficha de un estudiante en su curso (desde alertas o el buscador)
+function openStudentInGroup(groupId, studentId){
+  if(state.activeGroupId !== groupId){
+    state.activeGroupId = groupId;
+    saveState();
+  }
+  goToModule('cursos');
+  renderGroupSelect();
+  setTimeout(()=> openStudentDetail(studentId), 30);
+}
+
 function renderInicio(){
   const main = document.getElementById('main');
   if(state.groups.length === 0){
@@ -2979,7 +3238,7 @@ function renderInicio(){
   const todayEntries = state.schedule.filter(e=> e.day === todayWeekday).sort((a,b)=> a.startTime.localeCompare(b.startTime));
   const currentOrNext = findCurrentOrNextClass();
 
-  main.innerHTML = `
+  main.innerHTML = inicioTopHtml() + `
     ${currentOrNext ? (()=>{
       const entry = currentOrNext.entry;
       const g = state.groups.find(g=>g.id===entry.groupId);
@@ -7020,6 +7279,9 @@ function buildPortalPayload(group, s){
     premios: (state.premios || []).map(x=> ({ n: x.name, c: x.cost, t: x.type === 'decimas' ? 'd' : 'p' })),
     entregas,
     notasEntregas,
+    // Próximas evaluaciones (con fecha desde hoy): el portal muestra las de los próximos días
+    prox: evalsSorted.filter(e=> e.date && e.date >= toISODate(new Date()) && !isActiveRemedial(e))
+      .map(e=> ({ n: e.name, d: e.date, pr: e.processId || '' })),
   };
   if(p.includeBitacora){
     // Solo registros dirigidos a este estudiante (los generales del curso pueden mencionar a otros)
@@ -9277,6 +9539,7 @@ function renderCalificaciones(group){
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
               ${isActiveRemedial(e) ? `<span class="pill pill-rem" style="margin-left:6px;">🔁 Remedial de ${escapeHtml(remedialBaseOf(e).name)}</span>` : ''}
               ${remedialOfEval(e) ? `<span class="pill pill-rem" style="margin-left:6px;">🔁 Con remedial</span>` : ''}
+              ${hasRubric(e) ? `<span class="pill" style="margin-left:6px;">📋 Rúbrica · ${e.rubric.items.length} ind.</span>` : ''}
               ${e.date ? `<span class="pill" style="margin-left:6px;">📅 ${formatDate(e.date)}</span>` : ''}
               ${e.processId ? `<span class="pill" style="margin-left:6px;">📂 ${escapeHtml((group.processes.find(p=>p.id===e.processId)||{}).name || '—')}</span>` : ''}
               ${e.entregaLink ? `<span class="pill" style="margin-left:6px; background:var(--primary-light); color:var(--primary); border-color:var(--primary-border);" title="Se recalcula sola al editar las entregas">🔄 Vinculada a entregas${e.entregaLink.processId ? ' · ' + escapeHtml((group.processes.find(p=>p.id===e.entregaLink.processId)||{}).name || '—') : ''}</span>` : ''}
@@ -9298,6 +9561,7 @@ function renderCalificaciones(group){
                 <button class="btn btn-outline btn-sm" title="Subir" ${evIdx===0?'disabled style="opacity:0.35;"':''} onclick="moveEvaluation('${e.id}',-1)">▲</button>
                 <button class="btn btn-outline btn-sm" title="Bajar" ${evIdx===evaluations.length-1?'disabled style="opacity:0.35;"':''} onclick="moveEvaluation('${e.id}',1)">▼</button>` : ''}
               <button class="btn btn-accent btn-sm" onclick="openEvalScores('${e.id}')">Completar puntajes</button>
+              <button class="btn btn-outline btn-sm" onclick="openEvalAnalysis('${e.id}')">📊 Análisis</button>
               <button class="btn btn-outline btn-sm" onclick="openDecimasBulkForm('${e.id}')">🎯 Décimas</button>
               ${e.entregaLink
                 ? `<button class="btn btn-outline btn-sm" onclick="unlinkEvaluationFromEntregas('${e.id}')" title="Dejar de actualizar sola">⛓️‍💥 Desvincular</button>`
@@ -9703,12 +9967,19 @@ function renderEvalScores(group, evaluation){
         <h2 style="border:none; margin-bottom:0; padding-bottom:0;">${escapeHtml(evaluation.name)}</h2>
         <button class="btn btn-outline btn-sm" onclick="closeEvalScores()">← Volver</button>
       </div>
-      <p class="muted">Puntaje total: ${evaluation.totalScore} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)</p>
+      <p class="muted">Puntaje total: ${fmtNum(evaluation.totalScore)} · Exigencia: ${evaluation.exigencia}% (aprobación 4.0)</p>
+      <div class="row" style="gap:6px; margin-bottom:10px;">
+        <button class="btn btn-outline btn-sm" onclick="openEvalAnalysis('${evaluation.id}')">📊 Análisis</button>
+        ${evaluation.entregaLink ? '' : (hasRubric(evaluation)
+          ? `<button class="btn btn-outline btn-sm" onclick="openRubricEditor('${evaluation.id}')">✎ Editar rúbrica</button><button class="btn btn-danger btn-sm" onclick="removeRubric('${evaluation.id}')">Quitar rúbrica</button>`
+          : `<button class="btn btn-accent btn-sm" onclick="openRubricEditor('${evaluation.id}')">📋 Corregir con rúbrica</button>`)}
+      </div>
+      ${hasRubric(evaluation) ? rubricLegendHtml(evaluation) : ''}
       ${evaluation.entregaLink ? `<p class="muted" style="background:var(--primary-light); border:1px solid var(--primary-border); border-radius:10px; padding:8px 10px; color:var(--text);">🔄 Esta nota está vinculada a las entregas: el puntaje (% de cumplimiento) se calcula solo cada vez que editas las entregas. Haz clic en una nota para ver y editar las entregas del estudiante.</p>` : ''}
       <div style="overflow-x:auto;">
       <table>
         <thead>
-          <tr><th>Estudiante</th><th>Puntaje obtenido</th><th>Nota</th><th>Décimas aplicadas</th><th>Adecuación</th></tr>
+          <tr><th>Estudiante</th>${hasRubric(evaluation) ? evaluation.rubric.items.map((it, i)=> `<th title="${escapeHtml(it.text)}" style="text-align:center;">I${i+1}</th>`).join('') : ''}<th>Puntaje obtenido</th><th>Nota</th><th>Décimas aplicadas</th><th>Adecuación</th></tr>
         </thead>
         <tbody>
           ${group.students.map(s=>{
@@ -9716,10 +9987,15 @@ function renderEvalScores(group, evaluation){
             const nota = computeStudentEvalGrade(evaluation, s.id);
             const hasOverride = evaluation.overrides && evaluation.overrides[s.id];
             const decimasAqui = (evaluation.decimasAplicadas && evaluation.decimasAplicadas[s.id]) || 0;
+            const rub = hasRubric(evaluation);
+            const missing = rub ? rubricMissing(evaluation, s.id) : 0;
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
-                <td>${evaluation.entregaLink
+                ${rub ? evaluation.rubric.items.map(it=> `<td style="padding:4px;">${rubricSelectHtml(evaluation, s.id, it)}</td>`).join('') : ''}
+                <td>${rub
+                  ? `<span style="font-weight:700;">${score !== null && score !== undefined ? fmtNum(score) : '-'}</span>${missing && missing < evaluation.rubric.items.length ? `<br><span class="muted" style="font-size:0.74rem;">faltan ${missing}</span>` : ''}`
+                  : evaluation.entregaLink
                   ? `<span style="font-weight:700;">${score !== null && score !== undefined ? score + '%' : '-'}</span>`
                   : `<input type="number" class="score-select" style="width:80px;" min="0" max="${(hasOverride && hasOverride.totalScore) || evaluation.totalScore}"
                     value="${score !== null && score !== undefined ? score : ''}"
@@ -9739,6 +10015,198 @@ function renderEvalScores(group, evaluation){
       </div>
     </div>
   `;
+}
+
+/* ============ RÚBRICA (Logrado 3 · Medianamente logrado 2 · Por lograr 1 · No logrado 0) ============ */
+const RUBRIC_LEVELS = [
+  { v: 3, short: 'L', name: 'Logrado' },
+  { v: 2, short: 'ML', name: 'Medianamente logrado' },
+  { v: 1, short: 'PL', name: 'Por lograr' },
+  { v: 0, short: 'NL', name: 'No logrado' },
+];
+function fmtNum(n){ return (n === null || n === undefined) ? '-' : String(Math.round(n * 100) / 100).replace('.', ','); }
+function hasRubric(ev){ return !!(ev && ev.rubric && Array.isArray(ev.rubric.items) && ev.rubric.items.length); }
+function rubricItemPoints(it, level){ return (Number(it.max) || 3) * level / 3; }
+function rubricMissing(ev, sid){
+  const lv = (ev.rubricLevels && ev.rubricLevels[sid]) || {};
+  return ev.rubric.items.filter(it=> lv[it.id] === undefined || lv[it.id] === null).length;
+}
+// Recalcula el puntaje del estudiante a partir de sus niveles (los indicadores sin marcar cuentan 0)
+function recomputeRubricScore(ev, sid){
+  const lv = (ev.rubricLevels && ev.rubricLevels[sid]) || {};
+  const marked = ev.rubric.items.filter(it=> lv[it.id] !== undefined && lv[it.id] !== null);
+  if(!ev.scores) ev.scores = {};
+  ev.scores[sid] = marked.length ? Math.round(marked.reduce((a,it)=> a + rubricItemPoints(it, lv[it.id]), 0) * 100) / 100 : null;
+}
+function rubricSelectHtml(ev, sid, it){
+  const lv = ev.rubricLevels && ev.rubricLevels[sid] ? ev.rubricLevels[sid][it.id] : undefined;
+  const has = lv !== undefined && lv !== null;
+  const cls = !has ? '' : (lv === 3 ? 'rl-3' : lv === 2 ? 'rl-2' : lv === 1 ? 'rl-1' : 'rl-0');
+  return `<select class="rubric-sel ${cls}" title="${escapeHtml(it.text)}" onchange="setRubricLevel('${ev.id}','${sid}','${it.id}', this.value)">
+    <option value="" ${!has ? 'selected' : ''}>—</option>
+    ${RUBRIC_LEVELS.map(L=> `<option value="${L.v}" ${has && lv === L.v ? 'selected' : ''}>${L.short} · ${fmtNum(rubricItemPoints(it, L.v))}</option>`).join('')}
+  </select>`;
+}
+function rubricLegendHtml(ev){
+  return `<div class="rubric-legend">
+    ${ev.rubric.items.map((it, i)=> `<div><strong>I${i+1}</strong> ${escapeHtml(it.text)} <span class="muted">· ${fmtNum(Number(it.max) || 3)} pts</span></div>`).join('')}
+    <div class="muted" style="margin-top:4px; font-size:0.8rem;">L = Logrado (puntaje completo) · ML = Medianamente logrado (2/3) · PL = Por lograr (1/3) · NL = No logrado (0). El puntaje y la nota se calculan solos.</div>
+  </div>`;
+}
+function setRubricLevel(evalId, sid, itemId, value){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId);
+  if(!ev || !hasRubric(ev)) return;
+  if(!ev.rubricLevels) ev.rubricLevels = {};
+  if(!ev.rubricLevels[sid]) ev.rubricLevels[sid] = {};
+  if(value === '') delete ev.rubricLevels[sid][itemId];
+  else ev.rubricLevels[sid][itemId] = Number(value);
+  recomputeRubricScore(ev, sid);
+  saveState();
+  const y = window.scrollY;
+  renderEvalScores(group, ev);
+  window.scrollTo(0, y);
+}
+function openRubricEditor(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId);
+  if(!ev) return;
+  const lines = hasRubric(ev) ? ev.rubric.items.map(it=> it.text + ((Number(it.max) || 3) !== 3 ? ' | ' + it.max : '')).join('\n') : '';
+  const old = document.getElementById('rubricEditorOverlay'); if(old) old.remove();
+  const ov = document.createElement('div');
+  ov.className = 'modal-overlay'; ov.id = 'rubricEditorOverlay';
+  ov.innerHTML = `
+    <div class="modal-box app-font">
+      <button class="modal-close" onclick="document.getElementById('rubricEditorOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">📋 Rúbrica de "${escapeHtml(ev.name)}"</h2>
+      <p class="muted">Escribe un indicador por línea. Cada uno se corrige con Logrado (3), Medianamente logrado (2), Por lograr (1) o No logrado (0). Si un indicador vale más o menos de 3 puntos, agrégalo al final con una barra: <em>Resuelve el sistema | 6</em>.</p>
+      <label for="rubricLines">Indicadores</label>
+      <textarea id="rubricLines" style="min-height:180px;" placeholder="Identifica los datos del problema&#10;Plantea la ecuación | 6&#10;Resuelve correctamente&#10;Comunica la respuesta">${escapeHtml(lines)}</textarea>
+      <p class="muted" style="font-size:0.8rem;" id="rubricTotalHint"></p>
+      <div class="row" style="margin-top:12px;"><button class="btn btn-accent btn-sm" onclick="saveRubric('${ev.id}')">Guardar rúbrica</button></div>
+    </div>`;
+  document.body.appendChild(ov);
+  const ta = document.getElementById('rubricLines');
+  const hint = ()=>{ const items = parseRubricLines(ta.value); document.getElementById('rubricTotalHint').textContent = items.length ? `${items.length} indicador(es) · puntaje total ${fmtNum(items.reduce((a,x)=> a + x.max, 0))}` : ''; };
+  ta.addEventListener('input', hint); hint();
+}
+function parseRubricLines(text){
+  return String(text || '').split('\n').map(l=> l.trim()).filter(Boolean).map(l=>{
+    const m = l.match(/^(.*?)\s*\|\s*([0-9]+(?:[.,][0-9]+)?)\s*$/);
+    return m ? { text: m[1].trim(), max: Number(m[2].replace(',', '.')) || 3 } : { text: l, max: 3 };
+  }).filter(x=> x.text);
+}
+function saveRubric(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId);
+  if(!ev) return;
+  const parsed = parseRubricLines(document.getElementById('rubricLines').value);
+  if(!parsed.length){ showToast('Escribe al menos un indicador'); return; }
+  const prev = hasRubric(ev) ? ev.rubric.items : [];
+  // Conserva los niveles ya corregidos de los indicadores que mantienen su texto
+  const items = parsed.map((x, i)=>{ const same = prev.find(p=> p.text === x.text) || (prev[i] && !parsed.some(q=> q.text === prev[i].text) ? prev[i] : null); return { id: same ? same.id : uid(), text: x.text, max: x.max }; });
+  const hadScores = !hasRubric(ev) && Object.values(ev.scores || {}).some(v=> v !== null && v !== undefined);
+  if(hadScores && !confirm('Esta evaluación ya tiene puntajes ingresados. Al usar la rúbrica, el puntaje de cada estudiante se calculará con los niveles que marques (los puntajes actuales se reemplazan cuando corrijas a ese estudiante). ¿Continuar?')) return;
+  ev.rubric = { items };
+  ev.totalScore = Math.round(items.reduce((a,x)=> a + x.max, 0) * 100) / 100;
+  Object.keys(ev.rubricLevels || {}).forEach(sid=>{
+    Object.keys(ev.rubricLevels[sid]).forEach(k=>{ if(!items.some(it=> it.id === k)) delete ev.rubricLevels[sid][k]; });
+    recomputeRubricScore(ev, sid);
+  });
+  saveState();
+  document.getElementById('rubricEditorOverlay').remove();
+  renderEvalScores(group, ev);
+  showToast('Rúbrica guardada · puntaje total ' + fmtNum(ev.totalScore));
+}
+function removeRubric(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId);
+  if(!ev || !hasRubric(ev)) return;
+  if(!confirm('¿Quitar la rúbrica? Los puntajes calculados se conservan como puntajes normales.')) return;
+  delete ev.rubric; delete ev.rubricLevels;
+  saveState();
+  renderEvalScores(group, ev);
+}
+
+/* ============ ANÁLISIS DE UNA EVALUACIÓN ============ */
+function evalGradesFor(group, ev){
+  return (group.students || []).map(s=> ({ s, nota: computeStudentEvalGrade(ev, s.id) })).filter(x=> x.nota !== null);
+}
+function statsOf(notas){
+  if(!notas.length) return null;
+  const v = notas.slice().sort((a,b)=> a-b);
+  const avg = v.reduce((a,b)=> a+b, 0) / v.length;
+  const mid = v.length % 2 ? v[(v.length-1)/2] : (v[v.length/2-1] + v[v.length/2]) / 2;
+  return { n: v.length, avg: Math.round(avg*10)/10, med: Math.round(mid*10)/10, min: v[0], max: v[v.length-1], aprob: Math.round(v.filter(x=> x >= 4).length / v.length * 100) };
+}
+function openEvalAnalysis(evalId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId);
+  if(!ev) return;
+  const rows = evalGradesFor(group, ev);
+  const st = statsOf(rows.map(r=> r.nota));
+  const f1 = n=> n === null || n === undefined ? '-' : Number(n).toFixed(1).replace('.', ',');
+  const bins = [[1,2],[2,3],[3,4],[4,5],[5,6],[6,7.01]].map(([a,b])=> ({ lbl: a === 6 ? '6,0–7,0' : f1(a) + '–' + f1(b - 0.1), n: rows.filter(r=> r.nota >= a && r.nota < b).length, low: a < 4 }));
+  const maxBin = Math.max(1, ...bins.map(b=> b.n));
+  // Comparación: evaluaciones con el mismo nombre en otros cursos
+  const key = (ev.name || '').trim().toLowerCase();
+  const others = [];
+  (state.groups || []).forEach(g=>{
+    if(g.id === group.id) return;
+    (g.evaluations || []).filter(e=> (e.name || '').trim().toLowerCase() === key).forEach(e=>{
+      const so = statsOf(evalGradesFor(g, e).map(r=> r.nota));
+      if(so) others.push({ g, st: so });
+    });
+  });
+  // Logro por indicador de la rúbrica
+  let rubricHtml = '';
+  if(hasRubric(ev)){
+    const ind = ev.rubric.items.map((it, i)=>{
+      const lv = (group.students || []).map(s=> ev.rubricLevels && ev.rubricLevels[s.id] ? ev.rubricLevels[s.id][it.id] : undefined).filter(x=> x !== undefined && x !== null);
+      const pct = lv.length ? Math.round(lv.reduce((a,b)=> a+b, 0) / (3 * lv.length) * 100) : null;
+      const dist = RUBRIC_LEVELS.map(L=> lv.filter(x=> x === L.v).length);
+      return { i, it, pct, dist, n: lv.length };
+    });
+    const ordered = ind.slice().sort((a,b)=> (a.pct ?? 999) - (b.pct ?? 999));
+    rubricHtml = `<h3 class="an-h">Logro por indicador</h3>
+      <p class="muted" style="font-size:0.82rem; margin:0 0 8px;">Ordenados del más débil al más fuerte. Bajo 60% conviene retomarlo (por ejemplo, en el remedial).</p>
+      ${ordered.map(x=> `<div class="an-ind">
+        <div class="an-ind-top"><span><strong>I${x.i+1}</strong> ${escapeHtml(x.it.text)}</span><strong style="${x.pct !== null && x.pct < 60 ? 'color:var(--danger);' : ''}">${x.pct === null ? '-' : x.pct + '%'}</strong></div>
+        <div class="an-bar"><div style="width:${x.pct || 0}%; background:${x.pct !== null && x.pct < 60 ? 'var(--danger)' : 'var(--primary)'};"></div></div>
+        <div class="muted" style="font-size:0.78rem;">${RUBRIC_LEVELS.map((L, k)=> `${L.short} ${x.dist[k]}`).join(' · ')}</div>
+      </div>`).join('')}`;
+  }
+  const bajo = rows.filter(r=> r.nota < 4).sort((a,b)=> a.nota - b.nota);
+  const old = document.getElementById('evalAnalysisOverlay'); if(old) old.remove();
+  const ov = document.createElement('div');
+  ov.className = 'modal-overlay'; ov.id = 'evalAnalysisOverlay';
+  ov.addEventListener('click', e=>{ if(e.target === ov) ov.remove(); });
+  ov.innerHTML = `
+    <div class="modal-box app-font" style="max-width:640px;">
+      <button class="modal-close" onclick="document.getElementById('evalAnalysisOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0; margin-bottom:2px;">📊 ${escapeHtml(ev.name)}</h2>
+      <div class="muted" style="margin-bottom:12px;">${escapeHtml(group.name)} · ${rows.length} de ${(group.students || []).length} con nota</div>
+      ${!st ? '<div class="empty-state">Aún no hay notas en esta evaluación.</div>' : `
+      <div class="an-tiles">
+        <div><b>${f1(st.avg)}</b><span>Promedio</span></div>
+        <div><b>${st.aprob}%</b><span>Aprobación</span></div>
+        <div><b>${f1(st.med)}</b><span>Mediana</span></div>
+        <div><b>${f1(st.min)} – ${f1(st.max)}</b><span>Mín – máx</span></div>
+      </div>
+      <h3 class="an-h">Distribución de notas</h3>
+      <div class="an-hist">
+        ${bins.map(b=> `<div class="an-col"><span class="an-n">${b.n}</span><div class="an-colbar" style="height:${Math.round(b.n / maxBin * 100)}%; background:${b.low ? 'var(--danger)' : 'var(--primary)'};"></div><span class="an-lbl">${b.lbl}</span></div>`).join('')}
+      </div>
+      ${others.length ? `<h3 class="an-h">Comparación con otros cursos</h3>
+        <table><thead><tr><th>Curso</th><th>Promedio</th><th>Aprobación</th><th>Con nota</th></tr></thead><tbody>
+          <tr><td><strong>${escapeHtml(group.name)}</strong> (este)</td><td><strong>${f1(st.avg)}</strong></td><td>${st.aprob}%</td><td>${st.n}</td></tr>
+          ${others.map(o=> `<tr><td>${escapeHtml(o.g.name)}</td><td>${f1(o.st.avg)}</td><td>${o.st.aprob}%</td><td>${o.st.n}</td></tr>`).join('')}
+        </tbody></table>` : `<p class="muted" style="font-size:0.82rem; margin-top:12px;">Para comparar con otros cursos, usa el mismo nombre de evaluación en cada uno (por ejemplo, "Prueba 1").</p>`}
+      ${rubricHtml}
+      ${bajo.length ? `<h3 class="an-h">Bajo 4,0 (${bajo.length})</h3><div class="row" style="gap:6px;">${bajo.map(r=> `<span class="alert-chip bad">${escapeHtml(r.s.name)} · ${f1(r.nota)}</span>`).join('')}</div>` : ''}
+      `}
+    </div>`;
+  document.body.appendChild(ov);
 }
 
 function closeEvalScores(){

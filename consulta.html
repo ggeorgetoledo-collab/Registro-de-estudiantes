@@ -106,6 +106,11 @@
   .row.has-rem{ border-bottom:none; }
   .rem-row{ margin-left:14px; border-left:3px solid var(--primary-line); padding-left:10px !important; }
   .grade.struck{ text-decoration:line-through; opacity:0.55; }
+  .when{ width:46px; flex:none; border-radius:10px; padding:4px 0; text-align:center; display:flex; flex-direction:column; line-height:1.1; }
+  .when span{ font-size:0.72rem; font-weight:700; text-transform:uppercase; }
+  .when b{ font-family:Manrope,'Source Sans 3',sans-serif; font-size:1.2rem; }
+  .when.ev{ background:var(--primary-light); color:var(--primary-dark); }
+  .when.en{ background:var(--neutral-bg); color:var(--text); }
   .row.sm{ padding:6px 0; }
   .row.sm .title{ font-weight:500; font-size:0.9rem; }
   .row.sm .grade{ min-width:38px; padding:2px 6px; font-size:0.9rem; }
@@ -300,6 +305,28 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         <div class="tile"><div class="num ok">${num(dec.disponibles)}</div><div class="lbl">Décimas por aplicar</div></div>
       </div>`;
     if(proc) html += `<p class="dim small" style="margin:-4px 2px 12px;">Mostrando la unidad <strong>${esc(procName)}</strong>. Los puntos y las décimas corresponden a todo el periodo.</p>`;
+
+    // Lo que viene: evaluaciones y entregas de los próximos 21 días
+    {
+      const hoy = new Date(); hoy.setHours(0,0,0,0);
+      const dia = iso=>{ const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? new Date(+m[1], +m[2]-1, +m[3]) : null; };
+      const items = [];
+      (d.prox || []).filter(inProc).forEach(e=>{ const f = dia(e.d); if(f && f >= hoy) items.push({ f, n: e.n, tipo: 'Evaluación', cls: 'ev' }); });
+      (d.entregas || []).filter(inProc).forEach(e=>{
+        if(e.e || !e.lim || Date.now() >= e.lim) return;
+        const f = new Date(e.lim); const f0 = new Date(f); f0.setHours(0,0,0,0);
+        items.push({ f: f0, n: e.n, tipo: 'Entrega · hasta las ' + String(f.getHours()).padStart(2,'0') + ':' + String(f.getMinutes()).padStart(2,'0'), cls: 'en' });
+      });
+      const lim = new Date(hoy); lim.setDate(lim.getDate() + 21);
+      const prox = items.filter(x=> x.f <= lim).sort((a,b)=> a.f - b.f);
+      if(prox.length){
+        const DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
+        const falta = f=>{ const n = Math.round((f - hoy) / 86400000); return n === 0 ? '<strong>hoy</strong>' : n === 1 ? '<strong>mañana</strong>' : 'en ' + n + ' días'; };
+        html += `<div class="card"><h2>📅 Lo que viene</h2>` + prox.map(x=> `
+          <div class="row"><div class="when ${x.cls}"><span>${DIAS[x.f.getDay()]}</span><b>${x.f.getDate()}</b></div>
+          <div class="main" style="flex:1;"><div class="title">${esc(x.n)}</div><div class="sub">${esc(x.tipo)} · ${falta(x.f)}</div></div></div>`).join('') + `</div>`;
+      }
+    }
 
     // Calificaciones
     const gradeRow = (e, small)=>{
