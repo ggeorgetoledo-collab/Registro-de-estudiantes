@@ -197,6 +197,12 @@
   .an-ind-top{ display:flex; justify-content:space-between; gap:10px; font-size:0.92rem; }
   .an-bar{ height:8px; border-radius:6px; background:var(--bg); overflow:hidden; }
   .an-bar div{ height:100%; border-radius:6px; }
+  .nav-badge{ margin-left:auto; min-width:22px; height:22px; padding:0 6px; border-radius:999px; background:var(--danger); color:#fff; font-size:0.76rem; font-weight:800; display:inline-flex; align-items:center; justify-content:center; }
+  .nav-badge[hidden]{ display:none; }
+  @media (max-width: 900px){ .nav-badge{ margin-left:2px; } }
+  .alerts-strip{ display:flex; align-items:center; gap:12px; width:100%; margin-bottom:18px; padding:12px 16px; border:1px solid var(--danger-border); border-radius:var(--radius); background:var(--danger-light); color:var(--text); font:inherit; font-size:0.98rem; text-align:left; cursor:pointer; }
+  .alerts-strip-ico{ width:26px; height:26px; border-radius:50%; background:var(--danger); color:#fff; font-weight:800; display:flex; align-items:center; justify-content:center; flex:none; }
+  .alerts-strip-go{ margin-left:auto; color:var(--danger); font-weight:700; white-space:nowrap; }
   .alert-list{ display:flex; flex-direction:column; }
   .alert-row{ display:flex; flex-wrap:wrap; gap:6px 14px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--border); }
   .alert-name{ font-weight:700; min-width:180px; flex:0 0 200px; padding-top:6px; }
@@ -750,6 +756,7 @@
   </div>
   <nav class="side-nav" id="modulesNav" aria-label="Módulos">
     <button data-module="inicio" class="active"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Inicio</span></button>
+    <button data-module="alertas"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5L2.8 19.5h18.4z"/><path d="M12 10v4.5"/><path d="M12 17.2v.1"/></svg><span>Alertas</span><span class="nav-badge" id="alertsBadge" hidden></span></button>
     <button data-module="horario"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg><span>Horario</span></button>
     <button data-module="cursos"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.4 3.4-5.5 6.5-5.5s5.7 2.1 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18.5 14.8c1.6.8 2.7 2.6 3 5.2"/></svg><span>Cursos</span></button>
     <button data-module="trabajo"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9 10h6"/><path d="M9 14h6"/><path d="M9 18h3"/></svg><span>Trabajo en clases</span></button>
@@ -2371,6 +2378,7 @@ document.getElementById('newGroupBtn').addEventListener('click', ()=>{
 /* ============ MÓDULOS Y PESTAÑAS ============ */
 const MODULE_TABS = {
   inicio: ['inicio'],
+  alertas: ['alertas'],
   horario: ['horario'],
   cursos: ['estudiantes'],
   trabajo: ['indicadores','registrar','entregas','historial','decimas'],
@@ -2380,7 +2388,7 @@ const MODULE_TABS = {
   bitacora: ['bitacora'],
 };
 const MODULE_LABELS = {
-  inicio: 'Inicio', horario: 'Horario', cursos: 'Cursos', trabajo: 'Trabajo en clases',
+  inicio: 'Inicio', alertas: 'Alertas', horario: 'Horario', cursos: 'Cursos', trabajo: 'Trabajo en clases',
   calificaciones: 'Calificaciones', puntos: 'Puntos', tarjetas: 'Tarjetas y portal', bitacora: 'Bitácora',
 };
 const SUBTAB_LABELS = {
@@ -2405,6 +2413,7 @@ let currentModule = 'inicio';
 let currentTab = 'inicio';
 
 function renderNav(){
+  updateAlertsBadge();
   document.querySelectorAll('#modulesNav button').forEach(b=> b.classList.toggle('active', b.dataset.module === currentModule));
   const subNav = document.getElementById('subTabsNav');
   const tabs = MODULE_TABS[currentModule] || [];
@@ -2504,6 +2513,7 @@ function renderMain(){
   try{ recomputeEntregaLinkedGrades(); }catch(e){}
   if(currentTab !== 'escanear' && !kioskActive){ qrScanner.wanted = false; stopQrScanner(); }
   if(currentTab === 'inicio') return renderInicio();
+  if(currentTab === 'alertas') return renderAlertas();
   if(currentTab === 'estudiantes') return renderEstudiantes(group);
   if(currentTab === 'indicadores') return renderIndicadores(group);
   if(currentTab === 'horario') return renderHorario();
@@ -3206,14 +3216,28 @@ function alertsCardHtml(){
           </div>
         </div>`).join('')}
     </div>
-    ${list.length > 8 ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;" onclick="alertsShowAll=!alertsShowAll; renderInicio();">${alertsShowAll ? 'Ver menos' : 'Ver los ' + list.length}</button>` : ''}`}
+    ${list.length > 8 ? `<button class="btn btn-outline btn-sm" style="margin-top:10px;" onclick="alertsShowAll=!alertsShowAll; renderAlertas();">${alertsShowAll ? 'Ver menos' : 'Ver los ' + list.length}</button>` : ''}`}
   </div>`;
+}
+function renderAlertas(){
+  const main = document.getElementById('main');
+  const per = (state.periods || []).find(p=> p.id === state.activePeriodId);
+  main.innerHTML = `<div class="page-head app-font"><h1>Alertas</h1><div class="muted">Todos tus cursos${per ? ' · ' + escapeHtml(per.name) : ''}</div></div>` + alertsCardHtml();
+  updateAlertsBadge();
+}
+function updateAlertsBadge(){
+  const b = document.getElementById('alertsBadge');
+  if(!b) return;
+  let n = 0; try{ n = collectAlerts().length; }catch(e){}
+  b.hidden = !n; b.textContent = n > 99 ? '99+' : String(n);
 }
 function inicioTopHtml(){
   const name = teacherDisplayName();
   const d = new Date();
   const fecha = d.toLocaleDateString('es-CL', { weekday:'long', day:'numeric', month:'long' });
-  return `<div class="page-head app-font"><h1>Inicio</h1><div class="muted">${name ? 'Hola ' + escapeHtml(name) + ' · ' : ''}${escapeHtml(fecha.charAt(0).toUpperCase() + fecha.slice(1))}</div></div>` + alertsCardHtml();
+  const n = collectAlerts().length;
+  return `<div class="page-head app-font"><h1>Inicio</h1><div class="muted">${name ? 'Hola ' + escapeHtml(name) + ' · ' : ''}${escapeHtml(fecha.charAt(0).toUpperCase() + fecha.slice(1))}</div></div>`
+    + (n ? `<button type="button" class="alerts-strip app-font" onclick="goToModule('alertas')"><span class="alerts-strip-ico" aria-hidden="true">!</span><span><strong>${n} estudiante(s)</strong> necesitan atención</span><span class="alerts-strip-go">Ver alertas →</span></button>` : '');
 }
 // Abre la ficha de un estudiante en su curso (desde alertas o el buscador)
 function openStudentInGroup(groupId, studentId){
