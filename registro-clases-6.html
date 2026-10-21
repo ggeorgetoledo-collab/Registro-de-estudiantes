@@ -179,6 +179,14 @@
   .inc-toggle input{ width:auto; margin:0; }
   .inc-toggle.on{ background:#FBF0D9; border-color:#F0D9A8; color:#7A4F00; }
   :root[data-theme="dark"] .inc-toggle.on{ background:rgba(251,191,36,0.16); color:#FBBF24; border-color:rgba(251,191,36,0.4); }
+  .grp-val{ display:inline-block; min-width:44px; padding:5px 8px; border-radius:8px; background:var(--primary-light); color:var(--primary-dark); font-weight:700; text-align:center; font-size:0.86rem; }
+  .grp-edit{ margin-left:2px; }
+  .grp-val[hidden], .grp-edit[hidden]{ display:none !important; }
+  td.grp-exception{ background:#FBF0D9 !important; }
+  :root[data-theme="dark"] td.grp-exception{ background:rgba(251,191,36,0.12) !important; }
+  .grp-banner{ display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; justify-content:space-between; padding:10px 12px; margin:8px 0 12px; border:1px solid var(--primary-border); border-radius:12px; background:var(--primary-light); }
+  .ind-kind{ display:flex; flex-wrap:wrap; align-items:center; gap:2px 0; margin-bottom:6px; }
+  .ind-kind-t{ width:100%; font-size:0.78rem; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin:4px 0 2px; }
   .team-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:10px; margin-top:12px; }
   .team-box{ border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:var(--bg); }
   .team-box ul{ margin:6px 0 0; padding-left:18px; font-size:0.92rem; line-height:1.45; }
@@ -3026,12 +3034,12 @@ function renderIndicadores(group){
         </select>
       ` : ''}
       ${visibleIndicators.length === 0 ? '<div class="empty-state">No hay indicadores para mostrar.</div>' :
-        `<div style="margin-top:8px;">${visibleIndicators.map(ind=>`
+        [['👤 Individuales', visibleIndicators.filter(i=> !i.grupal)], ['👥 Grupales · se completan una vez por grupo', visibleIndicators.filter(i=> i.grupal)]].filter(x=> x[1].length).map(([titulo, lista])=> `<div class="ind-kind" style="margin-top:8px;"><span class="ind-kind-t">${titulo}</span>${lista.map(ind=>`
           <span class="indicator-tag">${ind.grupal ? '👥 ' : ''}${escapeHtml(ind.name)} · ${ind.levels || 5} niveles${ind.grupal ? ' · grupal' : ''}${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
             <button onclick="editIndicator('${ind.id}')" style="color:var(--primary);">✎</button>
             <button onclick="deleteIndicator('${ind.id}')">✕</button>
           </span>
-        `).join('')}</div>`
+        `).join('')}</div>`).join('')
       }
     </div>
   `;
@@ -3759,6 +3767,7 @@ function snapshotRegistrarInputs(){
 }
 function restoreRegistrarInputs(snap){
   document.querySelectorAll('select[data-student][data-indicator]').forEach(el=>{ const v = snap.sel[el.dataset.student + '|' + el.dataset.indicator]; if(v !== undefined) el.value = v; });
+  refreshGroupBadges();
   document.querySelectorAll('textarea[data-student][data-obs]').forEach(el=>{ const v = snap.obs[el.dataset.student]; if(v !== undefined) el.value = v; });
   document.querySelectorAll('input[data-attendance-student]').forEach(el=>{ const v = snap.att[el.dataset.attendanceStudent]; if(v !== undefined) el.checked = v; });
   syncTeamSelectsFromMembers();
@@ -3774,7 +3783,25 @@ function applyTeamIndicator(teamId, indId, value){
   const set = findTeamSet(getActiveGroup(), registrarTeamSetId);
   const team = set && set.teams.find(t=> t.id === teamId);
   if(!team) return;
-  team.members.forEach(sid=>{ const el = document.querySelector(`select[data-student="${sid}"][data-indicator="${indId}"]`); if(el) el.value = value; });
+  team.members.forEach(sid=>{
+    const el = document.querySelector(`select[data-student="${sid}"][data-indicator="${indId}"]`);
+    if(el && el.hidden) el.value = value;          // las excepciones (✎) se respetan
+  });
+  refreshGroupBadges();
+}
+function refreshGroupBadges(){
+  document.querySelectorAll('.grp-val[data-grpval]').forEach(sp=>{
+    const [sid, indId] = sp.dataset.grpval.split('|');
+    const el = document.querySelector(`select[data-student="${sid}"][data-indicator="${indId}"]`);
+    sp.textContent = el && el.value !== '' ? el.value : '–';
+  });
+}
+function unlockMemberCell(btn){
+  const td = btn.closest('td');
+  const sel = td.querySelector('select'); const sp = td.querySelector('.grp-val');
+  sel.hidden = false; if(sp) sp.hidden = true; btn.hidden = true;
+  td.classList.add('grp-exception');
+  sel.focus();
 }
 // Muestra en la fila del grupo el valor común de sus integrantes (vacío si difieren)
 function syncTeamSelectsFromMembers(){
@@ -3908,7 +3935,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
       ` : ''}
       <div style="margin-top:8px;">
         ${indicatorsToShow.length === 0 ? '<p class="muted">No hay indicadores para este tema. Crea uno con "+ Nuevo indicador".</p>' :
-          indicatorsToShow.map(ind=>`
+          [['👤 Individuales', indicatorsToShow.filter(i=> !i.grupal)], ['👥 Grupales', indicatorsToShow.filter(i=> i.grupal)]].filter(x=> x[1].length).map(([titulo, lista])=> `<div class="ind-kind"><span class="ind-kind-t">${titulo}</span>` + lista.map(ind=>`
             <span style="display:inline-flex; align-items:center; gap:4px; margin:4px 10px 4px 0;">
               <label style="display:inline-flex; align-items:center; gap:6px; font-family:'Source Sans 3',sans-serif; font-size:0.88rem;">
                 <input type="checkbox" value="${ind.id}" ${registrarIndicatorSelection.includes(ind.id) ? 'checked' : ''} onchange="toggleRegistrarIndicator('${ind.id}', this.checked)">
@@ -3916,7 +3943,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
               </label>
               <button onclick="openIndicatorForm('${ind.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; padding:0; font-size:0.85rem;">✎</button>
             </span>
-          `).join('')
+          `).join('') + '</div>').join('')
         }
       </div>
     </div>
@@ -3964,13 +3991,17 @@ function renderRegistrar(group, sessionToEdit, prefill){
           <button class="btn btn-outline btn-sm" onclick="repeatLastClass()">🔁 Repetir última clase</button>
         </div>
       </div>
+      ${hasGroupInds ? `<div class="grp-banner">
+        <div><strong>👥 ${selectedIndicators.filter(i=> i.grupal).length} indicador(es) grupal(es)</strong> · ${regTeamSet ? 'se completan <strong>una sola vez</strong> en la fila de cada grupo y valen para todos sus integrantes.' : 'elige los grupos para completarlos una sola vez por grupo.'}</div>
+        <div style="min-width:220px;">${teamSetSelectHtml(group, registrarTeamSetId, 'changeRegistrarTeamSet(this.value)', 'regTeamSet2')}</div>
+      </div>` : ''}
       ${entregasDelDia.length > 0 ? '<p class="muted" style="font-size:0.78rem;">Las columnas 📥 marcan la entrega de ese día — quedan como un registro independiente del cotejo.</p>' : ''}
       <div style="overflow-x:auto;">
       <table>
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${ind.grupal && regTeamSet ? '👥 ' : ''}${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})${ind.grupal && regTeamSet ? ' · grupal' : ''}</span></th>`).join('')}
+            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${ind.grupal ? '👥 ' : ''}${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})${ind.grupal ? ' · grupal' : ' · individual'}</span></th>`).join('')}
             ${entregasDelDia.map(entrega=>`<th style="min-width:150px;">📥 ${escapeHtml(entrega.name)}<br><button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="markAllEntregaDeliveredInline('${entrega.id}')">Todos</button></th>`).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
@@ -3986,7 +4017,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
               return `<td><select class="score-select team-select" data-team="${block.team.id}" data-indicator="${ind.id}" title="Se copia a todo el grupo" onchange="applyTeamIndicator('${block.team.id}','${ind.id}', this.value)">${o}</select></td>`;
             }).join('')}
             ${entregasDelDia.map(()=> '<td></td>').join('')}
-            <td class="muted" style="font-size:0.78rem;">${hasGroupInds && block.team ? 'Lo que marques aquí se copia a cada integrante; puedes corregir a alguien (por ejemplo, si estuvo ausente).' : ''}</td>
+            <td class="muted" style="font-size:0.78rem;">${hasGroupInds && block.team ? 'Completa aquí los indicadores 👥: valen para todo el grupo. Con ✎ cambias a un integrante (por ejemplo, si estuvo ausente).' : (block.team ? '' : 'Estudiantes sin grupo: se completan de forma individual.')}</td>
           </tr>`}
           ${block.students.map(s=>{
             const prevEntry = prevByStudent[s.id];
@@ -4000,9 +4031,20 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 for(let n=0; n<=levels; n++){
                   options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
                 }
+                if(ind.grupal && regTeamSet && block.team){
+                  // Indicador grupal: se completa en la fila del grupo; aquí solo se muestra (✎ para una excepción)
+                  return `
+                  <td class="from-team">
+                    <span class="grp-val" data-grpval="${s.id}|${ind.id}" title="Valor del grupo">${prevVal === null || prevVal === undefined ? '–' : prevVal}</span>
+                    <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}" hidden onchange="syncTeamSelectsFromMembers()">
+                      ${options}
+                    </select>
+                    <button type="button" class="icon-mini grp-edit" title="Cambiar solo para este estudiante (por ejemplo, si estuvo ausente)" aria-label="Cambiar solo para ${escapeHtml(s.name)}" onclick="unlockMemberCell(this)">✎</button>
+                  </td>`;
+                }
                 return `
-                <td${ind.grupal && regTeamSet ? ' class="from-team"' : ''}>
-                  <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}"${ind.grupal && regTeamSet ? ' onchange="syncTeamSelectsFromMembers()"' : ''}>
+                <td>
+                  <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}">
                     ${options}
                   </select>
                 </td>
@@ -4023,6 +4065,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
     ${saveButtonsRow}
   `;
   syncTeamSelectsFromMembers();
+  refreshGroupBadges();
 }
 
 function entregaCellHtml(entrega, studentId){
@@ -4057,6 +4100,8 @@ function markAllMaxScores(){
       if(sel) sel.value = String(ind.levels || 5);
     });
   });
+  document.querySelectorAll('select[data-team][data-indicator]').forEach(el=>{ const ind = selectedIndicators.find(i=> i.id === el.dataset.indicator); if(ind) el.value = String(ind.levels || 5); });
+  refreshGroupBadges();
   showToast('Todos marcados con la nota máxima. Ajusta las excepciones.');
 }
 
@@ -10176,13 +10221,16 @@ function renderEvalScores(group, evaluation){
           ? `<button class="btn btn-outline btn-sm" onclick="openRubricEditor('${evaluation.id}')">✎ Editar rúbrica</button><button class="btn btn-danger btn-sm" onclick="removeRubric('${evaluation.id}')">Quitar rúbrica</button>`
           : `<button class="btn btn-accent btn-sm" onclick="openRubricEditor('${evaluation.id}')">📋 Corregir con rúbrica</button>`)}
       </div>
-      ${evaluation.entregaLink ? '' : `<div style="margin-bottom:10px; max-width:420px;"><label for="evTeamSet">Trabajo en grupos</label>${teamSetSelectHtml(group, evaluation.teamSetId, `setEvalTeamSet('${evaluation.id}', this.value)`, 'evTeamSet')}</div>`}
+      ${evaluation.entregaLink ? '' : `<div class="${hasRubric(evaluation) && evaluation.rubric.items.some(it=> it.grupal) && !findTeamSet(group, evaluation.teamSetId) ? 'grp-banner' : ''}" style="margin-bottom:10px;">
+        ${hasRubric(evaluation) && evaluation.rubric.items.some(it=> it.grupal) && !findTeamSet(group, evaluation.teamSetId) ? `<div><strong>👥 Esta rúbrica tiene indicadores grupales.</strong> Elige los grupos para completarlos una sola vez por grupo.</div>` : ''}
+        <div style="max-width:420px;"><label for="evTeamSet">Trabajo en grupos</label>${teamSetSelectHtml(group, evaluation.teamSetId, `setEvalTeamSet('${evaluation.id}', this.value)`, 'evTeamSet')}</div>
+      </div>`}
       ${hasRubric(evaluation) ? rubricLegendHtml(evaluation) : ''}
       ${evaluation.entregaLink ? `<p class="muted" style="background:var(--primary-light); border:1px solid var(--primary-border); border-radius:10px; padding:8px 10px; color:var(--text);">🔄 Esta nota está vinculada a las entregas: el puntaje (% de cumplimiento) se calcula solo cada vez que editas las entregas. Haz clic en una nota para ver y editar las entregas del estudiante.</p>` : ''}
       <div style="overflow-x:auto;">
       <table>
         <thead>
-          <tr><th>Estudiante</th>${hasRubric(evaluation) ? evaluation.rubric.items.map((it, i)=> `<th title="${escapeHtml(it.text)}" style="text-align:center;">I${i+1}</th>`).join('') : ''}<th>Puntaje obtenido</th><th>Nota</th><th>Décimas aplicadas</th><th>Adecuación</th></tr>
+          <tr><th>Estudiante</th>${hasRubric(evaluation) ? evaluation.rubric.items.map((it, i)=> `<th title="${escapeHtml(it.text)}" style="text-align:center;">${it.grupal ? '👥 ' : ''}I${i+1}</th>`).join('') : ''}<th>Puntaje obtenido</th><th>Nota</th><th>Décimas aplicadas</th><th>Adecuación</th></tr>
         </thead>
         <tbody>
           ${(()=>{ const ts = !evaluation.entregaLink && findTeamSet(group, evaluation.teamSetId); return ts ? studentsByTeam(group, ts) : [{ team: null, students: group.students, plain: true }]; })().map(block=> `
@@ -10197,7 +10245,9 @@ function renderEvalScores(group, evaluation){
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
-                ${rub ? evaluation.rubric.items.map(it=> `<td style="padding:4px;"${it.grupal && !block.plain ? ' class="from-team"' : ''}>${rubricSelectHtml(evaluation, s.id, it)}</td>`).join('') : ''}
+                ${rub ? evaluation.rubric.items.map(it=> (it.grupal && !block.plain && block.team && !evalGrpUnlocked.has(evaluation.id + '|' + s.id + '|' + it.id))
+                  ? `<td style="padding:4px;" class="from-team">${rubricLevelBadge(evaluation, s.id, it)}<button type="button" class="icon-mini" title="Cambiar solo para este estudiante" aria-label="Cambiar solo para ${escapeHtml(s.name)}" onclick="evalGrpUnlocked.add('${evaluation.id}|${s.id}|${it.id}'); renderEvalScores(getActiveGroup(), getActiveGroup().evaluations.find(e=>e.id==='${evaluation.id}'))">✎</button></td>`
+                  : `<td style="padding:4px;"${it.grupal && !block.plain ? ' class="from-team grp-exception"' : ''}>${rubricSelectHtml(evaluation, s.id, it)}</td>`).join('') : ''}
                 <td>${rub
                   ? `<span style="font-weight:700;">${score !== null && score !== undefined ? fmtNum(score) : '-'}</span>${missing && missing < evaluation.rubric.items.length ? `<br><span class="muted" style="font-size:0.74rem;">faltan ${missing}</span>` : ''}`
                   : evaluation.entregaLink
@@ -10242,6 +10292,13 @@ function recomputeRubricScore(ev, sid){
   const marked = ev.rubric.items.filter(it=> lv[it.id] !== undefined && lv[it.id] !== null);
   if(!ev.scores) ev.scores = {};
   ev.scores[sid] = marked.length ? Math.round(marked.reduce((a,it)=> a + rubricItemPoints(it, lv[it.id]), 0) * 100) / 100 : null;
+}
+const evalGrpUnlocked = new Set(); // excepciones individuales en ítems grupales
+function rubricLevelBadge(ev, sid, it){
+  const lv = ev.rubricLevels && ev.rubricLevels[sid] ? ev.rubricLevels[sid][it.id] : undefined;
+  if(lv === undefined || lv === null) return '<span class="grp-val" title="Se completa en la fila del grupo">–</span>';
+  const L = RUBRIC_LEVELS.find(x=> x.v === lv);
+  return `<span class="grp-val" title="Valor del grupo">${L ? L.short : lv} · ${fmtNum(rubricItemPoints(it, lv))}</span>`;
 }
 function rubricSelectHtml(ev, sid, it){
   const lv = ev.rubricLevels && ev.rubricLevels[sid] ? ev.rubricLevels[sid][it.id] : undefined;
@@ -10630,6 +10687,7 @@ function setRubricLevelTeam(evalId, setId, teamId, itemId, value){
   if(!ev.rubricLevels) ev.rubricLevels = {};
   team.members.forEach(sid=>{
     if(!group.students.some(s=> s.id === sid)) return;
+    if(evalGrpUnlocked.has(ev.id + '|' + sid + '|' + itemId)) return; // excepción individual
     if(!ev.rubricLevels[sid]) ev.rubricLevels[sid] = {};
     if(value === '') delete ev.rubricLevels[sid][itemId]; else ev.rubricLevels[sid][itemId] = Number(value);
     recomputeRubricScore(ev, sid);
