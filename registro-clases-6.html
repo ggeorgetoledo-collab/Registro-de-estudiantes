@@ -175,6 +175,21 @@
   .status-dot{ position:absolute; left:20px; top:8px; width:9px; height:9px; border-radius:50%; border:2px solid var(--card-bg); background:var(--text-dim); }
   #driveSettingsBtn.on .status-dot{ background:var(--success); }
   #driveSettingsBtn.off .status-dot{ background:var(--danger); }
+  .inc-toggle{ display:inline-flex; align-items:center; gap:5px; margin:4px 0 0; padding:3px 9px; border:1px solid var(--border-strong); border-radius:999px; font-size:0.8rem; font-weight:600; color:var(--text-dim); cursor:pointer; white-space:nowrap; }
+  .inc-toggle input{ width:auto; margin:0; }
+  .inc-toggle.on{ background:#FBF0D9; border-color:#F0D9A8; color:#7A4F00; }
+  :root[data-theme="dark"] .inc-toggle.on{ background:rgba(251,191,36,0.16); color:#FBBF24; border-color:rgba(251,191,36,0.4); }
+  .team-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:10px; margin-top:12px; }
+  .team-box{ border:1px solid var(--border); border-radius:12px; padding:10px 12px; background:var(--bg); }
+  .team-box ul{ margin:6px 0 0; padding-left:18px; font-size:0.92rem; line-height:1.45; }
+  .icon-mini{ border:none; background:none; color:var(--text-dim); cursor:pointer; padding:2px 6px; border-radius:6px; font-size:0.85rem; }
+  .icon-mini:hover{ background:var(--card-bg); color:var(--text); }
+  .team-assign{ display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:6px 16px; margin-top:8px; }
+  .team-assign-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:0.92rem; color:var(--text); margin:0; }
+  .team-assign-row select{ width:auto; max-width:150px; padding:5px 8px; }
+  tr.team-row td{ background:var(--primary-light); border-top:2px solid var(--primary-border); }
+  tr.team-member td:first-child{ padding-left:22px; }
+  td.from-team{ background:rgba(127,127,127,0.06); }
   .rubric-legend{ background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:12px; display:flex; flex-direction:column; gap:3px; font-size:0.9rem; }
   .rubric-sel{ width:auto; min-width:74px; padding:5px 6px; font-size:0.84rem; font-weight:700; text-align:center; }
   .rubric-sel.rl-3{ background:var(--success-light); color:var(--success); border-color:var(--success-border); }
@@ -2364,7 +2379,7 @@ document.getElementById('newGroupBtn').addEventListener('click', ()=>{
 const MODULE_TABS = {
   inicio: ['inicio'],
   horario: ['horario'],
-  cursos: ['estudiantes'],
+  cursos: ['estudiantes','grupos'],
   trabajo: ['indicadores','registrar','entregas','historial','decimas'],
   puntos: ['escanear','premios','catalogo'],
   tarjetas: ['tarjetas','portal','consulta'],
@@ -2376,6 +2391,8 @@ const MODULE_LABELS = {
   calificaciones: 'Calificaciones', puntos: 'Puntos', tarjetas: 'Tarjetas y portal', bitacora: 'Bitácora',
 };
 const SUBTAB_LABELS = {
+  estudiantes: 'Estudiantes',
+  grupos: 'Grupos de trabajo',
   indicadores: 'Indicadores',
   registrar: 'Registrar clase',
   historial: 'Historial',
@@ -2411,14 +2428,14 @@ function renderNav(){
 function goToTab(tab){
   currentTab = tab;
   currentModule = moduleForTab(tab);
-  if(tab === 'registrar'){ registrarIndicatorSelection = null; registrarAttendanceOnly = null; }
+  if(tab === 'registrar'){ registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarAttendanceOnly = null; }
   renderNav();
   renderMain();
 }
 function goToModule(mod){
   currentModule = mod;
   currentTab = (MODULE_TABS[mod] || ['horario'])[0];
-  if(currentTab === 'registrar'){ registrarIndicatorSelection = null; registrarAttendanceOnly = null; }
+  if(currentTab === 'registrar'){ registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarAttendanceOnly = null; }
   renderNav();
   renderMain();
 }
@@ -2474,6 +2491,122 @@ function renderStudentSearch(q){
   input.addEventListener('blur', ()=> setTimeout(()=>{ box.hidden = true; }, 150));
 })();
 
+
+/* ============ GRUPOS DE TRABAJO ============
+   group.teamSets = [{ id, name, teams: [{ id, name, members: [studentId] }] }]
+   Un "conjunto" es una forma de agrupar el curso (ej. "Grupos Unidad 2"); se elige al registrar una clase
+   o al calificar, y los indicadores marcados como grupales se ingresan una vez por grupo. */
+function teamSetsOf(group){ if(!group.teamSets) group.teamSets = []; return group.teamSets; }
+function findTeamSet(group, id){ return id ? teamSetsOf(group).find(t=> t.id === id) || null : null; }
+// Estudiantes ordenados por grupo: [{ team | null, students: [] }]
+function studentsByTeam(group, set){
+  const out = [];
+  const used = new Set();
+  set.teams.forEach(t=>{
+    const st = t.members.map(id=> group.students.find(s=> s.id === id)).filter(Boolean);
+    st.forEach(s=> used.add(s.id));
+    if(st.length) out.push({ team: t, students: st });
+  });
+  const rest = group.students.filter(s=> !used.has(s.id));
+  if(rest.length) out.push({ team: null, students: rest });
+  return out;
+}
+function shuffleArr(a){ a = a.slice(); for(let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function buildTeams(studentIds, size, random){
+  const ids = random ? shuffleArr(studentIds) : studentIds.slice();
+  size = Math.max(2, size || 4);
+  const n = Math.max(1, Math.round(ids.length / size));
+  const teams = Array.from({ length: n }, (_, i)=> ({ id: uid(), name: 'Grupo ' + (i + 1), members: [] }));
+  ids.forEach((id, i)=> teams[i % n].members.push(id));
+  return teams;
+}
+function renderGrupos(group){
+  const main = document.getElementById('main');
+  const sets = teamSetsOf(group);
+  const defName = 'Grupos ' + new Date().toLocaleDateString('es-CL', { day:'2-digit', month:'2-digit' });
+  main.innerHTML = `
+    ${groupHeaderCard(group)}
+    <div class="card app-font">
+      <h2>Nuevo conjunto de grupos</h2>
+      <p class="muted">Arma los grupos una vez y úsalos al registrar una clase o al calificar: los indicadores grupales se marcan una sola vez por grupo y se copian a sus integrantes. Puedes tener varios conjuntos (por ejemplo, uno por unidad o por proyecto).</p>
+      ${group.students.length === 0 ? '<div class="empty-state">Agrega estudiantes primero.</div>' : `
+      <div class="grid-2">
+        <div><label for="tsName">Nombre</label><input type="text" id="tsName" value="${escapeHtml(defName)}"></div>
+        <div><label for="tsSize">Integrantes por grupo (aprox.)</label><input type="number" id="tsSize" min="2" max="12" value="4"></div>
+      </div>
+      <label for="tsMode" style="margin-top:8px;">Cómo armarlos</label>
+      <select id="tsMode">
+        <option value="random">Al azar</option>
+        <option value="order">En el orden de la lista</option>
+        <option value="empty">Vacíos (los armo yo)</option>
+      </select>
+      <div class="row" style="margin-top:12px;"><button class="btn btn-accent" onclick="createTeamSet()">+ Crear grupos</button></div>`}
+    </div>
+    ${sets.length === 0 ? '' : sets.map(set=> teamSetCardHtml(group, set)).join('')}
+  `;
+}
+const teamAssignOpen = new Set();
+function teamSetCardHtml(group, set){
+  const opts = t=> `<option value="">Sin grupo</option>` + set.teams.map(x=> `<option value="${x.id}" ${t && t.id === x.id ? 'selected' : ''}>${escapeHtml(x.name)}</option>`).join('');
+  return `
+    <div class="card app-font">
+      <div class="flex-between" style="gap:8px; flex-wrap:wrap;">
+        <h2 style="border:none; margin:0; padding:0;">👥 ${escapeHtml(set.name)} <span class="muted" style="font-weight:400; font-size:0.9rem;">· ${set.teams.length} grupo(s)</span></h2>
+        <div class="row" style="gap:6px;">
+          <button class="btn btn-outline btn-sm" onclick="renameTeamSet('${set.id}')">✎ Renombrar</button>
+          <button class="btn btn-outline btn-sm" onclick="addTeam('${set.id}')">+ Grupo</button>
+          <button class="btn btn-outline btn-sm" onclick="reshuffleTeamSet('${set.id}')">🔀 Rearmar al azar</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteTeamSet('${set.id}')">Eliminar</button>
+        </div>
+      </div>
+      <div class="team-grid">
+        ${set.teams.map(t=> `
+          <div class="team-box">
+            <div class="flex-between"><strong>${escapeHtml(t.name)}</strong>
+              <span class="row" style="gap:2px;"><button class="icon-mini" title="Renombrar grupo" aria-label="Renombrar ${escapeHtml(t.name)}" onclick="renameTeam('${set.id}','${t.id}')">✎</button><button class="icon-mini" title="Eliminar grupo" aria-label="Eliminar ${escapeHtml(t.name)}" onclick="deleteTeam('${set.id}','${t.id}')">✕</button></span></div>
+            ${t.members.length ? `<ul>${t.members.map(id=>{ const st = group.students.find(s=> s.id === id); return st ? `<li>${escapeHtml(st.name)}</li>` : ''; }).join('')}</ul>` : '<p class="muted" style="margin:6px 0 0; font-size:0.85rem;">Sin integrantes</p>'}
+          </div>`).join('')}
+      </div>
+      <details style="margin-top:10px;" ${teamAssignOpen.has(set.id) ? 'open' : ''} ontoggle="this.open ? teamAssignOpen.add('${set.id}') : teamAssignOpen.delete('${set.id}')">
+        <summary class="muted" style="cursor:pointer; font-weight:600;">Mover estudiantes entre grupos</summary>
+        <div class="team-assign">
+          ${group.students.map(st=>{ const t = set.teams.find(x=> x.members.includes(st.id)); return `<label class="team-assign-row"><span>${escapeHtml(st.name)}</span><select onchange="moveToTeam('${set.id}','${st.id}', this.value)">${opts(t)}</select></label>`; }).join('')}
+        </div>
+      </details>
+    </div>`;
+}
+function createTeamSet(){
+  const group = getActiveGroup();
+  const name = document.getElementById('tsName').value.trim() || 'Grupos';
+  const size = parseInt(document.getElementById('tsSize').value, 10) || 4;
+  const mode = document.getElementById('tsMode').value;
+  const ids = group.students.map(s=> s.id);
+  const teams = mode === 'empty'
+    ? Array.from({ length: Math.max(1, Math.round(ids.length / Math.max(2, size))) }, (_, i)=> ({ id: uid(), name: 'Grupo ' + (i + 1), members: [] }))
+    : buildTeams(ids, size, mode === 'random');
+  teamSetsOf(group).unshift({ id: uid(), name, teams });
+  saveState(); renderGrupos(group);
+  showToast(teams.length + ' grupo(s) creados');
+}
+function withTeamSet(setId, fn){
+  const group = getActiveGroup(); const set = findTeamSet(group, setId); if(!set) return;
+  if(fn(set, group) === false) return;
+  saveState(); renderGrupos(group);
+}
+function renameTeamSet(setId){ withTeamSet(setId, set=>{ const n = prompt('Nombre del conjunto de grupos:', set.name); if(!n || !n.trim()) return false; set.name = n.trim(); }); }
+function renameTeam(setId, teamId){ withTeamSet(setId, set=>{ const t = set.teams.find(x=> x.id === teamId); const n = t && prompt('Nombre del grupo:', t.name); if(!n || !n.trim()) return false; t.name = n.trim(); }); }
+function addTeam(setId){ withTeamSet(setId, set=>{ set.teams.push({ id: uid(), name: 'Grupo ' + (set.teams.length + 1), members: [] }); }); }
+function deleteTeam(setId, teamId){ withTeamSet(setId, set=>{ const t = set.teams.find(x=> x.id === teamId); if(!t || !confirm('¿Eliminar "' + t.name + '"? Sus integrantes quedan sin grupo.')) return false; set.teams = set.teams.filter(x=> x.id !== teamId); }); }
+function moveToTeam(setId, sid, teamId){ withTeamSet(setId, set=>{ set.teams.forEach(t=> t.members = t.members.filter(x=> x !== sid)); const t = set.teams.find(x=> x.id === teamId); if(t) t.members.push(sid); }); }
+function reshuffleTeamSet(setId){ withTeamSet(setId, (set, group)=>{ if(!confirm('¿Rearmar "' + set.name + '" al azar? Se mantiene la cantidad de grupos.')) return false; const ids = shuffleArr(group.students.map(s=> s.id)); set.teams.forEach(t=> t.members = []); ids.forEach((id, i)=> set.teams[i % set.teams.length].members.push(id)); }); }
+function deleteTeamSet(setId){ withTeamSet(setId, (set, group)=>{ if(!confirm('¿Eliminar el conjunto "' + set.name + '"? Las notas y registros ya hechos no cambian.')) return false; group.teamSets = group.teamSets.filter(x=> x.id !== setId); }); }
+// Selector reutilizable de conjunto de grupos
+function teamSetSelectHtml(group, currentId, onchange, id){
+  const sets = teamSetsOf(group);
+  if(!sets.length) return `<p class="muted" style="font-size:0.85rem; margin:0;">Para trabajar en grupos, créalos en <a href="#" onclick="goToTab('grupos'); return false;">Cursos → Grupos de trabajo</a>.</p>`;
+  return `<select id="${id}" onchange="${onchange}"><option value="">Sin grupos (individual)</option>${sets.map(x=> `<option value="${x.id}" ${x.id === currentId ? 'selected' : ''}>👥 ${escapeHtml(x.name)} · ${x.teams.length} grupos</option>`).join('')}</select>`;
+}
+
 /* ============ RENDER PRINCIPAL ============ */
 function renderAll(){
   renderGreeting();
@@ -2497,6 +2630,7 @@ function renderMain(){
   if(currentTab !== 'escanear' && !kioskActive){ qrScanner.wanted = false; stopQrScanner(); }
   if(currentTab === 'inicio') return renderInicio();
   if(currentTab === 'estudiantes') return renderEstudiantes(group);
+  if(currentTab === 'grupos') return renderGrupos(group);
   if(currentTab === 'indicadores') return renderIndicadores(group);
   if(currentTab === 'horario') return renderHorario();
   if(currentTab === 'registrar') return renderRegistrar(group);
@@ -2727,7 +2861,7 @@ function openStudentDetail(studentId){
   const entregas = getActiveEntregas(group);
   const entregaStats = computeStudentEntregaStats(group, studentId, entregas);
   const entregaTotal = entregas.length;
-  const entregaCumplimiento = entregaTotal > 0 ? Math.round(((entregaStats.en_plazo * 1 + entregaStats.fuera_plazo * 0.5) / entregaTotal) * 100) : null;
+  const entregaCumplimiento = entregaCumplimientoPct(entregas, studentId);
   const evals = getActiveEvaluations(group);
 
   const overlay = document.createElement('div');
@@ -2873,6 +3007,7 @@ function renderIndicadores(group){
           <label>Unidad / tema (opcional)</label>
           ${temaSelectHtml('newIndicatorTemaSelect', 'newIndicatorTemaNew', themes, '')}
         </div>
+        <label style="display:flex; align-items:center; gap:6px; align-self:flex-end; margin-bottom:10px; white-space:nowrap;"><input type="checkbox" id="newIndicatorGrupal" style="width:auto;"> 👥 Grupal</label>
         <div style="align-self:flex-end;">
           <button class="btn btn-accent" id="addIndicatorBtn">+ Agregar</button>
         </div>
@@ -2892,7 +3027,7 @@ function renderIndicadores(group){
       ` : ''}
       ${visibleIndicators.length === 0 ? '<div class="empty-state">No hay indicadores para mostrar.</div>' :
         `<div style="margin-top:8px;">${visibleIndicators.map(ind=>`
-          <span class="indicator-tag">${escapeHtml(ind.name)} · ${ind.levels || 5} niveles${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
+          <span class="indicator-tag">${ind.grupal ? '👥 ' : ''}${escapeHtml(ind.name)} · ${ind.levels || 5} niveles${ind.grupal ? ' · grupal' : ''}${ind.tema ? ' · ' + escapeHtml(ind.tema) : ''}
             <button onclick="editIndicator('${ind.id}')" style="color:var(--primary);">✎</button>
             <button onclick="deleteIndicator('${ind.id}')">✕</button>
           </span>
@@ -2909,7 +3044,8 @@ function renderIndicadores(group){
     if(!levels || levels < 2) levels = 2;
     if(levels > 10) levels = 10;
     const tema = readTemaSelectValue('newIndicatorTemaSelect', 'newIndicatorTemaNew');
-    group.indicators.push({id: uid(), name, levels, tema});
+    const grupal = document.getElementById('newIndicatorGrupal').checked;
+    group.indicators.push({id: uid(), name, levels, tema, ...(grupal ? { grupal: true } : {})});
     saveState();
     renderIndicadores(group);
     showToast('Indicador agregado');
@@ -2936,6 +3072,7 @@ function openIndicatorForm(id){
       <input type="number" id="indicatorFormLevels" min="2" max="10" value="${ind.levels || 5}">
       <label style="margin-top:10px;">Unidad / tema (opcional)</label>
       ${temaSelectHtml('indicatorFormTemaSelect', 'indicatorFormTemaNew', themes, ind.tema || '')}
+      <label style="margin-top:10px; display:flex; align-items:center; gap:8px;"><input type="checkbox" id="indicatorFormGrupal" style="width:auto;" ${ind.grupal ? 'checked' : ''}> 👥 Indicador grupal (al trabajar en grupos se marca una vez por grupo)</label>
       <div class="row" style="margin-top:14px;">
         <button class="btn btn-accent btn-sm" onclick="saveIndicatorForm('${id}')">Guardar</button>
       </div>
@@ -2956,6 +3093,7 @@ function saveIndicatorForm(id){
   ind.tema = readTemaSelectValue('indicatorFormTemaSelect', 'indicatorFormTemaNew');
   if(name) ind.name = name;
   if(levels && levels >= 2 && levels <= 10) ind.levels = levels;
+  if(document.getElementById('indicatorFormGrupal').checked) ind.grupal = true; else delete ind.grupal;
   saveState();
   closeIndicatorForm();
   if(currentTab === 'registrar'){
@@ -3027,7 +3165,7 @@ function goToDateClass(entryId, iso){
   renderGroupSelect();
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
-  registrarIndicatorSelection = null;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
   registrarAttendanceOnly = null;
   renderNav();
   const existingSession = getActiveSessions(group).find(s=> s.date === iso && s.time === entry.startTime);
@@ -3523,7 +3661,7 @@ function goToClass(entryId){
   renderGroupSelect();
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
-  registrarIndicatorSelection = null;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
   registrarAttendanceOnly = null;
   renderNav();
   const targetDate = computeDateForWeekday(entry.day);
@@ -3610,6 +3748,45 @@ function saveQuickIndicatorForm(){
   showToast('Indicador agregado y seleccionado');
 }
 
+let registrarTeamSetId = undefined;
+// Guarda lo que ya se marcó en la tabla para no perderlo al volver a dibujarla
+function snapshotRegistrarInputs(){
+  const snap = { sel: {}, obs: {}, att: {} };
+  document.querySelectorAll('select[data-student][data-indicator]').forEach(el=> snap.sel[el.dataset.student + '|' + el.dataset.indicator] = el.value);
+  document.querySelectorAll('textarea[data-student][data-obs]').forEach(el=> snap.obs[el.dataset.student] = el.value);
+  document.querySelectorAll('input[data-attendance-student]').forEach(el=> snap.att[el.dataset.attendanceStudent] = el.checked);
+  return snap;
+}
+function restoreRegistrarInputs(snap){
+  document.querySelectorAll('select[data-student][data-indicator]').forEach(el=>{ const v = snap.sel[el.dataset.student + '|' + el.dataset.indicator]; if(v !== undefined) el.value = v; });
+  document.querySelectorAll('textarea[data-student][data-obs]').forEach(el=>{ const v = snap.obs[el.dataset.student]; if(v !== undefined) el.value = v; });
+  document.querySelectorAll('input[data-attendance-student]').forEach(el=>{ const v = snap.att[el.dataset.attendanceStudent]; if(v !== undefined) el.checked = v; });
+  syncTeamSelectsFromMembers();
+}
+function changeRegistrarTeamSet(id){
+  const snap = snapshotRegistrarInputs();
+  registrarTeamSetId = id || null;
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  restoreRegistrarInputs(snap);
+}
+// Al elegir un valor en la fila del grupo, se copia a todos sus integrantes
+function applyTeamIndicator(teamId, indId, value){
+  const set = findTeamSet(getActiveGroup(), registrarTeamSetId);
+  const team = set && set.teams.find(t=> t.id === teamId);
+  if(!team) return;
+  team.members.forEach(sid=>{ const el = document.querySelector(`select[data-student="${sid}"][data-indicator="${indId}"]`); if(el) el.value = value; });
+}
+// Muestra en la fila del grupo el valor común de sus integrantes (vacío si difieren)
+function syncTeamSelectsFromMembers(){
+  const set = findTeamSet(getActiveGroup(), registrarTeamSetId);
+  if(!set) return;
+  document.querySelectorAll('select[data-team][data-indicator]').forEach(el=>{
+    const team = set.teams.find(t=> t.id === el.dataset.team); if(!team) return;
+    const vals = [...new Set(team.members.map(sid=>{ const m = document.querySelector(`select[data-student="${sid}"][data-indicator="${el.dataset.indicator}"]`); return m ? m.value : null; }).filter(v=> v !== null))];
+    el.value = vals.length === 1 ? vals[0] : '';
+  });
+}
+
 function renderRegistrar(group, sessionToEdit, prefill){
   const main = document.getElementById('main');
   const today = new Date().toISOString().slice(0,10);
@@ -3639,6 +3816,12 @@ function renderRegistrar(group, sessionToEdit, prefill){
     }
   }
   const selectedIndicators = group.indicators.filter(i=> registrarIndicatorSelection.includes(i.id));
+  if(registrarTeamSetId === undefined){
+    registrarTeamSetId = isEdit ? (sessionToEdit.teamSetId || null) : (group.lastTeamSetId || null);
+  }
+  if(registrarTeamSetId && !findTeamSet(group, registrarTeamSetId)) registrarTeamSetId = null;
+  const regTeamSet = findTeamSet(group, registrarTeamSetId);
+  const hasGroupInds = selectedIndicators.some(i=> i.grupal);
   const indicatorThemes = [...new Set(group.indicators.map(i=>i.tema).filter(Boolean))];
   const indicatorsToShow = registrarThemeFilter ? group.indicators.filter(i=> i.tema === registrarThemeFilter) : group.indicators;
 
@@ -3697,6 +3880,11 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <input type="checkbox" style="width:auto;" ${registrarAttendanceOnly ? 'checked' : ''} onchange="toggleAttendanceOnlyMode(this.checked)">
         Registrar solo asistencia (sin indicadores)
       </label>
+      ${registrarAttendanceOnly ? '' : `<div style="margin-top:10px;">
+        <label for="regTeamSet">Trabajo en grupos</label>
+        ${teamSetSelectHtml(group, registrarTeamSetId, 'changeRegistrarTeamSet(this.value)', 'regTeamSet')}
+        ${regTeamSet && !hasGroupInds ? '<p class="muted" style="font-size:0.8rem; margin-top:4px;">Ninguno de los indicadores elegidos es grupal: márcalos como 👥 grupales (✎) para evaluarlos por grupo.</p>' : ''}
+      </div>`}
     </div>
 
     ${registrarAttendanceOnly ? '' : `
@@ -3724,7 +3912,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
             <span style="display:inline-flex; align-items:center; gap:4px; margin:4px 10px 4px 0;">
               <label style="display:inline-flex; align-items:center; gap:6px; font-family:'Source Sans 3',sans-serif; font-size:0.88rem;">
                 <input type="checkbox" value="${ind.id}" ${registrarIndicatorSelection.includes(ind.id) ? 'checked' : ''} onchange="toggleRegistrarIndicator('${ind.id}', this.checked)">
-                ${escapeHtml(ind.name)}${ind.tema ? ` <span class="muted">(${escapeHtml(ind.tema)})</span>` : ''}
+                ${ind.grupal ? '👥 ' : ''}${escapeHtml(ind.name)}${ind.tema ? ` <span class="muted">(${escapeHtml(ind.tema)})</span>` : ''}
               </label>
               <button onclick="openIndicatorForm('${ind.id}')" style="background:none; border:none; color:var(--primary); cursor:pointer; padding:0; font-size:0.85rem;">✎</button>
             </span>
@@ -3782,16 +3970,28 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
+            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${ind.grupal && regTeamSet ? '👥 ' : ''}${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})${ind.grupal && regTeamSet ? ' · grupal' : ''}</span></th>`).join('')}
             ${entregasDelDia.map(entrega=>`<th style="min-width:150px;">📥 ${escapeHtml(entrega.name)}<br><button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="markAllEntregaDeliveredInline('${entrega.id}')">Todos</button></th>`).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
         </thead>
         <tbody id="registrarBody">
-          ${group.students.map(s=>{
+          ${(regTeamSet ? studentsByTeam(group, regTeamSet) : [{ team: null, students: group.students, plain: true }]).map(block=> `
+          ${block.plain ? '' : `<tr class="team-row">
+            <td><strong>👥 ${block.team ? escapeHtml(block.team.name) : 'Sin grupo'}</strong><br><span class="muted" style="font-size:0.78rem;">${block.students.length} integrante(s)</span></td>
+            ${selectedIndicators.map(ind=>{
+              if(!ind.grupal || !block.team) return '<td></td>';
+              let o = '<option value="">-</option>';
+              for(let n=0; n<=(ind.levels || 5); n++) o += `<option value="${n}">${n}</option>`;
+              return `<td><select class="score-select team-select" data-team="${block.team.id}" data-indicator="${ind.id}" title="Se copia a todo el grupo" onchange="applyTeamIndicator('${block.team.id}','${ind.id}', this.value)">${o}</select></td>`;
+            }).join('')}
+            ${entregasDelDia.map(()=> '<td></td>').join('')}
+            <td class="muted" style="font-size:0.78rem;">${hasGroupInds && block.team ? 'Lo que marques aquí se copia a cada integrante; puedes corregir a alguien (por ejemplo, si estuvo ausente).' : ''}</td>
+          </tr>`}
+          ${block.students.map(s=>{
             const prevEntry = prevByStudent[s.id];
             return `
-            <tr>
+            <tr class="${block.plain ? '' : 'team-member'}">
               <td>${escapeHtml(s.name)}</td>
               ${selectedIndicators.map(ind=>{
                 const levels = ind.levels || 5;
@@ -3801,8 +4001,8 @@ function renderRegistrar(group, sessionToEdit, prefill){
                   options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
                 }
                 return `
-                <td>
-                  <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}">
+                <td${ind.grupal && regTeamSet ? ' class="from-team"' : ''}>
+                  <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}"${ind.grupal && regTeamSet ? ' onchange="syncTeamSelectsFromMembers()"' : ''}>
                     ${options}
                   </select>
                 </td>
@@ -3813,7 +4013,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 <textarea data-student="${s.id}" data-obs="1" placeholder="Observaciones...">${prevEntry ? escapeHtml(prevEntry.observaciones || '') : ''}</textarea>
               </td>
             </tr>
-          `;}).join('')}
+          `;}).join('')}`).join('')}
         </tbody>
       </table>
       </div>
@@ -3822,6 +4022,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
 
     ${saveButtonsRow}
   `;
+  syncTeamSelectsFromMembers();
 }
 
 function entregaCellHtml(entrega, studentId){
@@ -3833,6 +4034,7 @@ function entregaCellHtml(entrega, studentId){
         ${info ? info.label : (entregaIsOpen(entrega) ? '⏳ En plazo · Marcar' : '⬜ Marcar')}
       </button>
       ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaExceptionInline('${entrega.id}','${studentId}')" title="Marcar en plazo por excepción">🔓</button>` : ''}
+      ${entregaIncToggleHtml(entrega, studentId, `refreshEntregaInlineCell('${entrega.id}','${studentId}')`)}
     </div>
   `;
 }
@@ -3926,7 +4128,7 @@ function handleSaveSession(){
       const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
       return { studentId: s.id, cotejo, observaciones: obsEl ? obsEl.value.trim() : '' };
     });
-    indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5}));
+    indicatorSnapshot = selectedIndicators.map(i=>({id:i.id, name:i.name, levels:i.levels || 5, ...(i.grupal ? { grupal: true } : {})}));
   }
 
   // Conservar datos de estudiantes que ya no están en el grupo pero tenían registro previo
@@ -3936,16 +4138,17 @@ function handleSaveSession(){
   if(isEdit){
     const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
     if(idx !== -1){
-      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot, processId: selectedProcessId };
+      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot, processId: selectedProcessId, teamSetId: registrarTeamSetId || null };
     }
     showToast('Registro actualizado correctamente');
   } else {
-    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId });
+    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId, teamSetId: registrarTeamSetId || null });
+    group.lastTeamSetId = registrarTeamSetId || null;
     showToast('Clase registrada correctamente');
   }
   if(!registrarAttendanceOnly) group.lastUsedIndicatorIds = registrarIndicatorSelection.slice();
   saveState();
-  registrarIndicatorSelection = null;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
   registrarAttendanceOnly = null;
   goToTab('historial');
 }
@@ -3956,7 +4159,7 @@ function editSession(sessionId){
   if(!session) return;
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
-  registrarIndicatorSelection = null;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
   registrarAttendanceOnly = null;
   renderNav();
   renderRegistrar(group, session);
@@ -7184,7 +7387,8 @@ function buildPortalPayload(group, s){
   const entregas = getActiveEntregas(group).map(e=>{
     const st = e.estados ? e.estados[sid] : null;
     const f = (st === 'en_plazo' || st === 'fuera_plazo') && e.fechas ? (e.fechas[sid] || '') : '';
-    return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '', lim: getEntregaEffectiveDeadlineTimestamp(e), f };
+    return { n: e.name, d: e.date || '', e: st || '', pr: e.processId || '', lim: getEntregaEffectiveDeadlineTimestamp(e), f,
+      inc: isEntregaIncompleta(e, sid) ? 1 : 0, pts: entregaPoints(e, sid), max: entregaMaxPts() };
   });
   // Nota que forman las entregas de cada unidad (evaluaciones vinculadas a entregas)
   const notasEntregas = evalsSorted.filter(e=> e.entregaLink).map(e=> ({
@@ -8213,7 +8417,7 @@ function renderEntregas(group){
       <div style="margin-top:10px;">
         <label style="display:flex; align-items:center; gap:8px;">
           <input type="checkbox" id="entAsignaDecimas" style="width:auto;" onchange="document.getElementById('entDecimasWrap').style.display = this.checked ? 'block' : 'none';">
-          Asignar décimas a quien entregue en plazo
+          Asignar décimas a quien entregue en plazo y completo
         </label>
         <div id="entDecimasWrap" style="display:none; margin-top:8px;">
           <label class="muted" style="font-size:0.74rem;">Cantidad de décimas</label>
@@ -8224,6 +8428,20 @@ function renderEntregas(group){
       <div class="row" style="margin-top:12px;">
         <button class="btn btn-accent" id="addEntregaBtn">+ Crear y completar por estudiante</button>
       </div>
+    </div>
+
+    <div class="card app-font">
+      <details ${entregaPtsOpen ? 'open' : ''} ontoggle="entregaPtsOpen = this.open">
+        <summary style="cursor:pointer; font-weight:700;">⚙️ Puntaje de cada entrega <span class="muted" style="font-weight:400; font-size:0.86rem;">· ${escapeHtml(entregaScaleText())}</span></summary>
+        <p class="muted" style="margin-top:8px;">Cada entrega suma dos partes: el <strong>plazo</strong> (se decide solo según la fecha límite) y si está <strong>completa</strong> (marca "Incompleta" cuando corresponda). La nota de entregas usa el porcentaje de estos puntos.</p>
+        <div class="grid-2" style="max-width:520px;">
+          <div><label for="epEnPlazo">En plazo</label><input type="number" id="epEnPlazo" min="0" step="0.5" value="${entregaScoring().enPlazo}"></div>
+          <div><label for="epFuera">Fuera de plazo</label><input type="number" id="epFuera" min="0" step="0.5" value="${entregaScoring().fueraPlazo}"></div>
+          <div><label for="epCompleta">Completa</label><input type="number" id="epCompleta" min="0" step="0.5" value="${entregaScoring().completa}"></div>
+          <div><label for="epIncompleta">Incompleta</label><input type="number" id="epIncompleta" min="0" step="0.5" value="${entregaScoring().incompleta}"></div>
+        </div>
+        <div class="row" style="margin-top:10px;"><button class="btn btn-accent btn-sm" onclick="saveEntregaScoring()">Guardar puntaje</button><button class="btn btn-outline btn-sm" onclick="resetEntregaScoring()">Volver a 2 + 2</button></div>
+      </details>
     </div>
 
     <div class="card app-font">
@@ -8267,6 +8485,7 @@ function renderEntregas(group){
                       <option value="fuera_plazo" ${estado==='fuera_plazo'?'selected':''}>🟠 Entregada fuera de plazo</option>
                       ${entregaIsOpen(e) ? '' : `<option value="no_entregada" ${estado==='no_entregada'?'selected':''}>🔴 No entregada</option>`}
                     </select>
+                    ${entregaIncToggleHtml(e, s.id, 'renderEntregas(getActiveGroup())')}
                   </td>`;
                 }).join('')}
               </tr>
@@ -8300,7 +8519,7 @@ function renderEntregas(group){
             const stats = computeStudentEntregaStats(group, s.id, entregas);
             const asistStats = computeStudentStatsForSessions(group, s.id, getActiveProcessSessions(group));
             const totalEnt = entregas.length;
-            const cumplimiento = totalEnt > 0 ? Math.round(((stats.en_plazo * 1 + stats.fuera_plazo * 0.5) / totalEnt) * 100) : null;
+            const cumplimiento = entregaCumplimientoPct(entregas, s.id);
             const deficiente = cumplimiento !== null && cumplimiento < 60;
             return `
               <tr style="${deficiente ? `background:var(--danger-light);` : ''}">
@@ -8317,7 +8536,7 @@ function renderEntregas(group){
         </tbody>
       </table>
       </div>
-      <p class="muted" style="font-size:0.76rem; margin-top:8px;">⚠️ Se marcan en rojo los estudiantes con menos de 60% de cumplimiento (en plazo = 1 punto, fuera de plazo = 0,5 punto).</p>
+      <p class="muted" style="font-size:0.76rem; margin-top:8px;">⚠️ Se marcan en rojo los estudiantes con menos de 60% de cumplimiento. Puntaje: ${entregaScaleText()}.</p>
     </div>
     ` : ''}
   `;
@@ -8378,7 +8597,7 @@ function entregasByUnitHtml(group, entregas){
         <div style="min-width:0;">
           <strong>${escapeHtml(e.name)}</strong>
           ${dl ? `<span class="pill" style="margin-left:6px;">🔔 ${formatDate(dl.fecha)} ${dl.hora}</span>` : ''}
-          <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada</div>
+          <div class="muted">${formatDate(e.date)} · ✅ ${counts.en_plazo} en plazo · 🟠 ${counts.fuera_plazo} fuera de plazo · 🔴 ${counts.no_entregada} no entregada${Object.keys(e.incompletas || {}).length ? ' · ◐ ' + Object.keys(e.incompletas).length + ' incompleta(s)' : ''}</div>
           ${procs.length ? `<label class="muted" style="font-size:0.74rem; display:flex; align-items:center; gap:6px; margin-top:4px;">📂
             <select style="width:auto; max-width:220px; font-size:0.78rem; padding:3px 6px;" onchange="setEntregaUnit('${e.id}', this.value)">
               <option value="">Sin unidad</option>
@@ -8430,6 +8649,17 @@ function setEntregaUnit(entregaId, processId){
   showToast(proc ? '"' + entrega.name + '" quedó en ' + entregaUnitLabel(proc.name) : '"' + entrega.name + '" quedó sin unidad');
 }
 
+let entregaPtsOpen = false;
+function saveEntregaScoring(){
+  const v = id=> Math.max(0, Number(document.getElementById(id).value) || 0);
+  const c = { enPlazo: v('epEnPlazo'), fueraPlazo: v('epFuera'), completa: v('epCompleta'), incompleta: v('epIncompleta') };
+  if(c.enPlazo + c.completa <= 0){ showToast('El puntaje máximo debe ser mayor que 0'); return; }
+  state.entregaPuntos = c;
+  saveState(); renderEntregas(getActiveGroup());
+  showToast('Puntaje de entregas guardado · máximo ' + fmtNum(entregaMaxPts()) + ' por entrega');
+}
+function resetEntregaScoring(){ delete state.entregaPuntos; saveState(); renderEntregas(getActiveGroup()); showToast('Puntaje 2 + 2 restablecido'); }
+
 function computeStudentEntregaStats(group, studentId, entregasList){
   const stats = { en_plazo:0, fuera_plazo:0, no_entregada:0 };
   (entregasList || getActiveEntregas(group)).forEach(e=>{
@@ -8466,7 +8696,7 @@ function renderEntregaValues(group, entrega){
       </div>
       <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Estudiante</th><th>Estado</th><th>Excepción</th><th>Asistencia ese día</th></tr></thead>
+        <thead><tr><th>Estudiante</th><th>Estado</th><th>Completitud y excepción</th><th>Asistencia ese día</th></tr></thead>
         <tbody>
           ${group.students.map(s=>{
             const estado = entrega.estados ? entrega.estados[s.id] : null;
@@ -8485,7 +8715,11 @@ function renderEntregaValues(group, entrega){
                   </button>
                 </td>
                 <td>
+                  <div class="row" style="gap:6px; align-items:center;">
                   ${estado !== 'en_plazo' ? `<button class="btn btn-outline btn-sm" onclick="markEntregaException('${entrega.id}','${s.id}')" title="Marcar como en plazo aunque se haya pasado la fecha">🔓 En plazo (excepción)</button>` : (isException ? '<span class="muted">⭐ Excepción aplicada</span>' : '')}
+                  ${entregaIncToggleHtml(entrega, s.id, `renderEntregaValues(getActiveGroup(), getActiveGroup().entregas.find(x=>x.id==='${entrega.id}'))`)}
+                  ${estado ? `<span class="muted" style="font-size:0.8rem;">${fmtNum(entregaPoints(entrega, s.id))}/${fmtNum(entregaMaxPts())} pts</span>` : ''}
+                  </div>
                 </td>
                 <td>${asistenciaLabel}</td>
               </tr>
@@ -8511,6 +8745,7 @@ function ensureEntregaDecimaSession(group, entrega){
 }
 function syncEntregaDecimaBonus(group, entrega, studentId, awardBonus){
   if(!entrega.decimasBonus) return;
+  if(isEntregaIncompleta(entrega, studentId)) awardBonus = false; // solo en plazo y completa
   const session = ensureEntregaDecimaSession(group, entrega);
   if(awardBonus){ session.values[studentId] = entrega.decimasBonus; }
   else { delete session.values[studentId]; }
@@ -8528,6 +8763,7 @@ function applyEntregaToggle(entregaId, studentId){
     delete entrega.estados[studentId];
     delete entrega.fechas[studentId];
     delete entrega.excepciones[studentId];
+    if(entrega.incompletas) delete entrega.incompletas[studentId];
     syncEntregaDecimaBonus(group, entrega, studentId, false);
   } else {
     const todayISO = toISODate(new Date());
@@ -8552,6 +8788,7 @@ function setEntregaEstadoDirect(entregaId, studentId, estado){
     delete entrega.estados[studentId];
     delete entrega.fechas[studentId];
     delete entrega.excepciones[studentId];
+    if(entrega.incompletas) delete entrega.incompletas[studentId];
     syncEntregaDecimaBonus(group, entrega, studentId, false);
   } else {
     entrega.estados[studentId] = estado;
@@ -8652,7 +8889,7 @@ function openEntregasToGradeForm(processId){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="closeEntregasToGradeForm()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🎯 Convertir entregas en nota</h2>
-      <p class="muted">Se creará una evaluación en Calificaciones con el cumplimiento de entregas${procName ? ' de "' + escapeHtml(procName) + '"' : ''} (${entregas.length} entrega(s)). En plazo = 1 punto, fuera de plazo = 0,5 punto, no entregada = 0.</p>
+      <p class="muted">Se creará una evaluación en Calificaciones con el cumplimiento de entregas${procName ? ' de "' + escapeHtml(procName) + '"' : ''} (${entregas.length} entrega(s)). Cada entrega suma sus puntos: ${entregaScaleText()}.</p>
       <label style="margin-top:8px;">Nombre de la evaluación</label>
       <input type="text" id="entGradeName" value="${procName ? 'Entregas ' + escapeHtml(entregaUnitLabel(procName)) : 'Entregas'}">
       <label style="margin-top:10px;">Total de entregas para el cálculo</label>
@@ -8711,7 +8948,42 @@ function saveEntregasToGradeForm(){
 }
 
 /* ---- Nota vinculada a entregas: recálculo automático y detalle por estudiante ---- */
-const ENTREGA_PUNTOS = { en_plazo: 1, fuera_plazo: 0.5, no_entregada: 0 };
+/* Cada entrega vale: puntos por plazo (en plazo / fuera de plazo) + puntos por completitud (completa / incompleta).
+   No entregada = 0. Por defecto 2+2 = 4 puntos. Se configura en state.entregaPuntos. */
+const ENTREGA_PUNTOS_DEF = { enPlazo: 2, fueraPlazo: 1, completa: 2, incompleta: 1 };
+function entregaScoring(){ return Object.assign({}, ENTREGA_PUNTOS_DEF, state.entregaPuntos || {}); }
+function entregaMaxPts(){ const c = entregaScoring(); return (Number(c.enPlazo) || 0) + (Number(c.completa) || 0); }
+function isEntregaIncompleta(e, sid){ return !!(e && e.incompletas && e.incompletas[sid]); }
+function entregaPoints(e, sid){
+  const st = e && e.estados ? e.estados[sid] : null;
+  if(st !== 'en_plazo' && st !== 'fuera_plazo') return 0;
+  const c = entregaScoring();
+  return (Number(st === 'en_plazo' ? c.enPlazo : c.fueraPlazo) || 0) + (Number(isEntregaIncompleta(e, sid) ? c.incompleta : c.completa) || 0);
+}
+function entregaFraction(e, sid){ const m = entregaMaxPts(); return m > 0 ? Math.min(1, entregaPoints(e, sid) / m) : 0; }
+function entregaScaleText(){
+  const c = entregaScoring(), f = n=> fmtNum(Number(n) || 0);
+  return `En plazo ${f(c.enPlazo)} · fuera de plazo ${f(c.fueraPlazo)} · completa ${f(c.completa)} · incompleta ${f(c.incompleta)} · no entregada 0 (máximo ${f(entregaMaxPts())} por entrega)`;
+}
+function entregaCumplimientoPct(entregas, sid){
+  return entregas.length ? Math.round(entregas.reduce((a, e)=> a + entregaFraction(e, sid), 0) / entregas.length * 100) : null;
+}
+// Marca o desmarca "incompleta" (solo aplica a entregas ya entregadas)
+function setEntregaIncompleta(entregaId, sid, on){
+  const group = getActiveGroup();
+  const e = group.entregas.find(x=> x.id === entregaId); if(!e) return;
+  if(!e.incompletas) e.incompletas = {};
+  if(on) e.incompletas[sid] = true; else delete e.incompletas[sid];
+  syncEntregaDecimaBonus(group, e, sid, e.estados && e.estados[sid] === 'en_plazo');
+  saveState();
+}
+function entregaIncToggleHtml(e, sid, after){
+  const st = e.estados ? e.estados[sid] : null;
+  if(st !== 'en_plazo' && st !== 'fuera_plazo') return '';
+  const on = isEntregaIncompleta(e, sid);
+  return `<label class="inc-toggle${on ? ' on' : ''}" title="Marca si entregó incompleto"><input type="checkbox" ${on ? 'checked' : ''} onchange="setEntregaIncompleta('${e.id}','${sid}', this.checked); ${after || ''}"> Incompleta</label>`;
+}
+const ENTREGA_PUNTOS = { en_plazo: 1, fuera_plazo: 0.5, no_entregada: 0 }; // (antiguo, ya no se usa en el cálculo)
 
 // Entregas que alimentan una evaluación vinculada (mismo período y, si corresponde, mismo proceso)
 function getEntregaLinkedEntregas(group, evaluation){
@@ -8732,7 +9004,7 @@ function computeEntregaLinkPoints(group, evaluation, studentId){
   let obtained = 0;
   getEntregaLinkedEntregas(group, evaluation).forEach(e=>{
     const estado = e.estados ? e.estados[studentId] : null;
-    obtained += ENTREGA_PUNTOS[estado] || 0;
+    obtained += entregaFraction(e, studentId);
   });
   return obtained;
 }
@@ -8768,7 +9040,7 @@ function linkEvaluationToEntregas(evalId){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="document.getElementById('linkEntregasOverlay').remove()">✕</button>
       <h2 style="border:none; padding-bottom:0;">🔗 Vincular nota a las entregas</h2>
-      <p class="muted">La nota elegida pasará a calcularse sola con las entregas (en plazo = 1, fuera de plazo = 0,5, no entregada = 0) y se actualizará cada vez que las edites. Sus puntajes actuales se reemplazan por ese cálculo.</p>
+      <p class="muted">La nota elegida pasará a calcularse sola con las entregas (${entregaScaleText()}) y se actualizará cada vez que las edites. Sus puntajes actuales se reemplazan por ese cálculo.</p>
       <label style="margin-top:8px;">Nota (evaluación)</label>
       <select id="linkEvalSel">
         ${candidatas.map(e=>`<option value="${e.id}" ${e.id===sel?'selected':''}>${escapeHtml(e.name)}</option>`).join('')}
@@ -8844,7 +9116,7 @@ function openEntregaGradeDetail(evalId, studentId){
       <div class="muted" style="margin-bottom:8px;">${escapeHtml(ev.name)}${procName ? ' · 📂 ' + escapeHtml(procName) : ''}</div>
       <div style="text-align:center; margin:6px 0 10px;">
         <div style="font-size:2rem; font-weight:800; font-family:'Manrope',sans-serif; color:${nota!==null && nota<4 ? 'var(--danger)' : 'var(--primary)'};">${nota !== null ? nota.toFixed(1) : '-'}</div>
-        <div class="muted">${fmtPts(obtained)} de ${fmtPts(total)} punto(s) · exigencia ${ev.exigencia}%</div>
+        <div class="muted">${fmtNum(obtained * entregaMaxPts())} de ${fmtNum(total * entregaMaxPts())} pts · exigencia ${ev.exigencia}%</div>
       </div>
       <div class="row" style="gap:6px; justify-content:center; margin-bottom:10px;">
         ${['en_plazo','fuera_plazo','no_entregada'].map(k=>`<span class="pill" style="background:${ENTREGA_ESTADOS[k].color.bg}; color:${ENTREGA_ESTADOS[k].color.text}; border-color:${ENTREGA_ESTADOS[k].color.border};">${ENTREGA_ESTADOS[k].label}: ${counts[k]}</span>`).join('')}
@@ -8853,7 +9125,7 @@ function openEntregaGradeDetail(evalId, studentId){
       ${entregas.length === 0 ? '<p class="muted">No hay entregas registradas para esta nota.</p>' : `
       <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Entrega</th><th>Fecha</th><th>Estado</th><th>Pts.</th></tr></thead>
+        <thead><tr><th>Entrega</th><th>Fecha</th><th>Estado</th><th>Puntos</th></tr></thead>
         <tbody>
           ${entregas.map(e=>{
             const est = e.estados ? e.estados[studentId] : null;
@@ -8868,13 +9140,13 @@ function openEntregaGradeDetail(evalId, studentId){
                   ${Object.keys(ENTREGA_ESTADOS).map(k=>`<option value="${k}" ${est===k?'selected':''}>${ENTREGA_ESTADOS[k].label}</option>`).join('')}
                 </select>
               </td>
-              <td style="text-align:center;">${fmtPts(ENTREGA_PUNTOS[est] || 0)}</td>
+              <td style="text-align:center; white-space:nowrap;">${fmtNum(entregaPoints(e, studentId))} / ${fmtNum(entregaMaxPts())}${entregaIncToggleHtml(e, studentId, `openEntregaGradeDetail('${evalId}','${studentId}'); renderMain();`)}</td>
             </tr>`;
           }).join('')}
         </tbody>
       </table>
       </div>`}
-      <p class="muted" style="font-size:0.74rem; margin-top:8px;">En plazo = 1 · Fuera de plazo = 0,5 · No entregada / sin marcar = 0.${ev.entregaLink && ev.entregaLink.totalFixed ? ' Total fijo para el cálculo: ' + fmtPts(ev.entregaLink.totalFixed) + '.' : ''} Puedes cambiar el estado aquí mismo; la nota se actualiza al instante.</p>
+      <p class="muted" style="font-size:0.74rem; margin-top:8px;">${entregaScaleText()}. Sin marcar = 0.${ev.entregaLink && ev.entregaLink.totalFixed ? ' Total fijo para el cálculo: ' + fmtPts(ev.entregaLink.totalFixed) + '.' : ''} Puedes cambiar el estado aquí mismo; la nota se actualiza al instante.</p>
     </div>
   `;
   document.body.appendChild(overlay);
@@ -8896,6 +9168,7 @@ function changeEntregaEstadoFromGrade(entregaId, studentId, estado){
     delete entrega.estados[studentId];
     delete entrega.fechas[studentId];
     delete entrega.excepciones[studentId];
+    if(entrega.incompletas) delete entrega.incompletas[studentId];
     syncEntregaDecimaBonus(group, entrega, studentId, false);
   } else {
     entrega.estados[studentId] = estado;
@@ -8944,7 +9217,7 @@ function openEntregaEditForm(id){
       </select>
       <label style="margin-top:10px; display:flex; align-items:center; gap:8px;">
         <input type="checkbox" id="entEditAsignaDecimas" style="width:auto;" ${entrega.decimasBonus ? 'checked' : ''} onchange="document.getElementById('entEditDecimasWrap').style.display = this.checked ? 'block' : 'none';">
-        Asignar décimas a quien entregue en plazo
+        Asignar décimas a quien entregue en plazo y completo
       </label>
       <div id="entEditDecimasWrap" style="display:${entrega.decimasBonus ? 'block' : 'none'}; margin-top:8px;">
         <label class="muted" style="font-size:0.74rem;">Cantidad de décimas</label>
@@ -9903,6 +10176,7 @@ function renderEvalScores(group, evaluation){
           ? `<button class="btn btn-outline btn-sm" onclick="openRubricEditor('${evaluation.id}')">✎ Editar rúbrica</button><button class="btn btn-danger btn-sm" onclick="removeRubric('${evaluation.id}')">Quitar rúbrica</button>`
           : `<button class="btn btn-accent btn-sm" onclick="openRubricEditor('${evaluation.id}')">📋 Corregir con rúbrica</button>`)}
       </div>
+      ${evaluation.entregaLink ? '' : `<div style="margin-bottom:10px; max-width:420px;"><label for="evTeamSet">Trabajo en grupos</label>${teamSetSelectHtml(group, evaluation.teamSetId, `setEvalTeamSet('${evaluation.id}', this.value)`, 'evTeamSet')}</div>`}
       ${hasRubric(evaluation) ? rubricLegendHtml(evaluation) : ''}
       ${evaluation.entregaLink ? `<p class="muted" style="background:var(--primary-light); border:1px solid var(--primary-border); border-radius:10px; padding:8px 10px; color:var(--text);">🔄 Esta nota está vinculada a las entregas: el puntaje (% de cumplimiento) se calcula solo cada vez que editas las entregas. Haz clic en una nota para ver y editar las entregas del estudiante.</p>` : ''}
       <div style="overflow-x:auto;">
@@ -9911,7 +10185,9 @@ function renderEvalScores(group, evaluation){
           <tr><th>Estudiante</th>${hasRubric(evaluation) ? evaluation.rubric.items.map((it, i)=> `<th title="${escapeHtml(it.text)}" style="text-align:center;">I${i+1}</th>`).join('') : ''}<th>Puntaje obtenido</th><th>Nota</th><th>Décimas aplicadas</th><th>Adecuación</th></tr>
         </thead>
         <tbody>
-          ${group.students.map(s=>{
+          ${(()=>{ const ts = !evaluation.entregaLink && findTeamSet(group, evaluation.teamSetId); return ts ? studentsByTeam(group, ts) : [{ team: null, students: group.students, plain: true }]; })().map(block=> `
+          ${block.plain ? '' : evalTeamRowHtml(group, evaluation, block)}
+          ${block.students.map(s=>{
             const score = evaluation.scores ? evaluation.scores[s.id] : null;
             const nota = computeStudentEvalGrade(evaluation, s.id);
             const hasOverride = evaluation.overrides && evaluation.overrides[s.id];
@@ -9921,7 +10197,7 @@ function renderEvalScores(group, evaluation){
             return `
               <tr>
                 <td>${escapeHtml(s.name)}</td>
-                ${rub ? evaluation.rubric.items.map(it=> `<td style="padding:4px;">${rubricSelectHtml(evaluation, s.id, it)}</td>`).join('') : ''}
+                ${rub ? evaluation.rubric.items.map(it=> `<td style="padding:4px;"${it.grupal && !block.plain ? ' class="from-team"' : ''}>${rubricSelectHtml(evaluation, s.id, it)}</td>`).join('') : ''}
                 <td>${rub
                   ? `<span style="font-weight:700;">${score !== null && score !== undefined ? fmtNum(score) : '-'}</span>${missing && missing < evaluation.rubric.items.length ? `<br><span class="muted" style="font-size:0.74rem;">faltan ${missing}</span>` : ''}`
                   : evaluation.entregaLink
@@ -9938,7 +10214,7 @@ function renderEvalScores(group, evaluation){
                 </td>
               </tr>
             `;
-          }).join('')}
+          }).join('')}`).join('')}
         </tbody>
       </table>
       </div>
@@ -9978,7 +10254,7 @@ function rubricSelectHtml(ev, sid, it){
 }
 function rubricLegendHtml(ev){
   return `<div class="rubric-legend">
-    ${ev.rubric.items.map((it, i)=> `<div><strong>I${i+1}</strong> ${escapeHtml(it.text)} <span class="muted">· ${fmtNum(Number(it.max) || 3)} pts</span></div>`).join('')}
+    ${ev.rubric.items.map((it, i)=> `<div><strong>I${i+1}</strong> ${it.grupal ? '👥 ' : ''}${escapeHtml(it.text)} <span class="muted">· ${fmtNum(Number(it.max) || 3)} pts${it.grupal ? ' · grupal' : ''}</span></div>`).join('')}
     <div class="muted" style="margin-top:4px; font-size:0.8rem;">L = Logrado (puntaje completo) · ML = Medianamente logrado (2/3) · PL = Por lograr (1/3) · NL = No logrado (0). El puntaje y la nota se calculan solos.</div>
   </div>`;
 }
@@ -10000,7 +10276,7 @@ function openRubricEditor(evalId){
   const group = getActiveGroup();
   const ev = group.evaluations.find(e=> e.id === evalId);
   if(!ev) return;
-  const lines = hasRubric(ev) ? ev.rubric.items.map(it=> it.text + ((Number(it.max) || 3) !== 3 ? ' | ' + it.max : '')).join('\n') : '';
+  const lines = hasRubric(ev) ? ev.rubric.items.map(it=> it.text + ((Number(it.max) || 3) !== 3 ? ' | ' + it.max : '') + (it.grupal ? ' | grupal' : '')).join('\n') : '';
   const old = document.getElementById('rubricEditorOverlay'); if(old) old.remove();
   const ov = document.createElement('div');
   ov.className = 'modal-overlay'; ov.id = 'rubricEditorOverlay';
@@ -10008,7 +10284,7 @@ function openRubricEditor(evalId){
     <div class="modal-box app-font">
       <button class="modal-close" onclick="document.getElementById('rubricEditorOverlay').remove()">✕</button>
       <h2 style="border:none; padding-bottom:0;">📋 Rúbrica de "${escapeHtml(ev.name)}"</h2>
-      <p class="muted">Escribe un indicador por línea. Cada uno se corrige con Logrado (3), Medianamente logrado (2), Por lograr (1) o No logrado (0). Si un indicador vale más o menos de 3 puntos, agrégalo al final con una barra: <em>Resuelve el sistema | 6</em>.</p>
+      <p class="muted">Escribe un indicador por línea. Cada uno se corrige con Logrado (3), Medianamente logrado (2), Por lograr (1) o No logrado (0). Si un indicador vale más o menos de 3 puntos, agrégalo al final con una barra: <em>Resuelve el sistema | 6</em>. Para un indicador que se evalúa por grupo, agrega <em>| grupal</em>: <em>Presenta el trabajo | 6 | grupal</em>.</p>
       <div class="flex-between" style="gap:8px; flex-wrap:wrap;"><label for="rubricLines" style="margin:0;">Indicadores</label><button type="button" class="btn btn-outline btn-sm" onclick="importRubricForEval()">📄 Importar desde Word</button></div>
       <textarea id="rubricLines" style="min-height:180px;" placeholder="Identifica los datos del problema&#10;Plantea la ecuación | 6&#10;Resuelve correctamente&#10;Comunica la respuesta">${escapeHtml(lines)}</textarea>
       <p class="muted" style="font-size:0.8rem;" id="rubricTotalHint"></p>
@@ -10019,10 +10295,16 @@ function openRubricEditor(evalId){
   const hint = ()=>{ const items = parseRubricLines(ta.value); document.getElementById('rubricTotalHint').textContent = items.length ? `${items.length} indicador(es) · puntaje total ${fmtNum(items.reduce((a,x)=> a + x.max, 0))}` : ''; };
   ta.addEventListener('input', hint); hint();
 }
+// Formato por línea: "Indicador | puntos | grupal" (puntos y grupal son opcionales, en cualquier orden)
 function parseRubricLines(text){
   return String(text || '').split('\n').map(l=> l.trim()).filter(Boolean).map(l=>{
-    const m = l.match(/^(.*?)\s*\|\s*([0-9]+(?:[.,][0-9]+)?)\s*$/);
-    return m ? { text: m[1].trim(), max: Number(m[2].replace(',', '.')) || 3 } : { text: l, max: 3 };
+    const parts = l.split('|').map(x=> x.trim());
+    const out = { text: parts[0], max: 3, grupal: false };
+    parts.slice(1).forEach(x=>{
+      if(/^[0-9]+(?:[.,][0-9]+)?$/.test(x)) out.max = Number(x.replace(',', '.')) || 3;
+      else if(/^(grupal|g|grupo)$/i.test(x)) out.grupal = true;
+    });
+    return out;
   }).filter(x=> x.text);
 }
 function saveRubric(evalId){
@@ -10033,7 +10315,7 @@ function saveRubric(evalId){
   if(!parsed.length){ showToast('Escribe al menos un indicador'); return; }
   const prev = hasRubric(ev) ? ev.rubric.items : [];
   // Conserva los niveles ya corregidos de los indicadores que mantienen su texto
-  const items = parsed.map((x, i)=>{ const same = prev.find(p=> p.text === x.text) || (prev[i] && !parsed.some(q=> q.text === prev[i].text) ? prev[i] : null); return { id: same ? same.id : uid(), text: x.text, max: x.max }; });
+  const items = parsed.map((x, i)=>{ const same = prev.find(p=> p.text === x.text) || (prev[i] && !parsed.some(q=> q.text === prev[i].text) ? prev[i] : null); return { id: same ? same.id : uid(), text: x.text, max: x.max, ...(x.grupal ? { grupal: true } : {}) }; });
   const hadScores = !hasRubric(ev) && Object.values(ev.scores || {}).some(v=> v !== null && v !== undefined);
   if(hadScores && !confirm('Esta evaluación ya tiene puntajes ingresados. Al usar la rúbrica, el puntaje de cada estudiante se calculará con los niveles que marques (los puntajes actuales se reemplazan cuando corrijas a ese estudiante). ¿Continuar?')) return;
   ev.rubric = { items };
@@ -10090,7 +10372,8 @@ function rubricRowsToItems(rows){
       });
       if(nums.length) pts = Math.max(...nums);
     }
-    out.push({ text, pts: pts && pts > 0 ? pts : null });
+    const grupal = r.some((c, k)=> k !== ci && /^(grupal|g)$/i.test(c)) || /\((grupal|g)\)\s*$/i.test(text);
+    out.push({ text: text.replace(/\s*\((grupal|g)\)\s*$/i, ''), pts: pts && pts > 0 ? pts : null, grupal });
   });
   return out;
 }
@@ -10128,7 +10411,7 @@ function openTableImport(opts){
     <div class="modal-box app-font" style="max-width:720px;">
       <button class="modal-close" onclick="document.getElementById('tableImportOverlay').remove()">✕</button>
       <h2 style="border:none; padding-bottom:0;">📄 ${escapeHtml(opts.title)}</h2>
-      <p class="muted">Usa la tabla de tu rúbrica en Word. Se toma el <strong>indicador</strong> (primera columna) y su <strong>puntaje máximo</strong> (una columna "Puntaje", o el mayor puntaje escrito en los descriptores, como "3 pts"). Revisa la lista antes de agregarla.</p>
+      <p class="muted">Usa la tabla de tu rúbrica en Word. Se toma el <strong>indicador</strong> (primera columna) y su <strong>puntaje máximo</strong> (una columna "Puntaje", o el mayor puntaje escrito en los descriptores, como "3 pts"). Revisa la lista antes de agregarla y marca 👥 los indicadores grupales (si en Word escribes "(grupal)" al final del indicador, o una columna con "grupal", se marcan solos).</p>
       <div class="row" style="gap:8px; align-items:center;">
         <button class="btn btn-accent btn-sm" onclick="document.getElementById('tableImportFile').click()">Elegir archivo de Word (.docx)</button>
         <span class="muted" style="font-size:0.85rem;">o pega la tabla aquí abajo</span>
@@ -10158,7 +10441,7 @@ function openTableImport(opts){
 }
 function setTableImportItems(items, source){
   const ctx = tableImportCtx; if(!ctx) return;
-  ctx.items = items.map(it=> ({ ...it, pts: it.pts || ctx.defaultPts || 3, guessed: !it.pts, on: true }));
+  ctx.items = items.map(it=> ({ ...it, pts: it.pts || ctx.defaultPts || 3, guessed: !it.pts, on: true, grupal: !!it.grupal }));
   renderTableImportPreview(source);
 }
 function renderTableImportPreview(source){
@@ -10171,11 +10454,12 @@ function renderTableImportPreview(source){
     <p style="margin:0 0 6px;"><strong>${ctx.items.length} indicador(es)</strong> encontrados${source ? ' en ' + escapeHtml(source) : ''}. Puedes corregir el texto o el puntaje y quitar filas que no correspondan.</p>
     <div style="overflow-x:auto; max-height:340px; overflow-y:auto; border:1px solid var(--border); border-radius:10px;">
     <table>
-      <thead><tr><th style="width:36px;"></th><th>Indicador</th><th style="width:96px;">Puntos</th></tr></thead>
+      <thead><tr><th style="width:36px;"></th><th>Indicador</th><th style="width:96px;">Puntos</th><th style="width:70px; text-align:center;">👥 Grupal</th></tr></thead>
       <tbody>${ctx.items.map((it, i)=> `<tr>
         <td><input type="checkbox" style="width:auto;" ${it.on ? 'checked' : ''} onchange="tableImportCtx.items[${i}].on=this.checked; renderTableImportPreview(${JSON.stringify(source || '').replace(/"/g, '&quot;')})" aria-label="Incluir fila ${i+1}"></td>
         <td><input type="text" value="${escapeHtml(it.text)}" onchange="tableImportCtx.items[${i}].text=this.value"></td>
         <td><input type="number" min="1" max="${ctx.maxPts || 100}" step="${ctx.integerPts ? 1 : 0.5}" value="${it.pts}" onchange="tableImportCtx.items[${i}].pts=Number(this.value); tableImportCtx.items[${i}].guessed=false; renderTableImportPreview(${JSON.stringify(source || '').replace(/"/g, '&quot;')})">${it.guessed ? '<div class="muted" style="font-size:0.72rem;">no venía en la tabla</div>' : ''}</td>
+        <td style="text-align:center;"><input type="checkbox" style="width:auto;" ${it.grupal ? 'checked' : ''} onchange="tableImportCtx.items[${i}].grupal=this.checked" aria-label="Indicador grupal ${i+1}"></td>
       </tr>`).join('')}</tbody>
     </table></div>
     ${ctx.extraHtml || ''}
@@ -10186,7 +10470,7 @@ function renderTableImportPreview(source){
 }
 function applyTableImport(){
   const ctx = tableImportCtx; if(!ctx) return;
-  const items = ctx.items.filter(i=> i.on && String(i.text).trim()).map(i=> ({ text: String(i.text).trim(), pts: Number(i.pts) || ctx.defaultPts || 3 }));
+  const items = ctx.items.filter(i=> i.on && String(i.text).trim()).map(i=> ({ text: String(i.text).trim(), pts: Number(i.pts) || ctx.defaultPts || 3, grupal: !!i.grupal }));
   if(!items.length) return;
   if(ctx.onApply(items) === false) return;
   const ov = document.getElementById('tableImportOverlay'); if(ov) ov.remove();
@@ -10199,7 +10483,7 @@ function importRubricForEval(){
     onApply: items=>{
       const ta = document.getElementById('rubricLines'); if(!ta) return;
       const append = document.getElementById('tableImportAppend') && document.getElementById('tableImportAppend').checked;
-      const lines = items.map(i=> i.text.replace(/\|/g, '/') + (i.pts !== 3 ? ' | ' + fmtNum(i.pts) : ''));
+      const lines = items.map(i=> i.text.replace(/\|/g, '/') + (i.pts !== 3 ? ' | ' + String(i.pts) : '') + (i.grupal ? ' | grupal' : ''));
       ta.value = (append && ta.value.trim() ? ta.value.trim() + '\n' : '') + lines.join('\n');
       ta.dispatchEvent(new Event('input'));
       showToast(items.length + ' indicador(es) cargados: revisa y presiona "Guardar rúbrica"');
@@ -10216,7 +10500,7 @@ function importProcessIndicators(){
       let skipped = 0;
       items.forEach(i=>{
         if(group.indicators.some(x=> x.name.trim().toLowerCase() === i.text.toLowerCase() && (x.tema || '') === tema)){ skipped++; return; }
-        group.indicators.push({ id: uid(), name: i.text, levels: Math.min(10, Math.max(1, Math.round(i.pts))), tema });
+        group.indicators.push({ id: uid(), name: i.text, levels: Math.min(10, Math.max(1, Math.round(i.pts))), tema, ...(i.grupal ? { grupal: true } : {}) });
       });
       saveState();
       renderIndicadores(group);
@@ -10303,6 +10587,66 @@ function openEvalAnalysis(evalId){
       `}
     </div>`;
   document.body.appendChild(ov);
+}
+
+/* ---- Calificar por grupos ---- */
+function setEvalTeamSet(evalId, setId){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId); if(!ev) return;
+  ev.teamSetId = setId || null;
+  saveState(); renderEvalScores(group, ev);
+}
+function evalTeamRowHtml(group, ev, block){
+  const rub = hasRubric(ev);
+  const t = block.team;
+  const members = block.students;
+  const common = vals=>{ const u = [...new Set(vals)]; return u.length === 1 ? u[0] : undefined; };
+  let cells = '';
+  if(rub){
+    cells = ev.rubric.items.map(it=>{
+      if(!it.grupal || !t) return '<td></td>';
+      const cur = common(members.map(s=> ev.rubricLevels && ev.rubricLevels[s.id] ? ev.rubricLevels[s.id][it.id] : undefined));
+      const has = cur !== undefined && cur !== null;
+      const cls = !has ? '' : (cur === 3 ? 'rl-3' : cur === 2 ? 'rl-2' : cur === 1 ? 'rl-1' : 'rl-0');
+      return `<td style="padding:4px;"><select class="rubric-sel ${cls}" title="Se aplica a todo el grupo" onchange="setRubricLevelTeam('${ev.id}','${ev.teamSetId}','${t.id}','${it.id}', this.value)">
+        <option value="" ${!has ? 'selected' : ''}>—</option>
+        ${RUBRIC_LEVELS.map(L=> `<option value="${L.v}" ${has && cur === L.v ? 'selected' : ''}>${L.short} · ${fmtNum(rubricItemPoints(it, L.v))}</option>`).join('')}
+      </select></td>`;
+    }).join('');
+    const hasGroupItems = ev.rubric.items.some(it=> it.grupal);
+    cells += `<td colspan="4" class="muted" style="font-size:0.78rem;">${!t ? '' : hasGroupItems ? 'Los indicadores 👥 se marcan aquí para todo el grupo; los demás, por estudiante.' : 'Ningún indicador de la rúbrica es grupal: agrega "| grupal" en Editar rúbrica.'}</td>`;
+  } else {
+    const cur = common(members.map(s=> ev.scores ? ev.scores[s.id] : undefined));
+    cells = `<td>${t ? `<input type="number" class="score-select" style="width:80px;" min="0" max="${ev.totalScore}" value="${cur !== undefined && cur !== null ? cur : ''}" title="Puntaje para todo el grupo" onchange="saveEvalScoreTeam('${ev.id}','${ev.teamSetId}','${t.id}', this.value)">` : ''}</td>
+      <td colspan="3" class="muted" style="font-size:0.78rem;">${t ? 'Puntaje del grupo: se copia a cada integrante (puedes cambiar a alguien después).' : ''}</td>`;
+  }
+  return `<tr class="team-row"><td><strong>👥 ${t ? escapeHtml(t.name) : 'Sin grupo'}</strong><br><span class="muted" style="font-size:0.78rem;">${members.length} integrante(s)</span></td>${cells}</tr>`;
+}
+function setRubricLevelTeam(evalId, setId, teamId, itemId, value){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId);
+  const set = findTeamSet(group, setId); const team = set && set.teams.find(t=> t.id === teamId);
+  if(!ev || !team) return;
+  if(!ev.rubricLevels) ev.rubricLevels = {};
+  team.members.forEach(sid=>{
+    if(!group.students.some(s=> s.id === sid)) return;
+    if(!ev.rubricLevels[sid]) ev.rubricLevels[sid] = {};
+    if(value === '') delete ev.rubricLevels[sid][itemId]; else ev.rubricLevels[sid][itemId] = Number(value);
+    recomputeRubricScore(ev, sid);
+  });
+  saveState();
+  const y = window.scrollY; renderEvalScores(group, ev); window.scrollTo(0, y);
+}
+function saveEvalScoreTeam(evalId, setId, teamId, value){
+  const group = getActiveGroup();
+  const ev = group.evaluations.find(e=> e.id === evalId);
+  const set = findTeamSet(group, setId); const team = set && set.teams.find(t=> t.id === teamId);
+  if(!ev || !team) return;
+  if(!ev.scores) ev.scores = {};
+  const num = value === '' ? null : Number(value);
+  team.members.forEach(sid=>{ if(group.students.some(s=> s.id === sid)) ev.scores[sid] = (num === null || isNaN(num)) ? null : num; });
+  saveState();
+  const y = window.scrollY; renderEvalScores(group, ev); window.scrollTo(0, y);
 }
 
 function closeEvalScores(){

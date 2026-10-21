@@ -387,6 +387,8 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         }
       } else if(e.d) parts.push(fdate(e.d));
       if(e.f) parts.push('entregada el ' + fdate(e.f));
+      if(e.inc) parts.push('<strong>incompleta</strong>');
+      if(e.max && (e.e === 'en_plazo' || e.e === 'fuera_plazo' || e.e === 'no_entregada')) parts.push(num(e.pts) + ' de ' + num(e.max) + ' pts');
       const sub = parts.join(' · ');
       return `<div class="row"><div class="main"><div class="title">${esc(e.n)}</div><div class="sub">${sub}</div></div><span class="chip ${st[1]}">${st[0]}</span></div>`;
     };
