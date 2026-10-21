@@ -2855,8 +2855,11 @@ function renderIndicadores(group){
   main.innerHTML = `
     ${groupHeaderCard(group)}
     <div class="card app-font">
-      <h2>Agregar indicador de evaluación</h2>
-      <p class="muted">Define cuántos niveles de logro tendrá cada indicador (por ejemplo, 3, 4 o 5 niveles).</p>
+      <div class="flex-between" style="gap:8px; flex-wrap:wrap;">
+        <h2 style="border:none; margin:0; padding:0;">Agregar indicador de evaluación</h2>
+        <button class="btn btn-outline btn-sm" onclick="importProcessIndicators()">📄 Importar rúbrica desde Word</button>
+      </div>
+      <p class="muted" style="margin-top:10px;">Define cuántos niveles de logro tendrá cada indicador (por ejemplo, 3, 4 o 5 niveles). Si tienes la rúbrica de proceso en Word, impórtala: cada fila será un indicador y su puntaje máximo, sus niveles.</p>
       <div class="row">
         <div style="flex:1; min-width:200px;">
           <label>Nombre del indicador</label>
@@ -10006,7 +10009,7 @@ function openRubricEditor(evalId){
       <button class="modal-close" onclick="document.getElementById('rubricEditorOverlay').remove()">✕</button>
       <h2 style="border:none; padding-bottom:0;">📋 Rúbrica de "${escapeHtml(ev.name)}"</h2>
       <p class="muted">Escribe un indicador por línea. Cada uno se corrige con Logrado (3), Medianamente logrado (2), Por lograr (1) o No logrado (0). Si un indicador vale más o menos de 3 puntos, agrégalo al final con una barra: <em>Resuelve el sistema | 6</em>.</p>
-      <label for="rubricLines">Indicadores</label>
+      <div class="flex-between" style="gap:8px; flex-wrap:wrap;"><label for="rubricLines" style="margin:0;">Indicadores</label><button type="button" class="btn btn-outline btn-sm" onclick="importRubricForEval()">📄 Importar desde Word</button></div>
       <textarea id="rubricLines" style="min-height:180px;" placeholder="Identifica los datos del problema&#10;Plantea la ecuación | 6&#10;Resuelve correctamente&#10;Comunica la respuesta">${escapeHtml(lines)}</textarea>
       <p class="muted" style="font-size:0.8rem;" id="rubricTotalHint"></p>
       <div class="row" style="margin-top:12px;"><button class="btn btn-accent btn-sm" onclick="saveRubric('${ev.id}')">Guardar rúbrica</button></div>
@@ -10052,6 +10055,173 @@ function removeRubric(evalId){
   delete ev.rubric; delete ev.rubricLevels;
   saveState();
   renderEvalScores(group, ev);
+}
+
+
+/* ============ IMPORTAR RÚBRICAS DESDE TABLAS DE WORD ============
+   Lee la tabla (archivo .docx o copiada y pegada) y obtiene, por fila, el indicador y su puntaje máximo:
+   - el indicador es el texto de la primera columna (o de la segunda si la primera es solo un número);
+   - el puntaje es una columna "Puntaje/Puntos" si existe; si no, el mayor número que aparezca como
+     "3 pts", "3 puntos", "(3)" o solo en una celda dentro de los descriptores de la fila. */
+function rubricRowsToItems(rows){
+  const clean = t=> String(t || '').replace(/\s+/g, ' ').trim();
+  rows = rows.map(r=> r.map(clean)).filter(r=> r.some(c=> c));
+  const header = rows.find(r=> r.some(c=> /^(puntaje|puntos|pts\.?|ptje\.?)( m[aá]ximo)?$/i.test(c)));
+  const ptsCol = header ? header.findIndex(c=> /^(puntaje|puntos|pts\.?|ptje\.?)( m[aá]ximo)?$/i.test(c)) : -1;
+  const numOf = t=> Number(String(t).replace(',', '.'));
+  const out = [];
+  rows.forEach(r=>{
+    if(r === header) return;
+    let ci = 0;
+    if(/^\d+[.)]?$/.test(r[0] || '') && r[1]) ci = 1;              // primera columna = numeración
+    const text = r[ci];
+    if(!text) return;
+    if(/^(indicador(es)?|criterio(s)?|aspecto(s)?( a evaluar)?|dimensi[oó]n|descriptor(es)?|nivel(es)?( de logro)?|total|puntaje total)\b/i.test(text)) return;
+    if(r.slice(ci + 1).every(c=> !c) && r.length > 2) return;      // fila de título que abarca la tabla
+    let pts = null;
+    if(ptsCol >= 0 && r[ptsCol]){ const m = r[ptsCol].match(/\d+(?:[.,]\d+)?/); if(m) pts = numOf(m[0]); }
+    if(pts === null){
+      const nums = [];
+      r.forEach((c, k)=>{
+        if(k === ci) return;
+        let m; const re = /(\d+(?:[.,]\d+)?)\s*(?:pts?\.?|puntos?|ptos?\.?|ptje\.?)(?![a-záéíóú])|\((\d+(?:[.,]\d+)?)\)/gi;
+        while((m = re.exec(c))) nums.push(numOf(m[1] || m[2]));
+        if(/^\d+(?:[.,]\d+)?$/.test(c)) nums.push(numOf(c));
+      });
+      if(nums.length) pts = Math.max(...nums);
+    }
+    out.push({ text, pts: pts && pts > 0 ? pts : null });
+  });
+  return out;
+}
+async function docxToTableRows(file){
+  if(typeof JSZip === 'undefined') throw new Error('Se necesita conexión a internet para leer archivos de Word.');
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const xml = await zip.file('word/document.xml').async('string');
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const rows = [];
+  [...doc.getElementsByTagNameNS(W, 'tbl')].forEach(tbl=>{
+    if(tbl.parentNode && tbl.parentNode.localName === 'tc') return;   // tablas anidadas: se leen como texto de su celda
+    [...tbl.childNodes].filter(n=> n.localName === 'tr').forEach(tr=>{
+      rows.push([...tr.childNodes].filter(n=> n.localName === 'tc').map(tc=>
+        [...tc.getElementsByTagNameNS(W, 'p')].map(p=> [...p.getElementsByTagNameNS(W, 't')].map(t=> t.textContent).join('')).join(' ')));
+    });
+  });
+  return rows;
+}
+function htmlToTableRows(html){
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return [...doc.querySelectorAll('tr')].map(tr=> [...tr.children].map(td=> td.innerText || td.textContent || ''));
+}
+function textToTableRows(text){
+  return String(text || '').split(/\r?\n/).map(l=> l.split('\t'));
+}
+// Ventana común: cargar .docx o pegar la tabla, revisar y confirmar
+let tableImportCtx = null;
+function openTableImport(opts){
+  tableImportCtx = { ...opts, items: [] };
+  const old = document.getElementById('tableImportOverlay'); if(old) old.remove();
+  const ov = document.createElement('div');
+  ov.className = 'modal-overlay'; ov.id = 'tableImportOverlay';
+  ov.innerHTML = `
+    <div class="modal-box app-font" style="max-width:720px;">
+      <button class="modal-close" onclick="document.getElementById('tableImportOverlay').remove()">✕</button>
+      <h2 style="border:none; padding-bottom:0;">📄 ${escapeHtml(opts.title)}</h2>
+      <p class="muted">Usa la tabla de tu rúbrica en Word. Se toma el <strong>indicador</strong> (primera columna) y su <strong>puntaje máximo</strong> (una columna "Puntaje", o el mayor puntaje escrito en los descriptores, como "3 pts"). Revisa la lista antes de agregarla.</p>
+      <div class="row" style="gap:8px; align-items:center;">
+        <button class="btn btn-accent btn-sm" onclick="document.getElementById('tableImportFile').click()">Elegir archivo de Word (.docx)</button>
+        <span class="muted" style="font-size:0.85rem;">o pega la tabla aquí abajo</span>
+        <input type="file" id="tableImportFile" accept=".docx" style="display:none;">
+      </div>
+      <textarea id="tableImportPaste" style="margin-top:8px; min-height:70px;" placeholder="Copia la tabla en Word (selecciónala y Ctrl+C) y pégala aquí (Ctrl+V)."></textarea>
+      <div id="tableImportPreview" style="margin-top:10px;"></div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('tableImportFile').addEventListener('change', async e=>{
+    const f = e.target.files[0]; if(!f) return;
+    try{ setTableImportItems(rubricRowsToItems(await docxToTableRows(f)), f.name); }
+    catch(err){ showToast('No se pudo leer el archivo: ' + (err.message || err)); }
+  });
+  const ta = document.getElementById('tableImportPaste');
+  ta.addEventListener('paste', e=>{
+    const html = e.clipboardData && e.clipboardData.getData('text/html');
+    if(html && /<table/i.test(html)){
+      e.preventDefault();
+      ta.value = '(tabla pegada)';
+      setTableImportItems(rubricRowsToItems(htmlToTableRows(html)), 'la tabla pegada');
+    } else {
+      setTimeout(()=> setTableImportItems(rubricRowsToItems(textToTableRows(ta.value)), 'el texto pegado'), 0);
+    }
+  });
+  ta.addEventListener('input', ()=>{ if(ta.value && ta.value !== '(tabla pegada)') setTableImportItems(rubricRowsToItems(textToTableRows(ta.value)), 'el texto pegado'); });
+}
+function setTableImportItems(items, source){
+  const ctx = tableImportCtx; if(!ctx) return;
+  ctx.items = items.map(it=> ({ ...it, pts: it.pts || ctx.defaultPts || 3, guessed: !it.pts, on: true }));
+  renderTableImportPreview(source);
+}
+function renderTableImportPreview(source){
+  const ctx = tableImportCtx;
+  const box = document.getElementById('tableImportPreview'); if(!box || !ctx) return;
+  if(!ctx.items.length){ box.innerHTML = `<p class="muted">No se encontraron filas con indicadores en ${escapeHtml(source || 'la tabla')}. Revisa que la rúbrica esté en una tabla.</p>`; return; }
+  const sel = ctx.items.filter(i=> i.on);
+  const total = sel.reduce((a,i)=> a + (Number(i.pts) || 0), 0);
+  box.innerHTML = `
+    <p style="margin:0 0 6px;"><strong>${ctx.items.length} indicador(es)</strong> encontrados${source ? ' en ' + escapeHtml(source) : ''}. Puedes corregir el texto o el puntaje y quitar filas que no correspondan.</p>
+    <div style="overflow-x:auto; max-height:340px; overflow-y:auto; border:1px solid var(--border); border-radius:10px;">
+    <table>
+      <thead><tr><th style="width:36px;"></th><th>Indicador</th><th style="width:96px;">Puntos</th></tr></thead>
+      <tbody>${ctx.items.map((it, i)=> `<tr>
+        <td><input type="checkbox" style="width:auto;" ${it.on ? 'checked' : ''} onchange="tableImportCtx.items[${i}].on=this.checked; renderTableImportPreview(${JSON.stringify(source || '').replace(/"/g, '&quot;')})" aria-label="Incluir fila ${i+1}"></td>
+        <td><input type="text" value="${escapeHtml(it.text)}" onchange="tableImportCtx.items[${i}].text=this.value"></td>
+        <td><input type="number" min="1" max="${ctx.maxPts || 100}" step="${ctx.integerPts ? 1 : 0.5}" value="${it.pts}" onchange="tableImportCtx.items[${i}].pts=Number(this.value); tableImportCtx.items[${i}].guessed=false; renderTableImportPreview(${JSON.stringify(source || '').replace(/"/g, '&quot;')})">${it.guessed ? '<div class="muted" style="font-size:0.72rem;">no venía en la tabla</div>' : ''}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    ${ctx.extraHtml || ''}
+    <div class="row" style="margin-top:12px; align-items:center; gap:10px;">
+      <button class="btn btn-accent btn-sm" onclick="applyTableImport()" ${sel.length ? '' : 'disabled'}>${escapeHtml(ctx.applyLabel || 'Agregar')} (${sel.length})</button>
+      <span class="muted" style="font-size:0.85rem;">Puntaje total: ${fmtNum(total)}</span>
+    </div>`;
+}
+function applyTableImport(){
+  const ctx = tableImportCtx; if(!ctx) return;
+  const items = ctx.items.filter(i=> i.on && String(i.text).trim()).map(i=> ({ text: String(i.text).trim(), pts: Number(i.pts) || ctx.defaultPts || 3 }));
+  if(!items.length) return;
+  if(ctx.onApply(items) === false) return;
+  const ov = document.getElementById('tableImportOverlay'); if(ov) ov.remove();
+  tableImportCtx = null;
+}
+// Calificaciones: llena el editor de la rúbrica con los indicadores importados
+function importRubricForEval(){
+  openTableImport({ title: 'Importar rúbrica desde Word', applyLabel: 'Usar en la rúbrica', defaultPts: 3,
+    extraHtml: `<label style="display:flex; align-items:center; gap:8px; margin-top:10px;"><input type="checkbox" id="tableImportAppend" style="width:auto;"> Agregar a los indicadores que ya escribí (si no, los reemplaza)</label>`,
+    onApply: items=>{
+      const ta = document.getElementById('rubricLines'); if(!ta) return;
+      const append = document.getElementById('tableImportAppend') && document.getElementById('tableImportAppend').checked;
+      const lines = items.map(i=> i.text.replace(/\|/g, '/') + (i.pts !== 3 ? ' | ' + fmtNum(i.pts) : ''));
+      ta.value = (append && ta.value.trim() ? ta.value.trim() + '\n' : '') + lines.join('\n');
+      ta.dispatchEvent(new Event('input'));
+      showToast(items.length + ' indicador(es) cargados: revisa y presiona "Guardar rúbrica"');
+    } });
+}
+// Trabajo en clases: crea indicadores de proceso (puntaje máximo = niveles de logro, de 1 a 10)
+function importProcessIndicators(){
+  const group = getActiveGroup();
+  const themes = [...new Set(group.indicators.map(i=> i.tema).filter(Boolean))];
+  openTableImport({ title: 'Importar rúbrica de proceso desde Word', applyLabel: 'Agregar indicadores', defaultPts: 3, maxPts: 10, integerPts: true,
+    extraHtml: `<div style="margin-top:10px;"><label>Unidad / tema para estos indicadores (opcional)</label>${temaSelectHtml('impIndTemaSelect', 'impIndTemaNew', themes, '')}</div>`,
+    onApply: items=>{
+      const tema = readTemaSelectValue('impIndTemaSelect', 'impIndTemaNew');
+      let skipped = 0;
+      items.forEach(i=>{
+        if(group.indicators.some(x=> x.name.trim().toLowerCase() === i.text.toLowerCase() && (x.tema || '') === tema)){ skipped++; return; }
+        group.indicators.push({ id: uid(), name: i.text, levels: Math.min(10, Math.max(1, Math.round(i.pts))), tema });
+      });
+      saveState();
+      renderIndicadores(group);
+      showToast((items.length - skipped) + ' indicador(es) agregados' + (skipped ? ' · ' + skipped + ' ya existían' : ''));
+    } });
 }
 
 /* ============ ANÁLISIS DE UNA EVALUACIÓN ============ */
