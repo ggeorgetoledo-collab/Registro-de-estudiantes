@@ -181,6 +181,7 @@
   :root[data-theme="dark"] .inc-toggle.on{ background:rgba(251,191,36,0.16); color:#FBBF24; border-color:rgba(251,191,36,0.4); }
   .grp-val{ display:inline-block; min-width:44px; padding:5px 8px; border-radius:8px; background:var(--primary-light); color:var(--primary-dark); font-weight:700; text-align:center; font-size:0.86rem; }
   .grp-edit{ margin-left:2px; }
+  .team-apply{ display:block; margin-top:6px; white-space:nowrap; }
   .mode-seg{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:4px; }
   .mode-opt{ display:flex; gap:10px; align-items:flex-start; text-align:left; padding:10px 12px; border:1.5px solid var(--border); border-radius:12px; background:var(--card-bg); color:var(--text); cursor:pointer; font:inherit; }
   .mode-opt strong{ display:block; font-size:0.95rem; }
@@ -4093,7 +4094,8 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <tbody id="registrarBody">
           ${(regTeamSet ? studentsByTeam(group, regTeamSet) : [{ team: null, students: group.students, plain: true }]).map(block=> `
           ${block.plain ? '' : `<tr class="team-row">
-            <td><strong>👥 ${block.team ? escapeHtml(block.team.name) : 'Sin grupo'}</strong><br><span class="muted" style="font-size:0.78rem;">${block.students.length} integrante(s)</span></td>
+            <td style="min-width:150px;"><strong>👥 ${block.team ? escapeHtml(block.team.name) : 'Sin grupo'}</strong><br><span class="muted" style="font-size:0.78rem;">${block.students.length} integrante(s)</span>
+              ${block.team ? `<button type="button" class="btn btn-accent btn-sm team-apply" onclick="applyTeamRow('${block.team.id}')">⬇ Asignar a todo el grupo</button>` : ''}</td>
             ${selectedIndicators.map(ind=>{
               if(!block.team) return '<td></td>';
               let o = '<option value="">-</option>';
@@ -4101,7 +4103,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
               return `<td><select class="score-select team-select" data-team="${block.team.id}" data-indicator="${ind.id}" title="Puntaje para todo el grupo" aria-label="${escapeHtml(ind.name)} para ${escapeHtml(block.team.name)}">${o}</select></td>`;
             }).join('')}
             ${entregasDelDia.map(()=> '<td></td>').join('')}
-            <td>${block.team ? `<button type="button" class="btn btn-accent btn-sm" onclick="applyTeamRow('${block.team.id}')">⬇ Asignar a todo el grupo</button>` : '<span class="muted" style="font-size:0.78rem;">Estudiantes sin grupo: se completan uno por uno.</span>'}</td>
+            <td class="muted" style="font-size:0.78rem;">${block.team ? 'Elige los puntajes en esta fila y presiona «Asignar a todo el grupo».' : 'Estudiantes sin grupo: se completan uno por uno.'}</td>
           </tr>`}
           ${block.students.map(s=>{
             const prevEntry = prevByStudent[s.id];
