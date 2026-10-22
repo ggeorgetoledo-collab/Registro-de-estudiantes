@@ -181,6 +181,16 @@
   :root[data-theme="dark"] .inc-toggle.on{ background:rgba(251,191,36,0.16); color:#FBBF24; border-color:rgba(251,191,36,0.4); }
   .grp-val{ display:inline-block; min-width:44px; padding:5px 8px; border-radius:8px; background:var(--primary-light); color:var(--primary-dark); font-weight:700; text-align:center; font-size:0.86rem; }
   .grp-edit{ margin-left:2px; }
+  .mode-seg{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:4px; }
+  .mode-opt{ display:flex; gap:10px; align-items:flex-start; text-align:left; padding:10px 12px; border:1.5px solid var(--border); border-radius:12px; background:var(--card-bg); color:var(--text); cursor:pointer; font:inherit; }
+  .mode-opt strong{ display:block; font-size:0.95rem; }
+  .mode-opt small{ display:block; color:var(--text-dim); font-size:0.78rem; line-height:1.3; margin-top:2px; }
+  .mode-opt .mode-ic{ font-size:1.25rem; line-height:1; }
+  .mode-opt.on{ border-color:var(--primary); background:var(--primary-light); box-shadow:0 0 0 1px var(--primary) inset; }
+  .mode-opt.on strong{ color:var(--primary-dark); }
+  .mode-teams{ margin-top:10px; padding:10px 12px; border:1px dashed var(--primary-border); border-radius:12px; }
+  .mode-teams-row{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+  @media (max-width:700px){ .mode-seg{ grid-template-columns:1fr; } .mode-opt{ padding:8px 10px; } }
   .grp-val[hidden], .grp-edit[hidden]{ display:none !important; }
   td.grp-exception{ background:#FBF0D9 !important; }
   :root[data-theme="dark"] td.grp-exception{ background:rgba(251,191,36,0.12) !important; }
@@ -2436,14 +2446,14 @@ function renderNav(){
 function goToTab(tab){
   currentTab = tab;
   currentModule = moduleForTab(tab);
-  if(tab === 'registrar'){ registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarAttendanceOnly = null; }
+  if(tab === 'registrar'){ registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarMode = undefined; registrarAttendanceOnly = null; }
   renderNav();
   renderMain();
 }
 function goToModule(mod){
   currentModule = mod;
   currentTab = (MODULE_TABS[mod] || ['horario'])[0];
-  if(currentTab === 'registrar'){ registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarAttendanceOnly = null; }
+  if(currentTab === 'registrar'){ registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarMode = undefined; registrarAttendanceOnly = null; }
   renderNav();
   renderMain();
 }
@@ -3173,7 +3183,7 @@ function goToDateClass(entryId, iso){
   renderGroupSelect();
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
-  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarMode = undefined;
   registrarAttendanceOnly = null;
   renderNav();
   const existingSession = getActiveSessions(group).find(s=> s.date === iso && s.time === entry.startTime);
@@ -3669,7 +3679,7 @@ function goToClass(entryId){
   renderGroupSelect();
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
-  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarMode = undefined;
   registrarAttendanceOnly = null;
   renderNav();
   const targetDate = computeDateForWeekday(entry.day);
@@ -3757,6 +3767,47 @@ function saveQuickIndicatorForm(){
 }
 
 let registrarTeamSetId = undefined;
+// Modo de registro: 'individual' (lista del curso) | 'grupo' (lista ordenada por grupos, con botón para asignar el mismo puntaje al grupo)
+let registrarMode = undefined;
+let registrarQuickTeamsOpen = false;
+const REG_MODES = {
+  individual: { icon: '👤', name: 'Lista del curso', desc: 'Todos los estudiantes en una sola lista.' },
+  grupo: { icon: '👥', name: 'Por grupos', desc: 'La lista se ordena por grupo y cada grupo tiene un botón para asignar el mismo puntaje a todos; luego ajustas a quien quieras.' },
+};
+function changeRegistrarMode(m){
+  const snap = snapshotRegistrarInputs();
+  registrarMode = m;
+  const group = getActiveGroup();
+  if(m !== 'individual' && !findTeamSet(group, registrarTeamSetId)){
+    const sets = teamSetsOf(group);
+    registrarTeamSetId = sets.length ? sets[0].id : null;
+    registrarQuickTeamsOpen = !sets.length;
+  }
+  renderRegistrar(group, registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  restoreRegistrarInputs(snap);
+}
+// Arma grupos nuevos sin salir de "Registrar clase"
+function quickCreateTeamsInRegistrar(){
+  const group = getActiveGroup();
+  const size = parseInt(document.getElementById('qtSize').value, 10) || 4;
+  const random = document.getElementById('qtMode').value === 'random';
+  const teams = buildTeams(group.students.map(s=> s.id), size, random);
+  const set = { id: uid(), name: 'Grupos ' + new Date().toLocaleDateString('es-CL', { day:'2-digit', month:'2-digit' }), teams };
+  teamSetsOf(group).unshift(set);
+  saveState();
+  const snap = snapshotRegistrarInputs();
+  registrarTeamSetId = set.id; registrarQuickTeamsOpen = false;
+  if(registrarMode === 'individual') registrarMode = 'grupo';
+  renderRegistrar(group, registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  restoreRegistrarInputs(snap);
+  showToast(teams.length + ' grupo(s) creados · puedes ajustarlos en Cursos → Grupos');
+}
+function toggleQuickTeams(){
+  const snap = snapshotRegistrarInputs();
+  registrarQuickTeamsOpen = !registrarQuickTeamsOpen;
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  restoreRegistrarInputs(snap);
+}
 // Guarda lo que ya se marcó en la tabla para no perderlo al volver a dibujarla
 function snapshotRegistrarInputs(){
   const snap = { sel: {}, obs: {}, att: {} };
@@ -3775,6 +3826,7 @@ function restoreRegistrarInputs(snap){
 function changeRegistrarTeamSet(id){
   const snap = snapshotRegistrarInputs();
   registrarTeamSetId = id || null;
+  if(!id) registrarMode = 'individual';
   renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
   restoreRegistrarInputs(snap);
 }
@@ -3788,6 +3840,20 @@ function applyTeamIndicator(teamId, indId, value){
     if(el && el.hidden) el.value = value;          // las excepciones (✎) se respetan
   });
   refreshGroupBadges();
+}
+// Botón «Asignar a todo el grupo»: copia los puntajes elegidos en la fila del grupo a cada integrante
+function applyTeamRow(teamId){
+  const set = findTeamSet(getActiveGroup(), registrarTeamSetId);
+  const team = set && set.teams.find(t=> t.id === teamId);
+  if(!team) return;
+  let n = 0;
+  document.querySelectorAll(`select[data-team="${teamId}"][data-indicator]`).forEach(el=>{
+    if(el.value === '') return;
+    n++;
+    team.members.forEach(sid=>{ const m = document.querySelector(`select[data-student="${sid}"][data-indicator="${el.dataset.indicator}"]`); if(m) m.value = el.value; });
+  });
+  if(!n){ showToast('Primero elige al menos un puntaje en la fila del grupo'); return; }
+  showToast('Puntaje asignado a ' + team.members.length + ' integrante(s) de ' + team.name);
 }
 function refreshGroupBadges(){
   document.querySelectorAll('.grp-val[data-grpval]').forEach(sp=>{
@@ -3847,8 +3913,15 @@ function renderRegistrar(group, sessionToEdit, prefill){
     registrarTeamSetId = isEdit ? (sessionToEdit.teamSetId || null) : (group.lastTeamSetId || null);
   }
   if(registrarTeamSetId && !findTeamSet(group, registrarTeamSetId)) registrarTeamSetId = null;
-  const regTeamSet = findTeamSet(group, registrarTeamSetId);
-  const hasGroupInds = selectedIndicators.some(i=> i.grupal);
+  if(registrarMode === undefined){
+    const src = isEdit ? sessionToEdit : null;
+    registrarMode = src ? (src.regMode || (src.teamSetId ? 'grupo' : 'individual')) : (group.lastRegMode || (registrarTeamSetId ? 'grupo' : 'individual'));
+  }
+  if(registrarMode === 'mixto') registrarMode = 'grupo';
+  if(!REG_MODES[registrarMode]) registrarMode = 'individual';
+  if(registrarMode !== 'individual' && !registrarTeamSetId && teamSetsOf(group).length) registrarTeamSetId = teamSetsOf(group)[0].id;
+  const regTeamSet = registrarMode === 'individual' ? null : findTeamSet(group, registrarTeamSetId);
+
   const indicatorThemes = [...new Set(group.indicators.map(i=>i.tema).filter(Boolean))];
   const indicatorsToShow = registrarThemeFilter ? group.indicators.filter(i=> i.tema === registrarThemeFilter) : group.indicators;
 
@@ -3907,10 +3980,23 @@ function renderRegistrar(group, sessionToEdit, prefill){
         <input type="checkbox" style="width:auto;" ${registrarAttendanceOnly ? 'checked' : ''} onchange="toggleAttendanceOnlyMode(this.checked)">
         Registrar solo asistencia (sin indicadores)
       </label>
-      ${registrarAttendanceOnly ? '' : `<div style="margin-top:10px;">
-        <label for="regTeamSet">Trabajo en grupos</label>
-        ${teamSetSelectHtml(group, registrarTeamSetId, 'changeRegistrarTeamSet(this.value)', 'regTeamSet')}
-        ${regTeamSet && !hasGroupInds ? '<p class="muted" style="font-size:0.8rem; margin-top:4px;">Ninguno de los indicadores elegidos es grupal: márcalos como 👥 grupales (✎) para evaluarlos por grupo.</p>' : ''}
+      ${registrarAttendanceOnly ? '' : `<div style="margin-top:12px;">
+        <label>¿Cómo vas a registrar esta clase?</label>
+        <div class="mode-seg" role="radiogroup" aria-label="Modo de registro">
+          ${Object.entries(REG_MODES).map(([k, m])=> `<button type="button" role="radio" aria-checked="${registrarMode === k}" class="mode-opt${registrarMode === k ? ' on' : ''}" onclick="changeRegistrarMode('${k}')"><span class="mode-ic">${m.icon}</span><span><strong>${m.name}</strong><small>${m.desc}</small></span></button>`).join('')}
+        </div>
+        ${registrarMode === 'individual' ? '' : `<div class="mode-teams">
+          ${teamSetsOf(group).length ? `<div class="mode-teams-row">
+            <div style="flex:1; min-width:200px;"><label for="regTeamSet" style="margin-top:0;">Grupos</label>${teamSetSelectHtml(group, registrarTeamSetId, 'changeRegistrarTeamSet(this.value)', 'regTeamSet')}</div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="toggleQuickTeams()">${registrarQuickTeamsOpen ? 'Cancelar' : '⚡ Armar grupos nuevos'}</button>
+          </div>` : '<p class="muted" style="margin:0 0 6px; font-size:0.88rem;">Este curso aún no tiene grupos. Ármalos aquí mismo:</p>'}
+          ${registrarQuickTeamsOpen || !teamSetsOf(group).length ? `<div class="mode-teams-row" style="margin-top:8px;">
+            <div><label for="qtSize" style="margin-top:0;">Integrantes por grupo</label><input type="number" id="qtSize" min="2" max="12" value="4" style="width:90px;"></div>
+            <div><label for="qtMode" style="margin-top:0;">Cómo</label><select id="qtMode"><option value="random">Al azar</option><option value="order">En orden de lista</option></select></div>
+            <button type="button" class="btn btn-accent btn-sm" onclick="quickCreateTeamsInRegistrar()">+ Crear grupos</button>
+          </div>` : ''}
+          ${regTeamSet ? `<p class="muted" style="font-size:0.8rem; margin:6px 0 0;">${regTeamSet.teams.length} grupo(s). Para mover estudiantes entre grupos: <a href="#" onclick="goToTab('grupos'); return false;">Cursos → Grupos</a>.</p>` : ''}
+        </div>`}
       </div>`}
     </div>
 
@@ -3991,17 +4077,15 @@ function renderRegistrar(group, sessionToEdit, prefill){
           <button class="btn btn-outline btn-sm" onclick="repeatLastClass()">🔁 Repetir última clase</button>
         </div>
       </div>
-      ${hasGroupInds ? `<div class="grp-banner">
-        <div><strong>👥 ${selectedIndicators.filter(i=> i.grupal).length} indicador(es) grupal(es)</strong> · ${regTeamSet ? 'se completan <strong>una sola vez</strong> en la fila de cada grupo y valen para todos sus integrantes.' : 'elige los grupos para completarlos una sola vez por grupo.'}</div>
-        <div style="min-width:220px;">${teamSetSelectHtml(group, registrarTeamSetId, 'changeRegistrarTeamSet(this.value)', 'regTeamSet2')}</div>
-      </div>` : ''}
+      ${regTeamSet ? `<div class="grp-banner"><div><strong>👥 Por grupos:</strong> en la fila de cada grupo elige los puntajes y presiona <strong>«Asignar a todo el grupo»</strong>. Después puedes cambiar a cualquier integrante.</div></div>`
+        : (registrarMode !== 'individual' ? `<div class="grp-banner"><div><strong>👥 Por grupos:</strong> arma o elige los grupos en "Datos de la clase".</div></div>` : '')}
       ${entregasDelDia.length > 0 ? '<p class="muted" style="font-size:0.78rem;">Las columnas 📥 marcan la entrega de ese día — quedan como un registro independiente del cotejo.</p>' : ''}
       <div style="overflow-x:auto;">
       <table>
         <thead>
           <tr>
             <th>Estudiante</th>
-            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${ind.grupal ? '👥 ' : ''}${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})${ind.grupal ? ' · grupal' : ' · individual'}</span></th>`).join('')}
+            ${selectedIndicators.map(ind=>`<th class="indicator-header-name">${escapeHtml(ind.name)}<br><span style="font-weight:400; text-transform:none;">(0-${ind.levels || 5})</span></th>`).join('')}
             ${entregasDelDia.map(entrega=>`<th style="min-width:150px;">📥 ${escapeHtml(entrega.name)}<br><button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="markAllEntregaDeliveredInline('${entrega.id}')">Todos</button></th>`).join('')}
             <th style="min-width:180px;">Observaciones</th>
           </tr>
@@ -4011,13 +4095,13 @@ function renderRegistrar(group, sessionToEdit, prefill){
           ${block.plain ? '' : `<tr class="team-row">
             <td><strong>👥 ${block.team ? escapeHtml(block.team.name) : 'Sin grupo'}</strong><br><span class="muted" style="font-size:0.78rem;">${block.students.length} integrante(s)</span></td>
             ${selectedIndicators.map(ind=>{
-              if(!ind.grupal || !block.team) return '<td></td>';
+              if(!block.team) return '<td></td>';
               let o = '<option value="">-</option>';
               for(let n=0; n<=(ind.levels || 5); n++) o += `<option value="${n}">${n}</option>`;
-              return `<td><select class="score-select team-select" data-team="${block.team.id}" data-indicator="${ind.id}" title="Se copia a todo el grupo" onchange="applyTeamIndicator('${block.team.id}','${ind.id}', this.value)">${o}</select></td>`;
+              return `<td><select class="score-select team-select" data-team="${block.team.id}" data-indicator="${ind.id}" title="Puntaje para todo el grupo" aria-label="${escapeHtml(ind.name)} para ${escapeHtml(block.team.name)}">${o}</select></td>`;
             }).join('')}
             ${entregasDelDia.map(()=> '<td></td>').join('')}
-            <td class="muted" style="font-size:0.78rem;">${hasGroupInds && block.team ? 'Completa aquí los indicadores 👥: valen para todo el grupo. Con ✎ cambias a un integrante (por ejemplo, si estuvo ausente).' : (block.team ? '' : 'Estudiantes sin grupo: se completan de forma individual.')}</td>
+            <td>${block.team ? `<button type="button" class="btn btn-accent btn-sm" onclick="applyTeamRow('${block.team.id}')">⬇ Asignar a todo el grupo</button>` : '<span class="muted" style="font-size:0.78rem;">Estudiantes sin grupo: se completan uno por uno.</span>'}</td>
           </tr>`}
           ${block.students.map(s=>{
             const prevEntry = prevByStudent[s.id];
@@ -4030,17 +4114,6 @@ function renderRegistrar(group, sessionToEdit, prefill){
                 let options = '<option value="">-</option>';
                 for(let n=0; n<=levels; n++){
                   options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
-                }
-                if(ind.grupal && regTeamSet && block.team){
-                  // Indicador grupal: se completa en la fila del grupo; aquí solo se muestra (✎ para una excepción)
-                  return `
-                  <td class="from-team">
-                    <span class="grp-val" data-grpval="${s.id}|${ind.id}" title="Valor del grupo">${prevVal === null || prevVal === undefined ? '–' : prevVal}</span>
-                    <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}" hidden onchange="syncTeamSelectsFromMembers()">
-                      ${options}
-                    </select>
-                    <button type="button" class="icon-mini grp-edit" title="Cambiar solo para este estudiante (por ejemplo, si estuvo ausente)" aria-label="Cambiar solo para ${escapeHtml(s.name)}" onclick="unlockMemberCell(this)">✎</button>
-                  </td>`;
                 }
                 return `
                 <td>
@@ -4133,6 +4206,7 @@ function repeatLastClass(){
       const obsEl = document.querySelector(`textarea[data-student="${s.id}"][data-obs="1"]`);
       if(obsEl && prevEntry.observaciones) obsEl.value = prevEntry.observaciones;
     });
+    refreshGroupBadges(); syncTeamSelectsFromMembers();
     showToast('Se copiaron los valores de la clase anterior (' + formatDate(last.date) + ')');
   }, 30);
 }
@@ -4180,20 +4254,22 @@ function handleSaveSession(){
   const preservedEntries = isEdit ? sessionToEdit.entries.filter(e=> !currentStudentIds.has(e.studentId)) : [];
   const entries = [...newEntries, ...preservedEntries];
 
+  if(registrarMode === 'individual') registrarTeamSetId = null;
   if(isEdit){
     const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
     if(idx !== -1){
-      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot, processId: selectedProcessId, teamSetId: registrarTeamSetId || null };
+      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot, processId: selectedProcessId, teamSetId: registrarTeamSetId || null, regMode: registrarMode || 'individual' };
     }
     showToast('Registro actualizado correctamente');
   } else {
-    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId, teamSetId: registrarTeamSetId || null });
+    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId, teamSetId: registrarTeamSetId || null, regMode: registrarMode || 'individual' });
     group.lastTeamSetId = registrarTeamSetId || null;
+    if(!registrarAttendanceOnly) group.lastRegMode = registrarMode || 'individual';
     showToast('Clase registrada correctamente');
   }
   if(!registrarAttendanceOnly) group.lastUsedIndicatorIds = registrarIndicatorSelection.slice();
   saveState();
-  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarMode = undefined;
   registrarAttendanceOnly = null;
   goToTab('historial');
 }
@@ -4204,7 +4280,7 @@ function editSession(sessionId){
   if(!session) return;
   currentTab = 'registrar';
   currentModule = moduleForTab('registrar');
-  registrarIndicatorSelection = null; registrarTeamSetId = undefined;
+  registrarIndicatorSelection = null; registrarTeamSetId = undefined; registrarMode = undefined;
   registrarAttendanceOnly = null;
   renderNav();
   renderRegistrar(group, session);
