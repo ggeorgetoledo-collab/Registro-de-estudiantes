@@ -1,4 +1,4 @@
-const CACHE_NAME = 'registro-clases-cache-v115';
+const CACHE_NAME = 'registro-clases-cache-v117';
 const ASSETS_TO_CACHE = [
   './registro-clases-6.html',
   './manifest.json',
@@ -27,16 +27,19 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith(self.location.origin)) return;
+  // Los enlaces del widget (?ir=…) usan la misma copia guardada de la página, sin parámetros
+  const url = new URL(event.request.url);
+  const cacheKey = (event.request.mode === 'navigate' && url.search) ? url.origin + url.pathname : event.request;
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200) {
           const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+          caches.open(CACHE_NAME).then((cache) => cache.put(cacheKey, responseClone));
         }
         return networkResponse;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(cacheKey))
   );
 });
 
