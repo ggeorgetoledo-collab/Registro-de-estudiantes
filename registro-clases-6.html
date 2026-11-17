@@ -895,6 +895,8 @@ function uid(){ return 'id_' + Math.random().toString(36).slice(2,10) + Date.now
 
 /* ============ SINCRONIZACIÓN CON GOOGLE DRIVE ============ */
 const DRIVE_FILE_NAME = 'registro-clases-data.json';
+// drive.appdata: datos ocultos de la app · drive.file: solo los archivos y carpetas que crea la app ("Carpeta en Drive")
+const DRIVE_SCOPES = 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
 let driveFileId = null;
 let driveTokenClient = null;
 
@@ -1012,14 +1014,15 @@ function connectDrive(){
   const stored = loadStoredDriveToken();
   driveTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
-    scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email',
+    scope: DRIVE_SCOPES,
+    include_granted_scopes: true,
     callback: async (resp)=>{
       if(resp.error){
         showToastQuick('No se pudo conectar con Google Drive');
         setDriveStatus('error');
         return;
       }
-      const tok = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000) };
+      const tok = { access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000), scope: resp.scope || '' };
       storeDriveToken(tok);
       setDriveStatus('connected');
       showToastQuick('Conectado a Google Drive');
@@ -1320,6 +1323,8 @@ function openDriveSettings(){
       <p class="muted" style="font-size:0.78rem; margin-bottom:6px;">Mientras estés conectado, la app guarda sola una copia por día de todos tus datos y conserva los últimos ${DRIVE_BACKUP_KEEP} días. Si borras algo por error, puedes volver a una copia anterior.</p>
       <button class="btn btn-outline btn-sm" onclick="showDriveBackups()">🗂️ Ver copias guardadas</button>
       <div id="driveBackupsBox" style="margin-top:8px;"></div>
+      <hr class="divider">
+      <div id="drfBox">${drfHtml()}</div>
       <hr class="divider">
       <p class="muted" style="font-weight:600; margin-bottom:4px;">Respaldo completo (todos los cursos y periodos)</p>
       <div class="row">
@@ -12514,6 +12519,266 @@ function closeThemeColorPicker(){
   if(overlay) overlay.remove();
 }
 
+/* ============ CARPETA EN GOOGLE DRIVE ============
+   Una carpeta normal en "Mi unidad" (se puede compartir) que la app mantiene al día sola:
+     Registro de Clases/
+       2° Medio · Matemática/   → "Registro · <curso>.xlsx" y "Informes · <curso>.docx"
+       …un subcarpeta por curso
+       Respaldos/               → "Respaldo actual.json" y "Respaldo AAAA-MM.json" (uno por mes)
+   Siempre se reemplaza el contenido de los mismos archivos (Drive guarda las versiones anteriores),
+   así que no se acumulan archivos. Sube el dispositivo con la sesión de Google del dueño de la carpeta. */
+const DRF_DEBOUNCE = 2 * 60000;      // espera 2 minutos sin cambios antes de subir
+const DRF_RESPALDO_CADA = 30 * 60000; // el respaldo actual se reemplaza como máximo cada 30 minutos
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+function drfCfg(){ const c = state.driveFolder; return c && c.id ? c : null; }
+function drfTokOk(){ const t = loadStoredDriveToken(); return isDriveTokenValid(t) && /drive\.file/.test(t.scope || ''); }
+function drfEsDueno(){ const c = drfCfg(); return !!(c && c.email && c.email === localStorage.getItem('gdrive_email')); }
+function drfDocsKey(){ return 'drf_docs::' + (localStorage.getItem('gdrive_email') || 'local'); }
+function drfDocs(){ try{ return JSON.parse(localStorage.getItem(drfDocsKey()) || '{}') || {}; }catch(e){ return {}; } }
+function drfSetDoc(k, v){ const d = drfDocs(); d[k] = Object.assign({}, d[k] || {}, v); try{ localStorage.setItem(drfDocsKey(), JSON.stringify(d)); }catch(e){} }
+function drfHash(str){ let h = 2166136261; for(let i = 0; i < str.length; i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + '.' + str.length; }
+let drfEstado = { st: '', msg: '', hecho: 0, total: 0, at: Number(localStorage.getItem('drf_at') || 0) };
+let drfCorriendo = null, drfTimer = null;
+
+// Pide (una vez) el permiso para crear archivos en tu Drive, junto con el de siempre
+function drfLogin(){
+  return new Promise((resolve, reject)=>{
+    if(typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2){ reject(new Error('No se pudo cargar Google. Revisa tu conexión e intenta de nuevo.')); return; }
+    google.accounts.oauth2.initTokenClient({
+      client_id: loadDriveClientId(),
+      scope: DRIVE_SCOPES,
+      include_granted_scopes: true,
+      callback: async resp=>{
+        if(resp.error){ reject(new Error('Google no dio el permiso (' + (resp.error_description || resp.error) + ').')); return; }
+        if(!google.accounts.oauth2.hasGrantedAllScopes(resp, 'https://www.googleapis.com/auth/drive.file')){ reject(new Error('Falta marcar el permiso para crear archivos en tu Google Drive.')); return; }
+        storeDriveToken({ access_token: resp.access_token, expires_at: Date.now() + (resp.expires_in * 1000), scope: resp.scope || '' });
+        setDriveStatus('connected');
+        await fetchConnectedEmail();
+        resolve();
+      },
+      error_callback: err=> reject(new Error(err && err.type === 'popup_closed' ? 'Se cerró la ventana de Google.' : 'No se pudo abrir la ventana de Google.')),
+    }).requestAccessToken({ prompt: '' });
+  });
+}
+async function drfFetch(url, opts){
+  const t = loadStoredDriveToken();
+  const res = await fetch(url, Object.assign({}, opts || {}, { headers: Object.assign({ Authorization: 'Bearer ' + (t && t.access_token) }, (opts && opts.headers) || {}) }));
+  if(res.status === 401) throw Object.assign(new Error('La sesión de Google venció.'), { auth: true });
+  if(!res.ok){
+    let m = ''; try{ m = (await res.json()).error.message; }catch(e){}
+    if(res.status === 403 && /scope|insufficient/i.test(m)) throw Object.assign(new Error('Falta el permiso para la carpeta de Drive.'), { auth: true });
+    throw Object.assign(new Error('Google Drive (' + res.status + ')' + (m ? ': ' + m : '')), { status: res.status });
+  }
+  return res;
+}
+const drfQ = s=> String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+async function drfBuscar(nombre, padre, esCarpeta){
+  const q = `name='${drfQ(nombre)}' and '${padre}' in parents and trashed=false` + (esCarpeta ? " and mimeType='application/vnd.google-apps.folder'" : '');
+  const r = await drfFetch('https://www.googleapis.com/drive/v3/files?spaces=drive&fields=files(id)&q=' + encodeURIComponent(q));
+  const j = await r.json();
+  return j.files && j.files[0] ? j.files[0].id : null;
+}
+async function drfNuevaCarpeta(nombre, padre){
+  const r = await drfFetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nombre, mimeType: 'application/vnd.google-apps.folder', parents: padre ? [padre] : undefined }) });
+  return r.json();
+}
+async function drfCarpeta(nombre, padre){
+  const id = await drfBuscar(nombre, padre, true);
+  return id || (await drfNuevaCarpeta(nombre, padre)).id;
+}
+async function drfRenombrar(fid, nombre){
+  await drfFetch(`https://www.googleapis.com/drive/v3/files/${fid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nombre }) });
+}
+// Reemplaza el contenido del mismo archivo; si no existe, lo crea (y no duplica: primero lo busca por nombre)
+async function drfSubir(blob, nombre, padre, fid){
+  if(!fid) fid = await drfBuscar(nombre, padre, false);
+  if(fid){
+    try{
+      await drfFetch(`https://www.googleapis.com/upload/drive/v3/files/${fid}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': blob.type || 'application/octet-stream' }, body: blob });
+      await drfRenombrar(fid, nombre);
+      return fid;
+    }catch(e){ if(e.status !== 404) throw e; }
+  }
+  const b = 'rc' + Math.random().toString(36).slice(2);
+  const meta = JSON.stringify({ name: nombre, parents: [padre] });
+  const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`, blob, `\r\n--${b}--`]);
+  const r = await drfFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body });
+  return (await r.json()).id;
+}
+
+/* ---- Contenido de cada archivo (todo el año, no solo el periodo que estás viendo) ---- */
+function drfConTodosLosPeriodos(fn){
+  const per = state.activePeriodId;
+  state.activePeriodId = null;
+  try{ return fn(); } finally { state.activePeriodId = per; }
+}
+async function drfRegistroBlob(group){
+  if(typeof ExcelJS === 'undefined') throw new Error('Falta conexión para generar el Excel.');
+  const wb = new ExcelJS.Workbook();
+  const any = drfConTodosLosPeriodos(()=>{
+    let a = false;
+    a = addEstudiantesSheet(wb, group) || a;
+    a = addIndicadoresSheet(wb, group) || a;
+    a = addHorarioSheet(wb, group) || a;
+    a = addAsistenciaSheet(wb, group) || a;
+    a = addCalificacionesSheet(wb, group) || a;
+    a = addDecimasSheet(wb, group) || a;
+    a = addEntregasSheet(wb, group) || a;
+    a = addBitacoraSheet(wb, group) || a;
+    return a;
+  });
+  if(!any) return null;
+  return new Blob([await wb.xlsx.writeBuffer()], { type: XLSX_MIME });
+}
+async function drfInformesBlob(group){
+  if(typeof JSZip === 'undefined') throw new Error('Falta conexión para generar el Word.');
+  if(!group.students.length) return null;
+  const opts = reportOptionsFromTemplate();
+  const body = drfConTodosLosPeriodos(()=> group.students.map((s, i)=> buildStudentHistoryBody(group, s, opts) + (i < group.students.length - 1 ? wordPageBreak() : '')).join(''));
+  return buildDocxBlob(body, { nombre: '', curso: group.name });
+}
+function drfRespaldoBlob(){ return new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }); }
+function drfFirmaCurso(group){ let tpl = ''; try{ tpl = JSON.stringify(reportOptionsFromTemplate()); }catch(e){} return drfHash(JSON.stringify(group) + '|' + tpl); }
+function drfFirmaTodo(){
+  const { updatedAt, driveFolder, ...resto } = state;
+  return drfHash(JSON.stringify(resto));
+}
+const drfNombreCurso = g=> String(g.name || 'Curso').replace(/[\\/]+/g, '-').trim() || 'Curso';
+
+/* ---- Qué falta subir ---- */
+function drfPendientes(){
+  if(!drfCfg()) return [];
+  const docs = drfDocs(), p = [];
+  state.groups.forEach(g=>{
+    const k = 'curso:' + g.id;
+    if(!docs[k] || docs[k].sig !== drfFirmaCurso(g) || docs[k].nombre !== drfNombreCurso(g)) p.push({ tipo: 'curso', g });
+  });
+  const ra = docs.ractual;
+  if(!ra || (ra.sig !== drfFirmaTodo() && Date.now() - (ra.at || 0) > DRF_RESPALDO_CADA)) p.push({ tipo: 'ractual' });
+  const mes = toISODate(new Date()).slice(0, 7);
+  if(!docs['rmes:' + mes]) p.push({ tipo: 'rmes', mes });
+  return p;
+}
+
+/* ---- Subir ---- */
+async function drfEjecutar(manual){
+  if(drfCorriendo) return drfCorriendo;
+  const c = drfCfg();
+  if(!c) return;
+  if(!drfEsDueno()){ if(manual) showToast('La carpeta es de ' + c.email + ': los archivos se suben desde un dispositivo con esa cuenta.'); return; }
+  if(!drfTokOk()){ drfEstado.st = 'auth'; drfPintar(); return; }
+  drfCorriendo = (async ()=>{
+    const lista = drfPendientes();
+    drfEstado = Object.assign(drfEstado, { st: 'busy', hecho: 0, total: lista.length, msg: '' });
+    drfPintar();
+    let err = 0;
+    for(const it of lista){
+      try{
+        if(it.tipo === 'curso'){
+          const g = it.g, sig = drfFirmaCurso(g), nombre = drfNombreCurso(g);
+          const docs = drfDocs(), k = 'curso:' + g.id, d = docs[k] || {};
+          const cfg = drfCfg();
+          if(!cfg.cursos) cfg.cursos = {};
+          let dir = cfg.cursos[g.id];
+          if(!dir){ dir = await drfCarpeta(nombre, cfg.id); cfg.cursos[g.id] = dir; saveState(); }
+          else if(d.nombre && d.nombre !== nombre){ await drfRenombrar(dir, nombre); }
+          const reg = await drfRegistroBlob(g);
+          const fReg = reg ? await drfSubir(reg, 'Registro · ' + nombre + '.xlsx', dir, d.reg) : d.reg;
+          const inf = await drfInformesBlob(g);
+          const fInf = inf ? await drfSubir(inf, 'Informes · ' + nombre + '.docx', dir, d.inf) : d.inf;
+          drfSetDoc(k, { sig, nombre, reg: fReg || null, inf: fInf || null, at: Date.now() });
+        } else if(it.tipo === 'ractual'){
+          const cfg = drfCfg(), d = drfDocs().ractual || {};
+          const fid = await drfSubir(drfRespaldoBlob(), 'Respaldo actual.json', cfg.respaldos, d.fid);
+          drfSetDoc('ractual', { fid, sig: drfFirmaTodo(), at: Date.now() });
+        } else if(it.tipo === 'rmes'){
+          const fid = await drfSubir(drfRespaldoBlob(), 'Respaldo ' + it.mes + '.json', drfCfg().respaldos, null);
+          drfSetDoc('rmes:' + it.mes, { fid, at: Date.now() });
+        }
+      }catch(e){
+        console.warn('Carpeta de Drive:', e);
+        if(e.auth){ drfEstado.st = 'auth'; drfEstado.msg = e.message; drfPintar(); return; }
+        if(e.status === 404 && it.tipo === 'curso'){ const cfg = drfCfg(); if(cfg && cfg.cursos) delete cfg.cursos[it.g.id]; } // carpeta del curso borrada: se vuelve a crear
+        err++; drfEstado.msg = e.message || String(e);
+      }
+      drfEstado.hecho++; drfPintar();
+    }
+    drfEstado.st = err ? 'error' : 'ok';
+    drfEstado.at = Date.now();
+    try{ localStorage.setItem('drf_at', String(drfEstado.at)); }catch(e){}
+    drfPintar();
+    if(manual) showToast(err ? `⚠️ ${err} archivo(s) no se pudieron subir: ${drfEstado.msg}` : '✅ Carpeta de Drive al día');
+  })();
+  try{ await drfCorriendo; } finally { drfCorriendo = null; }
+}
+function drfProgramar(ms){
+  clearTimeout(drfTimer);
+  if(!drfCfg() || !drfEsDueno() || !drfTokOk()) return;
+  drfTimer = setTimeout(()=> drfEjecutar(false), ms == null ? DRF_DEBOUNCE : ms);
+}
+
+/* ---- Conectar / desconectar ---- */
+async function drfConectar(){
+  try{ if(!drfTokOk()) await drfLogin(); }catch(e){ showToast('⚠️ ' + e.message); return; }
+  const email = localStorage.getItem('gdrive_email');
+  if(!email){ showToast('No se pudo saber tu cuenta de Google. Intenta de nuevo.'); return; }
+  try{
+    setDrfBox('<p class="muted">⏳ Creando la carpeta en tu Drive…</p>');
+    const nombre = 'Registro de Clases' + (teacherDisplayName() ? ' · ' + teacherDisplayName() : '');
+    const raiz = await drfNuevaCarpeta(nombre);
+    const respaldos = (await drfNuevaCarpeta('Respaldos', raiz.id)).id;
+    try{ localStorage.removeItem(drfDocsKey()); }catch(e){}
+    state.driveFolder = { id: raiz.id, url: raiz.webViewLink || ('https://drive.google.com/drive/folders/' + raiz.id), email, respaldos, cursos: {} };
+    saveState();
+    showToast('📁 Carpeta creada en tu Google Drive. Subiendo los cursos…');
+    await drfEjecutar(true);
+  }catch(e){ showToast('⚠️ ' + e.message); }
+  drfPintar();
+}
+async function drfSubirAhora(){
+  if(!drfTokOk()){ try{ await drfLogin(); }catch(e){ showToast('⚠️ ' + e.message); return; } }
+  if(!drfEsDueno()){ showToast('La carpeta es de ' + drfCfg().email + ': entra con esa cuenta para subir.'); return; }
+  await drfEjecutar(true);
+}
+function drfQuitar(){
+  if(!confirm('¿Dejar de actualizar la carpeta? La carpeta y sus archivos quedan en tu Drive.')) return;
+  state.driveFolder = null;
+  saveState();
+  drfPintar();
+}
+
+/* ---- Tarjeta (ventana de Google Drive) ---- */
+function setDrfBox(html){ const el = document.getElementById('drfBox'); if(el) el.innerHTML = html; }
+function drfPintar(){ setDrfBox(drfHtml()); }
+function drfHtml(){
+  const c = drfCfg();
+  const titulo = '<p class="muted" style="font-weight:600; margin-bottom:4px;">📁 Carpeta en tu Google Drive</p>';
+  if(!c) return titulo + `
+    <p class="muted" style="font-size:0.78rem; margin-bottom:6px;">Crea una carpeta en tu Drive ("Mi unidad") con una <strong>subcarpeta por curso</strong>. La app la mantiene al día sola, siempre en los mismos archivos:</p>
+    <ul class="muted" style="font-size:0.78rem; margin:0 0 8px; padding-left:18px; line-height:1.5;">
+      <li><strong>Registro · curso.xlsx</strong>: estudiantes, asistencia, trabajo en clases, notas, décimas, entregas y bitácora.</li>
+      <li><strong>Informes · curso.docx</strong>: el informe de cada estudiante, uno por página (mismo formato que el correo).</li>
+      <li><strong>Respaldos</strong>: el respaldo actual y uno fijo por mes.</li>
+    </ul>
+    <p class="muted" style="font-size:0.78rem; margin-bottom:6px;">Drive guarda las versiones anteriores de cada archivo, así que no se acumulan copias. Puedes compartir la carpeta o un curso desde Drive.</p>
+    <button class="btn btn-accent btn-sm" onclick="drfConectar()">📁 Crear carpeta en mi Drive</button>`;
+  const pend = drfEsDueno() ? drfPendientes().length : 0;
+  let estado;
+  if(!drfEsDueno()) estado = `Los archivos se actualizan desde los dispositivos con la cuenta <strong>${escapeHtml(c.email)}</strong>.`;
+  else if(drfEstado.st === 'busy') estado = `⏳ Subiendo ${drfEstado.hecho} de ${drfEstado.total}…`;
+  else if(!drfTokOk()) estado = `⚠️ ${pend ? pend + ' pendiente(s). ' : ''}La sesión de Google venció o falta el permiso: toca "Actualizar ahora".`;
+  else if(drfEstado.st === 'error') estado = '⚠️ ' + escapeHtml(drfEstado.msg);
+  else estado = pend ? `🕒 ${pend} pendiente(s): se suben solas 2 minutos después del último cambio.` : '✅ Todo al día.';
+  return titulo + `
+    <p class="muted" style="font-size:0.78rem; margin-bottom:6px;">Una subcarpeta por curso con <strong>Registro</strong> (Excel) e <strong>Informes</strong> (Word), y <strong>Respaldos</strong>. Se actualizan solos en los mismos archivos.</p>
+    <p style="font-size:0.85rem; margin:0 0 8px;">${estado}${drfEstado.at && drfEsDueno() ? ` <span class="muted">· última subida ${new Date(drfEstado.at).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' })}</span>` : ''}</p>
+    <div class="row">
+      <a class="btn btn-outline btn-sm" href="${escapeHtml(c.url)}" target="_blank" rel="noopener">📂 Abrir carpeta</a>
+      ${drfEsDueno() ? '<button class="btn btn-accent btn-sm" onclick="drfSubirAhora()">⟳ Actualizar ahora</button>' : ''}
+      ${drfEsDueno() ? '<button class="btn btn-outline btn-sm" onclick="drfQuitar()">Dejar de actualizar</button>' : ''}
+    </div>`;
+}
+
 /* ============ INICIO ============ */
 if(!state.schedule) state.schedule = [];
 ensureDefaultGroup();
@@ -12561,6 +12826,12 @@ document.addEventListener('visibilitychange', ()=>{
   }
   if(!document.hidden) syncWidgetAgenda();
 });
+
+// Carpeta de Drive: sube 2 minutos después del último cambio, al abrir la app y cada 10 minutos
+const _saveStateDrf = saveState;
+saveState = function(){ _saveStateDrf.apply(this, arguments); drfProgramar(); };
+initialDriveSync.then(()=> drfProgramar(8000));
+setInterval(()=>{ if(!document.hidden) drfProgramar(1000); }, 600000);
 
 // Registro del Service Worker (permite instalar la app y funcionar offline)
 if('serviceWorker' in navigator){
