@@ -187,6 +187,33 @@
   :root[data-theme="dark"] .inc-toggle.on{ background:rgba(251,191,36,0.16); color:#FBBF24; border-color:rgba(251,191,36,0.4); }
   .grp-val{ display:inline-block; min-width:44px; padding:5px 8px; border-radius:8px; background:var(--primary-light); color:var(--primary-dark); font-weight:700; text-align:center; font-size:0.86rem; }
   .grp-edit{ margin-left:2px; }
+  /* Tabla de "Registrar clase": encabezado y nombres siempre a la vista */
+  .reg-scroll{ overflow:auto; max-height:min(78vh, calc(100vh - 140px)); border:1px solid var(--border); border-radius:12px; }
+  .reg-table{ margin:0; }
+  .reg-table thead th{ position:sticky; top:0; z-index:3; background:var(--card-bg); box-shadow:0 1px 0 var(--border); }
+  .reg-table tbody td:first-child, .reg-table thead th:first-child{ position:sticky; left:0; z-index:2; background:var(--card-bg); }
+  .reg-table thead th:first-child{ z-index:4; }
+  .reg-table tr.team-row td:first-child{ background:var(--primary-light); }
+  .reg-name{ min-width:140px; }
+  .reg-table textarea{ min-height:42px; height:42px; resize:vertical; transition:height .15s; }
+  .reg-table textarea:focus{ height:96px; }
+  @media (max-width:900px){
+    .reg-scroll{ max-height:calc(100dvh - 250px); scroll-margin-top:220px; }
+    .reg-name{ min-width:118px; }
+  }
+  .reg-name > span:first-child{ display:block; }
+  .row-quick{ display:flex; gap:4px; margin-top:4px; }
+  .mini-chip{ border:1px solid var(--border-strong); background:var(--card-bg); color:var(--text-dim); border-radius:999px; font-size:0.72rem; font-weight:700; padding:2px 8px; cursor:pointer; font-family:inherit; }
+  .mini-chip.up:hover{ border-color:var(--success); color:var(--success); }
+  .mini-chip.down:hover{ border-color:var(--danger); color:var(--danger); }
+  .score-tap{ min-width:48px; height:42px; border-radius:10px; border:1.5px dashed var(--border-strong); background:var(--card-bg); color:var(--text-dim); font-family:'Manrope',sans-serif; font-size:1.05rem; font-weight:800; cursor:pointer; touch-action:manipulation; user-select:none; -webkit-user-select:none; }
+  .score-tap.full{ border-style:solid; border-color:var(--success-border); background:var(--success-light); color:var(--success); }
+  .score-tap.part{ border-style:solid; border-color:var(--primary-border); background:var(--primary-light); color:var(--primary-dark); }
+  .score-tap.zero{ border-style:solid; border-color:var(--danger-border); background:var(--danger-light); color:var(--danger); }
+  .tap-bar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin:10px 0; }
+  .seg{ display:inline-flex; border:1px solid var(--border-strong); border-radius:10px; overflow:hidden; }
+  .seg button{ border:none; background:var(--card-bg); color:var(--text-dim); padding:6px 12px; font-family:inherit; font-weight:600; font-size:0.85rem; cursor:pointer; }
+  .seg button.on{ background:var(--primary-light); color:var(--primary-dark); }
   .team-apply{ display:block; margin-top:6px; white-space:nowrap; }
   .mode-seg{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:4px; }
   .mode-opt{ display:flex; gap:10px; align-items:flex-start; text-align:left; padding:10px 12px; border:1.5px solid var(--border); border-radius:12px; background:var(--card-bg); color:var(--text); cursor:pointer; font:inherit; }
@@ -3865,9 +3892,54 @@ function applyTeamRow(teamId){
     team.members.forEach(sid=>{ const m = document.querySelector(`select[data-student="${sid}"][data-indicator="${el.dataset.indicator}"]`); if(m) m.value = el.value; });
   });
   if(!n){ showToast('Primero elige al menos un puntaje en la fila del grupo'); return; }
+  refreshTapButtons();
   showToast('Puntaje asignado a ' + team.members.length + ' integrante(s) de ' + team.name);
 }
+/* ---- Puntajes por toques ----
+   Cada toque: vacío → máximo → máximo−1 → … → 0 → vacío. La lista (select) sigue existiendo, oculta:
+   es la que se guarda, así que todo lo demás (repetir clase, grupos, nota máxima) funciona igual. */
+function regScoreMode(){ try{ return localStorage.getItem('reg_score_mode') === 'list' ? 'list' : 'tap'; }catch(e){ return 'tap'; } }
+function setRegScoreMode(m){
+  try{ localStorage.setItem('reg_score_mode', m); }catch(e){}
+  const snap = snapshotRegistrarInputs();
+  renderRegistrar(getActiveGroup(), registrarCurrentSessionToEdit, registrarCurrentPrefill);
+  restoreRegistrarInputs(snap);
+}
+function scoreCellHtml(attrs, levels, val, label){
+  let o = '<option value="">-</option>';
+  for(let n = 0; n <= levels; n++) o += `<option value="${n}" ${val === n ? 'selected' : ''}>${n}</option>`;
+  if(regScoreMode() === 'list') return `<select class="score-select${attrs.includes('data-team') ? ' team-select' : ''}" ${attrs} aria-label="${escapeHtml(label)}">${o}</select>`;
+  return `<button type="button" class="score-tap" data-max="${levels}" onclick="tapScore(this)" aria-label="${escapeHtml(label)}">–</button><select class="score-select" ${attrs} hidden tabindex="-1">${o}</select>`;
+}
+function tapScore(btn){
+  const sel = btn.nextElementSibling;
+  if(!sel) return;
+  const max = Number(btn.dataset.max) || 0;
+  const v = sel.value === '' ? null : Number(sel.value);
+  sel.value = v === null ? String(max) : (v - 1 < 0 ? '' : String(v - 1));
+  paintTap(btn);
+}
+function paintTap(btn){
+  const sel = btn.nextElementSibling;
+  if(!sel) return;
+  const max = Number(btn.dataset.max) || 0;
+  const v = sel.value === '' ? null : Number(sel.value);
+  btn.textContent = v === null ? '–' : String(v);
+  btn.className = 'score-tap' + (v === null ? '' : v >= max ? ' full' : v === 0 ? ' zero' : ' part');
+}
+function refreshTapButtons(){ document.querySelectorAll('.score-tap').forEach(paintTap); }
+// Botones Máx / Mín de cada estudiante: todos sus indicadores al máximo o en 0
+function setStudentAllScores(sid, which){
+  const group = getActiveGroup();
+  group.indicators.filter(i=> registrarIndicatorSelection.includes(i.id)).forEach(ind=>{
+    const sel = document.querySelector(`select[data-student="${sid}"][data-indicator="${ind.id}"]`);
+    if(sel) sel.value = which === 'max' ? String(ind.levels || 5) : '0';
+  });
+  syncTeamSelectsFromMembers();
+  refreshTapButtons();
+}
 function refreshGroupBadges(){
+  refreshTapButtons();
   document.querySelectorAll('.grp-val[data-grpval]').forEach(sp=>{
     const [sid, indId] = sp.dataset.grpval.split('|');
     const el = document.querySelector(`select[data-student="${sid}"][data-indicator="${indId}"]`);
@@ -3890,6 +3962,7 @@ function syncTeamSelectsFromMembers(){
     const vals = [...new Set(team.members.map(sid=>{ const m = document.querySelector(`select[data-student="${sid}"][data-indicator="${el.dataset.indicator}"]`); return m ? m.value : null; }).filter(v=> v !== null))];
     el.value = vals.length === 1 ? vals[0] : '';
   });
+  refreshTapButtons();
 }
 
 function renderRegistrar(group, sessionToEdit, prefill){
@@ -4089,11 +4162,18 @@ function renderRegistrar(group, sessionToEdit, prefill){
           <button class="btn btn-outline btn-sm" onclick="repeatLastClass()">🔁 Repetir última clase</button>
         </div>
       </div>
+      <div class="tap-bar">
+        <div class="seg" role="radiogroup" aria-label="Cómo poner los puntajes">
+          <button type="button" role="radio" aria-checked="${regScoreMode() === 'tap'}" class="${regScoreMode() === 'tap' ? 'on' : ''}" onclick="setRegScoreMode('tap')">👆 Toques</button>
+          <button type="button" role="radio" aria-checked="${regScoreMode() === 'list'}" class="${regScoreMode() === 'list' ? 'on' : ''}" onclick="setRegScoreMode('list')">▾ Lista</button>
+        </div>
+        <span class="muted" style="font-size:0.8rem;">${regScoreMode() === 'tap' ? 'Toca la casilla: <strong>1 vez = máximo</strong>, cada toque más <strong>resta 1</strong>; después de 0 queda vacía.' : 'Elige el puntaje en cada lista.'} <strong>Máx</strong> / <strong>Mín</strong> junto al nombre ponen todos los indicadores del estudiante al máximo o en 0.</span>
+      </div>
       ${regTeamSet ? `<div class="grp-banner"><div><strong>👥 Por grupos:</strong> en la fila de cada grupo elige los puntajes y presiona <strong>«Asignar a todo el grupo»</strong>. Después puedes cambiar a cualquier integrante.</div></div>`
         : (registrarMode !== 'individual' ? `<div class="grp-banner"><div><strong>👥 Por grupos:</strong> arma o elige los grupos en "Datos de la clase".</div></div>` : '')}
       ${entregasDelDia.length > 0 ? '<p class="muted" style="font-size:0.78rem;">Las columnas 📥 marcan la entrega de ese día — quedan como un registro independiente del cotejo.</p>' : ''}
-      <div style="overflow-x:auto;">
-      <table>
+      <div class="reg-scroll">
+      <table class="reg-table">
         <thead>
           <tr>
             <th>Estudiante</th>
@@ -4109,9 +4189,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
               ${block.team ? `<button type="button" class="btn btn-accent btn-sm team-apply" onclick="applyTeamRow('${block.team.id}')">⬇ Asignar a todo el grupo</button>` : ''}</td>
             ${selectedIndicators.map(ind=>{
               if(!block.team) return '<td></td>';
-              let o = '<option value="">-</option>';
-              for(let n=0; n<=(ind.levels || 5); n++) o += `<option value="${n}">${n}</option>`;
-              return `<td><select class="score-select team-select" data-team="${block.team.id}" data-indicator="${ind.id}" title="Puntaje para todo el grupo" aria-label="${escapeHtml(ind.name)} para ${escapeHtml(block.team.name)}">${o}</select></td>`;
+              return `<td>${scoreCellHtml(`data-team="${block.team.id}" data-indicator="${ind.id}"`, ind.levels || 5, null, ind.name + ' para ' + block.team.name)}</td>`;
             }).join('')}
             ${entregasDelDia.map(()=> '<td></td>').join('')}
             <td class="muted" style="font-size:0.78rem;">${block.team ? 'Elige los puntajes en esta fila y presiona «Asignar a todo el grupo».' : 'Estudiantes sin grupo: se completan uno por uno.'}</td>
@@ -4120,21 +4198,11 @@ function renderRegistrar(group, sessionToEdit, prefill){
             const prevEntry = prevByStudent[s.id];
             return `
             <tr class="${block.plain ? '' : 'team-member'}">
-              <td>${escapeHtml(s.name)}</td>
+              <td class="reg-name"><span>${escapeHtml(s.name)}</span>
+                <span class="row-quick"><button type="button" class="mini-chip up" onclick="setStudentAllScores('${s.id}','max')" title="Todos los indicadores al máximo" aria-label="Todo al máximo para ${escapeHtml(s.name)}">Máx</button><button type="button" class="mini-chip down" onclick="setStudentAllScores('${s.id}','min')" title="Todos los indicadores en 0 (no trabajó)" aria-label="Todo en 0 para ${escapeHtml(s.name)}">Mín</button></span></td>
               ${selectedIndicators.map(ind=>{
-                const levels = ind.levels || 5;
                 const prevVal = prevEntry ? prevEntry.cotejo[ind.id] : null;
-                let options = '<option value="">-</option>';
-                for(let n=0; n<=levels; n++){
-                  options += `<option value="${n}" ${prevVal===n?'selected':''}>${n}</option>`;
-                }
-                return `
-                <td>
-                  <select class="score-select" data-student="${s.id}" data-indicator="${ind.id}">
-                    ${options}
-                  </select>
-                </td>
-                `;
+                return `<td>${scoreCellHtml(`data-student="${s.id}" data-indicator="${ind.id}"`, ind.levels || 5, prevVal, ind.name + ' de ' + s.name)}</td>`;
               }).join('')}
               ${entregasDelDia.map(entrega=>`<td data-entrega-cell="${entrega.id}::${s.id}">${entregaCellHtml(entrega, s.id)}</td>`).join('')}
               <td>
