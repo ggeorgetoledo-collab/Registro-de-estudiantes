@@ -4357,14 +4357,16 @@ function handleSaveSession(){
   const entries = [...newEntries, ...preservedEntries];
 
   if(registrarMode === 'individual') registrarTeamSetId = null;
+  const tsNow = findTeamSet(group, registrarTeamSetId);
+  const teamsSnapshot = (!registrarAttendanceOnly && tsNow) ? { name: tsNow.name, teams: tsNow.teams.map(t=> ({ id: t.id, name: t.name, members: t.members.slice() })) } : null;
   if(isEdit){
     const idx = group.sessions.findIndex(s=>s.id===sessionToEdit.id);
     if(idx !== -1){
-      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot, processId: selectedProcessId, teamSetId: registrarTeamSetId || null, regMode: registrarMode || 'individual' };
+      group.sessions[idx] = { ...group.sessions[idx], date, time, entries, indicatorSnapshot, processId: selectedProcessId, teamSetId: registrarTeamSetId || null, regMode: registrarMode || 'individual', teamsSnapshot: (sessionToEdit.teamsSnapshot && registrarTeamSetId === sessionToEdit.teamSetId) ? sessionToEdit.teamsSnapshot : teamsSnapshot };
     }
     showToast('Registro actualizado correctamente');
   } else {
-    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId, teamSetId: registrarTeamSetId || null, regMode: registrarMode || 'individual' });
+    group.sessions.push({ id: uid(), date, time, entries, indicatorSnapshot, periodId: state.activePeriodId, processId: selectedProcessId, teamSetId: registrarTeamSetId || null, regMode: registrarMode || 'individual', teamsSnapshot });
     group.lastTeamSetId = registrarTeamSetId || null;
     if(!registrarAttendanceOnly) group.lastRegMode = registrarMode || 'individual';
     showToast('Clase registrada correctamente');
@@ -4396,6 +4398,72 @@ function toggleHistorialSession(id){
   renderHistorial(getActiveGroup());
 }
 
+/* ---- Historial: ver estudiantes en lista o por grupos ----
+   Usa los grupos guardados con la clase (cómo estaban ese día). Si la clase no se registró por grupos,
+   se pueden elegir unos grupos actuales para mirarla así. */
+const historialTeamChoice = {}; // sessionId -> teamSetId elegido para mirar una clase sin grupos guardados
+function historialView(){ try{ return localStorage.getItem('hist_view') === 'grupos' ? 'grupos' : 'lista'; }catch(e){ return 'lista'; } }
+function setHistorialView(v){ try{ localStorage.setItem('hist_view', v); }catch(e){} renderHistorial(getActiveGroup()); }
+function setHistorialTeamChoice(sid, setId){ historialTeamChoice[sid] = setId || ''; renderHistorial(getActiveGroup()); }
+// Grupos con que se muestra una clase: { teams:[{name, members}], fuente:'guardados'|'actuales'|'elegidos', name } o null
+function historialTeamsFor(group, session){
+  if(session.teamsSnapshot && session.teamsSnapshot.teams && session.teamsSnapshot.teams.length) return { ...session.teamsSnapshot, fuente: 'guardados' };
+  const own = findTeamSet(group, session.teamSetId);
+  if(own) return { name: own.name, teams: own.teams, fuente: 'actuales' };
+  const chosen = historialTeamChoice[session.id] !== undefined ? historialTeamChoice[session.id] : (group.lastTeamSetId || (teamSetsOf(group)[0] || {}).id || '');
+  const ts = findTeamSet(group, chosen);
+  return ts ? { name: ts.name, teams: ts.teams, fuente: 'elegidos', id: ts.id } : null;
+}
+function historialRowsHtml(group, session, inds, entries){
+  return entries.map(e=>{
+    const student = group.students.find(s=>s.id===e.studentId);
+    const present = isEntryPresent(e);
+    const scores = inds.map(i=> e.cotejo[i.id]).filter(v=> v!==null && v!==undefined);
+    const avg = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) : '-';
+    const nameCell = student
+      ? `<button class="student-name-link" onclick="openStudentDetail('${student.id}')">${escapeHtml(student.name)}</button>`
+      : escapeHtml('(eliminado)');
+    return `
+      <tr>
+        <td>${nameCell}</td>
+        ${present
+          ? inds.map(i=>`<td>${e.cotejo[i.id] ?? '-'}</td>`).join('') + `<td class="avg-badge">${avg}</td>`
+          : `<td colspan="${inds.length + 1}"><span class="pill pill-danger">Ausente</span></td>`
+        }
+        <td>${escapeHtml(e.observaciones || '')}</td>
+      </tr>`;
+  }).join('');
+}
+function historialBodyHtml(group, session, inds){
+  if(historialView() !== 'grupos') return historialRowsHtml(group, session, inds, session.entries);
+  const info = historialTeamsFor(group, session);
+  if(!info) return historialRowsHtml(group, session, inds, session.entries);
+  const used = new Set();
+  const blocks = info.teams.map(t=>{
+    const es = t.members.map(id=> session.entries.find(e=> e.studentId === id)).filter(Boolean);
+    es.forEach(e=> used.add(e.studentId));
+    return { name: t.name, entries: es };
+  }).filter(b=> b.entries.length);
+  const rest = session.entries.filter(e=> !used.has(e.studentId));
+  if(rest.length) blocks.push({ name: 'Sin grupo', entries: rest });
+  return blocks.map(b=>{
+    const vals = b.entries.filter(isEntryPresent).flatMap(e=> inds.map(i=> e.cotejo[i.id]).filter(v=> v!==null && v!==undefined));
+    const avg = vals.length ? (vals.reduce((a,c)=>a+c,0)/vals.length).toFixed(1) : '-';
+    return `<tr class="team-row"><td colspan="${inds.length + 3}"><strong>👥 ${escapeHtml(b.name)}</strong> <span class="muted" style="font-size:0.8rem;">· ${b.entries.length} integrante(s) · promedio ${avg}</span></td></tr>`
+      + historialRowsHtml(group, session, inds, b.entries);
+  }).join('');
+}
+function historialTeamsNoteHtml(group, session){
+  if(historialView() !== 'grupos') return '';
+  const info = historialTeamsFor(group, session);
+  const sets = teamSetsOf(group);
+  if(info && info.fuente === 'guardados') return `<p class="muted" style="font-size:0.8rem; margin:0 0 6px;">👥 Grupos de ese día${info.name ? ' (' + escapeHtml(info.name) + ')' : ''}.</p>`;
+  if(info && info.fuente === 'actuales') return `<p class="muted" style="font-size:0.8rem; margin:0 0 6px;">👥 ${escapeHtml(info.name)}, como están hoy (esta clase se registró antes de que la app guardara los grupos de cada día).</p>`;
+  if(!sets.length) return '<p class="muted" style="font-size:0.8rem; margin:0 0 6px;">Este curso no tiene grupos: se muestra en lista.</p>';
+  return `<div class="row" style="gap:6px; align-items:center; margin:0 0 6px; font-size:0.85rem;"><span class="muted">Esta clase no se registró por grupos. Verla con:</span>
+    <select style="width:auto; min-width:180px;" onchange="setHistorialTeamChoice('${session.id}', this.value)"><option value="">Lista (sin grupos)</option>${sets.map(x=> `<option value="${x.id}" ${info && info.id === x.id ? 'selected' : ''}>👥 ${escapeHtml(x.name)}</option>`).join('')}</select></div>`;
+}
+
 function renderHistorial(group){
   const main = document.getElementById('main');
   const sessions = getActiveProcessSessions(group).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
@@ -4413,6 +4481,13 @@ function renderHistorial(group){
         </div>
       </div>
       ${sinProcesoCount > 0 ? `<p class="muted" style="color:var(--danger); margin-top:6px; margin-bottom:0;">⚠️ ${sinProcesoCount} clase(s) sin proceso asignado</p>` : (sessions.length > 0 ? '<p class="muted" style="color:var(--success); margin-top:6px; margin-bottom:0;">✅ Todas las clases tienen un proceso asignado</p>' : '')}
+      ${sessions.length ? `<div class="tap-bar" style="margin-bottom:0;">
+        <span class="muted" style="font-size:0.85rem;">Ver estudiantes:</span>
+        <div class="seg" role="radiogroup" aria-label="Ver estudiantes en lista o por grupos">
+          <button type="button" role="radio" aria-checked="${historialView() === 'lista'}" class="${historialView() === 'lista' ? 'on' : ''}" onclick="setHistorialView('lista')">☰ Lista</button>
+          <button type="button" role="radio" aria-checked="${historialView() === 'grupos'}" class="${historialView() === 'grupos' ? 'on' : ''}" onclick="setHistorialView('grupos')">👥 Grupos</button>
+        </div>
+      </div>` : ''}
     </div>
     ${sessions.length === 0 ? '<div class="card app-font"><div class="empty-state">Aún no se han registrado clases para este grupo o proceso.</div></div>' : ''}
     ${sessions.map(session=>{
@@ -4428,6 +4503,7 @@ function renderHistorial(group){
             <span class="accordion-chevron">${expanded ? '▾' : '▸'}</span>
             <span class="pill">${formatDate(session.date)}</span>
             ${proceso ? `<span class="pill" style="margin-left:4px;">📂 ${escapeHtml(proceso.name)}</span>` : '<span class="pill pill-danger" style="margin-left:4px;">⚠️ Sin proceso</span>'}
+            ${session.teamsSnapshot || findTeamSet(group, session.teamSetId) ? '<span class="pill" style="margin-left:4px;">👥 En grupos</span>' : ''}
             <span class="muted"> · ${session.time} hrs · ${presentCount} presente(s), ${absentCount} ausente(s)</span>
           </div>
           <div class="row" onclick="event.stopPropagation()">
@@ -4437,6 +4513,7 @@ function renderHistorial(group){
         </div>
         ${expanded ? `
         <hr class="divider">
+        ${historialTeamsNoteHtml(group, session)}
         <div style="overflow-x:auto;">
         <table>
           <thead>
@@ -4448,25 +4525,7 @@ function renderHistorial(group){
             </tr>
           </thead>
           <tbody>
-            ${session.entries.map(e=>{
-              const student = group.students.find(s=>s.id===e.studentId);
-              const present = isEntryPresent(e);
-              const scores = inds.map(i=> e.cotejo[i.id]).filter(v=> v!==null && v!==undefined);
-              const avg = scores.length ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(1) : '-';
-              const nameCell = student
-                ? `<button class="student-name-link" onclick="openStudentDetail('${student.id}')">${escapeHtml(student.name)}</button>`
-                : escapeHtml('(eliminado)');
-              return `
-                <tr>
-                  <td>${nameCell}</td>
-                  ${present
-                    ? inds.map(i=>`<td>${e.cotejo[i.id] ?? '-'}</td>`).join('') + `<td class="avg-badge">${avg}</td>`
-                    : `<td colspan="${inds.length + 1}"><span class="pill pill-danger">Ausente</span></td>`
-                  }
-                  <td>${escapeHtml(e.observaciones || '')}</td>
-                </tr>
-              `;
-            }).join('')}
+            ${historialBodyHtml(group, session, inds)}
           </tbody>
         </table>
         </div>
