@@ -194,16 +194,26 @@
   .reg-table tbody td:first-child, .reg-table thead th:first-child{ position:sticky; left:0; z-index:2; background:var(--card-bg); }
   .reg-table thead th:first-child{ z-index:4; }
   .reg-table tr.team-row td:first-child{ background:var(--primary-light); }
-  .reg-table th:first-child, .reg-name{ width:120px; min-width:120px; max-width:120px; }
+  .reg-table th:first-child, .reg-name{ width:110px; min-width:110px; max-width:110px; }
   .reg-name{ font-size:0.88rem; line-height:1.25; word-break:break-word; }
   .reg-table textarea{ min-height:42px; height:42px; resize:vertical; transition:height .15s; }
   .reg-table textarea:focus{ height:96px; }
   @media (max-width:900px){
     .reg-scroll{ max-height:calc(100dvh - 250px); scroll-margin-top:220px; }
-    .reg-table th:first-child, .reg-name{ width:92px; min-width:92px; max-width:92px; padding-left:8px; padding-right:4px; }
-    .reg-name{ font-size:0.8rem; }
+    .reg-table th, .reg-table td{ padding:6px 4px; }
+    .reg-table th{ font-size:0.6rem; letter-spacing:0.2px; line-height:1.2; }
+    .reg-table th.indicator-header-name{ max-width:62px; }
+    .reg-table th:first-child, .reg-name{ width:72px; min-width:72px; max-width:72px; padding-left:6px; }
+    .reg-name{ font-size:0.76rem; }
+    .reg-table .reg-name .nm-full{ display:none; }
+    .reg-table .reg-name .nm-short{ display:block; }
+    .reg-table .row-quick{ gap:2px; }
+    .reg-table .mini-chip{ font-size:0.6rem; padding:0 4px; }
+    .reg-table .score-tap{ min-width:40px; height:38px; font-size:0.95rem; border-radius:9px; }
+    .reg-table textarea{ min-width:110px; height:38px; min-height:38px; font-size:0.8rem; padding:6px 8px; }
   }
-  .reg-name > span:first-child{ display:block; }
+  .reg-name .nm-full{ display:block; }
+  .reg-name .nm-short{ display:none; }
   .row-quick{ display:flex; gap:3px; margin-top:3px; }
   .mini-chip{ border:1px solid var(--border-strong); background:var(--card-bg); color:var(--text-dim); border-radius:999px; font-size:0.68rem; font-weight:700; padding:1px 6px; cursor:pointer; font-family:inherit; }
   .mini-chip.up:hover{ border-color:var(--success); color:var(--success); }
@@ -3931,6 +3941,14 @@ function paintTap(btn){
 }
 function refreshTapButtons(){ document.querySelectorAll('.score-tap').forEach(paintTap); }
 // Botones Máx / Mín de cada estudiante: todos sus indicadores al máximo o en 0
+// Nombre corto para pantallas angostas: "Florencia M."; si se repite, usa el apellido completo
+function shortStudentNames(students){
+  const parts = s=> String(s.name || '').trim().split(/\s+/);
+  const out = {}, count = {};
+  students.forEach(s=>{ const p = parts(s); out[s.id] = p.length > 1 ? p[0] + ' ' + p[1][0] + '.' : p[0]; count[out[s.id]] = (count[out[s.id]] || 0) + 1; });
+  students.forEach(s=>{ if(count[out[s.id]] > 1){ const p = parts(s); out[s.id] = p.slice(0, 2).join(' '); } });
+  return out;
+}
 function setStudentAllScores(sid, which){
   const group = getActiveGroup();
   group.indicators.filter(i=> registrarIndicatorSelection.includes(i.id)).forEach(ind=>{
@@ -4014,6 +4032,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
 
   // Mapa rápido de valores previos si estamos editando
   const prevByStudent = {};
+  const shortNames = shortStudentNames(group.students);
   if(isEdit){
     sessionToEdit.entries.forEach(e=> prevByStudent[e.studentId] = e);
   }
@@ -4200,7 +4219,7 @@ function renderRegistrar(group, sessionToEdit, prefill){
             const prevEntry = prevByStudent[s.id];
             return `
             <tr class="${block.plain ? '' : 'team-member'}">
-              <td class="reg-name"><span>${escapeHtml(s.name)}</span>
+              <td class="reg-name" title="${escapeHtml(s.name)}"><span class="nm-full">${escapeHtml(s.name)}</span><span class="nm-short">${escapeHtml(shortNames[s.id] || s.name)}</span>
                 <span class="row-quick"><button type="button" class="mini-chip up" onclick="setStudentAllScores('${s.id}','max')" title="Todos los indicadores al máximo" aria-label="Todo al máximo para ${escapeHtml(s.name)}">Máx</button><button type="button" class="mini-chip down" onclick="setStudentAllScores('${s.id}','min')" title="Todos los indicadores en 0 (no trabajó)" aria-label="Todo en 0 para ${escapeHtml(s.name)}">Mín</button></span></td>
               ${selectedIndicators.map(ind=>{
                 const prevVal = prevEntry ? prevEntry.cotejo[ind.id] : null;
