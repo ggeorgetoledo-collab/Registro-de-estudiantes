@@ -187,6 +187,25 @@
   :root[data-theme="dark"] .inc-toggle.on{ background:rgba(251,191,36,0.16); color:#FBBF24; border-color:rgba(251,191,36,0.4); }
   .grp-val{ display:inline-block; min-width:44px; padding:5px 8px; border-radius:8px; background:var(--primary-light); color:var(--primary-dark); font-weight:700; text-align:center; font-size:0.86rem; }
   .grp-edit{ margin-left:2px; }
+  /* Tablas de Calificaciones: encabezado (nombre de cada evaluación) y estudiantes siempre a la vista */
+  .stk-scroll{ overflow:auto; max-height:min(78vh, calc(100vh - 140px)); border:1px solid var(--border); border-radius:12px; }
+  .stk-table{ margin:0; }
+  .stk-table thead th{ position:sticky; top:0; z-index:3; background:var(--card-bg); box-shadow:0 1px 0 var(--border); }
+  .stk-table tbody td:first-child, .stk-table thead th:first-child{ position:sticky; left:0; z-index:2; background:var(--card-bg); }
+  .stk-table thead th:first-child{ z-index:4; }
+  .stk-table tr.team-row td:first-child{ background:var(--primary-light); }
+  .stk-table tbody td:first-child{ min-width:120px; max-width:170px; }
+  @media (max-width:900px){
+    .stk-scroll{ max-height:calc(100dvh - 250px); scroll-margin-top:220px; }
+    .stk-table th, .stk-table td{ padding:7px 6px; }
+    .stk-table tbody td:first-child{ min-width:96px; max-width:120px; font-size:0.82rem; }
+  }
+  .side-action.busy{ color:var(--primary); }
+  .side-action.busy .ico{ animation:pulseUp 1s ease-in-out infinite; }
+  @keyframes pulseUp{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-3px); } }
+  .gg-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:10px 10px; margin-top:6px; border:1px solid var(--border); border-radius:12px; background:var(--card-bg); cursor:pointer; text-align:left; font:inherit; color:var(--text); }
+  .gg-head:hover{ border-color:var(--border-strong); }
+  .gg-head .gg-chev{ display:inline-block; width:1em; color:var(--text-dim); }
   /* Tabla de "Registrar clase": encabezado y nombres siempre a la vista */
   .reg-scroll{ overflow:auto; max-height:min(78vh, calc(100vh - 140px)); border:1px solid var(--border); border-radius:12px; }
   .reg-table{ margin:0; }
@@ -835,6 +854,7 @@
       <div class="swatches" id="sideSwatches" role="radiogroup" aria-label="Paleta de color"></div>
     </div>
     <div class="side-actions" id="icon-actions-wrap">
+      <button class="side-action" id="portalQuickBtn" onclick="quickPublishPortal()" title="Publicar el portal de estudiantes" hidden><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"/><path d="M7.5 8.5 12 4l4.5 4.5"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg><span>Publicar portal</span></button>
       <button class="side-action" id="driveSettingsBtn" onclick="openDriveSettings()" title="Google Drive"><span class="status-dot" aria-hidden="true"></span><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.4 1.5A3.8 3.8 0 0 1 17.5 18z"/></svg><span>Google Drive</span></button>
       <button class="side-action" id="reminderSettingsBtn" onclick="openReminderSettings()" title="Recordatorio de clases"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span>Recordatorios</span></button>
       <button class="side-action" id="themeToggleBtn" onclick="toggleTheme()" title="Modo claro u oscuro"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><span>Modo oscuro</span></button>
@@ -2679,6 +2699,7 @@ function teamSetSelectHtml(group, currentId, onchange, id){
 /* ============ RENDER PRINCIPAL ============ */
 function renderAll(){
   renderGreeting();
+  try{ updatePortalQuickBtn(); }catch(e){}
   renderGroupSelect();
   renderPeriodSelect();
   renderNav();
@@ -7788,6 +7809,7 @@ function setPortalEnabled(on){
   if(on) ensureWebTokens();
   saveState();
   renderPremios(getActiveGroup());
+  updatePortalQuickBtn();
 }
 function updatePortalOption(field, value){
   const p = ensurePortalConfig();
@@ -8420,7 +8442,27 @@ async function publishPortalNow(){
     showToast('No se pudo publicar: ' + msg);
   }finally{
     portalPublishing = false;
+    try{ updatePortalQuickBtn(); }catch(e){}
   }
+}
+// Botón "Publicar portal" del menú: visible cuando el portal está activado
+function updatePortalQuickBtn(){
+  const b = document.getElementById('portalQuickBtn');
+  if(!b) return;
+  let on = false;
+  try{ on = !!(state.portal && state.portal.enabled); }catch(e){}
+  b.hidden = !on;
+  b.classList.toggle('busy', !!portalPublishing);
+  const lbl = b.querySelector('span');
+  if(lbl) lbl.textContent = portalPublishing ? 'Publicando…' : 'Publicar portal';
+  const p = state.portal || {};
+  b.title = portalPublishing ? 'Publicando el portal…' : 'Publicar el portal de estudiantes' + (p.lastPublished ? ' (última vez: ' + new Date(p.lastPublished).toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'short' }) + ')' : '');
+}
+async function quickPublishPortal(){
+  if(portalPublishing) return;
+  const pr = publishPortalNow();
+  updatePortalQuickBtn();
+  try{ await pr; }finally{ updatePortalQuickBtn(); }
 }
 function setPortalPublishStatus(html){
   const el = document.getElementById('portalPublishedStatus');
@@ -9991,13 +10033,32 @@ function toggleCalFormTab(tab){
   calFormTab = (calFormTab === tab) ? null : tab;
   renderCalificaciones(getActiveGroup());
 }
-let collapsedGradeGroups = new Set();
+// Los grupos de notas parten plegados: se ve solo su nota (sumativa). Se recuerda cuáles abriste.
+const expandedGradeGroups = (()=>{ try{ return new Set(JSON.parse(localStorage.getItem('gg_expanded') || '[]')); }catch(e){ return new Set(); } })();
+const collapsedGradeGroups = { has: id=> !expandedGradeGroups.has(id) };
 function toggleGradeGroupCollapse(gradeGroupId){
-  if(collapsedGradeGroups.has(gradeGroupId)) collapsedGradeGroups.delete(gradeGroupId);
-  else collapsedGradeGroups.add(gradeGroupId);
+  if(expandedGradeGroups.has(gradeGroupId)) expandedGradeGroups.delete(gradeGroupId);
+  else expandedGradeGroups.add(gradeGroupId);
+  try{ localStorage.setItem('gg_expanded', JSON.stringify([...expandedGradeGroups])); }catch(e){}
   renderCalificaciones(getActiveGroup());
 }
 
+// Encabezado plegable de un grupo de notas en la lista de evaluaciones: muestra su nota (sumativa) del curso
+function gradeGroupHeadHtml(group, units, evaluations, ggId){
+  const gg = (group.gradeGroups || []).find(g=> g.id === ggId);
+  if(!gg) return '';
+  const color = gradeGroupColor(ggId);
+  const n = evaluations.filter(e=> e.gradeGroupId === ggId).length;
+  const u = units.find(x=> x.type === 'group' && x.gradeGroup.id === ggId);
+  const notas = u ? group.students.map(s=> computeUnitGrade(u, s.id)).filter(v=> v !== null) : [];
+  const prom = notas.length ? (notas.reduce((a,b)=> a+b, 0) / notas.length) : null;
+  const rep = notas.filter(v=> v < 4).length;
+  const open = !collapsedGradeGroups.has(ggId);
+  return `<button type="button" class="gg-head" style="border-left:4px solid ${color.text};" onclick="toggleGradeGroupCollapse('${ggId}')" aria-expanded="${open}">
+    <span><span class="gg-chev">${open ? '▾' : '▸'}</span> <strong style="color:${color.text};">${escapeHtml(gg.name)}</strong> <span class="muted" style="font-size:0.85rem;">· ${n} evaluación(es) · ${gg.weightType === 'weighted' ? 'pondera ' + gg.weightPercent + '%' : 'promedio simple'}</span></span>
+    <span class="muted" style="font-size:0.85rem; white-space:nowrap;">${prom !== null ? 'Promedio del curso <strong style="color:var(--text);">' + prom.toFixed(1) + '</strong>' : 'Sin notas'}${rep ? ' · <span style="color:var(--danger); font-weight:700;">' + rep + ' bajo 4,0</span>' : ''}</span>
+  </button>`;
+}
 function renderCalificaciones(group){
   if(!group.evaluations) group.evaluations = [];
   if(!group.gradeGroups) group.gradeGroups = [];
@@ -10150,7 +10211,20 @@ function renderCalificaciones(group){
         ${getEvalSortMode(group)==='fecha' && evaluations.some(e=>!e.date) ? '<span class="muted" style="font-size:0.74rem;">Las notas sin fecha quedan al final (puedes ponerles fecha con "Editar").</span>' : ''}
       </div>` : ''}
       ${evaluations.length === 0 ? '<div class="empty-state">Aún no has agregado evaluaciones.</div>' :
-        evaluations.map((e, evIdx)=>{
+        (()=>{ const shownGG = new Set();
+          // Las evaluaciones de un mismo grupo de notas quedan juntas, bajo su encabezado
+          const listOrder = [], seenGG = new Set();
+          evaluations.forEach(e=>{
+            if(!e.gradeGroupId || !gradeGroups.some(g=> g.id === e.gradeGroupId)){ listOrder.push(e); return; }
+            if(seenGG.has(e.gradeGroupId)) return;
+            seenGG.add(e.gradeGroupId);
+            evaluations.filter(x=> x.gradeGroupId === e.gradeGroupId).forEach(x=> listOrder.push(x));
+          });
+          return listOrder.map(e=>{ const evIdx = evaluations.indexOf(e);
+          let ggHead = '';
+          if(e.gradeGroupId && !shownGG.has(e.gradeGroupId) && gradeGroups.some(g=> g.id === e.gradeGroupId)){ shownGG.add(e.gradeGroupId); ggHead = gradeGroupHeadHtml(group, units, evaluations, e.gradeGroupId); }
+          if(ggHead === '' && e.gradeGroupId && shownGG.has(e.gradeGroupId) && collapsedGradeGroups.has(e.gradeGroupId)) return '';
+          if(ggHead && collapsedGradeGroups.has(e.gradeGroupId)) return ggHead;
           const color = e.gradeGroupId ? gradeGroupColor(e.gradeGroupId) : null;
           const gg = e.gradeGroupId ? gradeGroups.find(g=>g.id===e.gradeGroupId) : null;
           let reprobados = 0, pendientes = 0;
@@ -10159,8 +10233,8 @@ function renderCalificaciones(group){
             if(nota === null) pendientes++;
             else if(nota < 4) reprobados++;
           });
-          return `
-          <div class="student-list-item" style="align-items:flex-start; ${color ? `border-left:4px solid ${color.text}; padding-left:8px;` : ''}">
+          return ggHead + `
+          <div class="student-list-item" style="align-items:flex-start; ${color ? `border-left:4px solid ${color.text}; padding-left:8px; margin-left:10px;` : ''}">
             <div>
               <strong>${escapeHtml(e.name)}</strong>
               ${gg ? `<span class="pill" style="background:${color.bg}; color:${color.text}; border-color:${color.border}; margin-left:6px;">${escapeHtml(gg.name)}</span>` : ''}
@@ -10197,7 +10271,7 @@ function renderCalificaciones(group){
               <button class="btn btn-danger btn-sm" onclick="deleteEvaluation('${e.id}')">Eliminar</button>
             </div>
           </div>
-        `;}).join('')
+        `;}).join(''); })()
       }
     </div>
 
@@ -10223,8 +10297,9 @@ function renderCalificaciones(group){
           ${finalPendientes > 0 ? ` · <span style="color:var(--text-dim); font-weight:700;">⏳ ${finalPendientes} pendiente(s)</span>` : ''}
         </p>`;
       })()}
-      <div style="overflow-x:auto;">
-      <table>
+      ${gradeGroups.length ? `<p class="muted" style="font-size:0.8rem; margin:0 0 6px;">Toca el encabezado de un grupo de notas (▸) para ver u ocultar sus evaluaciones.</p>` : ''}
+      <div class="stk-scroll">
+      <table class="stk-table">
         <thead>
           <tr>
             <th>Estudiante</th>
@@ -10607,8 +10682,8 @@ function renderEvalScores(group, evaluation){
       </div>`}
       ${hasRubric(evaluation) ? rubricLegendHtml(evaluation) : ''}
       ${evaluation.entregaLink ? `<p class="muted" style="background:var(--primary-light); border:1px solid var(--primary-border); border-radius:10px; padding:8px 10px; color:var(--text);">🔄 Esta nota está vinculada a las entregas: el puntaje (% de cumplimiento) se calcula solo cada vez que editas las entregas. Haz clic en una nota para ver y editar las entregas del estudiante.</p>` : ''}
-      <div style="overflow-x:auto;">
-      <table>
+      <div class="stk-scroll">
+      <table class="stk-table">
         <thead>
           <tr><th>Estudiante</th>${hasRubric(evaluation) ? evaluation.rubric.items.map((it, i)=> `<th title="${escapeHtml(it.text)}" style="text-align:center;">${it.grupal ? '👥 ' : ''}I${i+1}</th>`).join('') : ''}<th>Puntaje obtenido</th><th>Nota</th><th>Décimas aplicadas</th><th>Adecuación</th></tr>
         </thead>
