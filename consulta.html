@@ -59,6 +59,17 @@
   h2{ font-size:1.08rem; margin:0 0 10px; font-weight:700; display:flex; align-items:center; gap:8px; }
   .row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
   .row:last-child{ border-bottom:none; }
+  details.cls{ border-bottom:1px solid var(--border); }
+  details.cls > summary.row{ border-bottom:none; cursor:pointer; list-style:none; }
+  details.cls > summary.row::-webkit-details-marker{ display:none; }
+  details.cls .more{ color:var(--primary); font-weight:600; }
+  details.cls[open] .more{ display:none; }
+  .ind-list{ padding:2px 0 10px; display:flex; flex-direction:column; gap:8px; }
+  .ind-top{ display:flex; justify-content:space-between; gap:10px; font-size:0.86rem; }
+  .ind-n{ min-width:0; overflow-wrap:anywhere; }
+  .ind-v{ font-weight:700; white-space:nowrap; }
+  .ind-bar{ height:6px; border-radius:99px; background:var(--border); overflow:hidden; margin-top:3px; }
+  .ind-bar span{ display:block; height:100%; background:var(--primary); border-radius:99px; }
   .row .main{ min-width:0; }
   .row .title{ font-weight:600; overflow-wrap:anywhere; }
   .row .sub{ color:var(--dim); font-size:0.8rem; }
@@ -365,9 +376,17 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     const clases = clasesF.slice().reverse();
     html += `<div class="card"><h2>📝 Asistencia y trabajo en clases</h2>
       <div class="summary"><span>Presente <strong>${presentes}</strong> de <strong>${totalClases}</strong> clases</span>${logro !== null ? `<span>Logro <strong>${logro}%</strong> (${num(obt)} de ${num(max)} pts)</span>` : ''}</div>`;
-    html += clases.length ? listWithMore(clases, c=> `
-      <div class="row"><div class="main"><div class="title">${fdate(c.d)}${c.h ? ' · ' + esc(c.h) : ''}</div>${c.p && c.m ? `<div class="sub">Puntaje ${num(c.o)} de ${num(c.m)}</div>` : ''}${c.obs ? `<div class="obs">${esc(c.obs)}</div>` : ''}</div>
-      <span class="chip ${c.p ? 'ok' : 'bad'}">${c.p ? 'Presente' : 'Ausente'}</span></div>`, 8) : `<div class="empty">${proc ? 'No hay clases registradas en esta unidad.' : 'Aún no hay clases registradas.'}</div>`;
+    const claseRow = c=>{
+      const head = `<div class="main"><div class="title">${fdate(c.d)}${c.h ? ' · ' + esc(c.h) : ''}</div>${c.p && c.m ? `<div class="sub">Puntaje ${num(c.o)} de ${num(c.m)}${c.ind && c.ind.length > 1 ? '<span class="more"> · ver detalle ▾</span>' : ''}</div>` : ''}${c.obs ? `<div class="obs">${esc(c.obs)}</div>` : ''}</div>
+      <span class="chip ${c.p ? 'ok' : 'bad'}">${c.p ? 'Presente' : 'Ausente'}</span>`;
+      if(!(c.p && c.ind && c.ind.length > 1)) return `<div class="row">${head}</div>`;
+      // Clase con varios indicadores: se toca para ver en qué se asignó cada puntaje
+      return `<details class="cls"><summary class="row">${head}</summary><div class="ind-list">${c.ind.map(([n, v, mx])=>{
+        const pct = v === null ? 0 : Math.max(0, Math.min(100, Math.round(v / (mx || 1) * 100)));
+        return `<div class="ind"><div class="ind-top"><span class="ind-n">${esc(n)}</span><span class="ind-v">${v === null ? '–' : num(v) + ' de ' + num(mx)}</span></div><div class="ind-bar"><span style="width:${pct}%;"></span></div></div>`;
+      }).join('')}</div></details>`;
+    };
+    html += clases.length ? listWithMore(clases, claseRow, 8) : `<div class="empty">${proc ? 'No hay clases registradas en esta unidad.' : 'Aún no hay clases registradas.'}</div>`;
     html += `</div>`;
 
     // Entregas, agrupadas por unidad (las de una misma unidad forman una nota)

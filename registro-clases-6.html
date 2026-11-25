@@ -7651,6 +7651,8 @@ function buildPortalPayload(group, s){
       if(v !== null && v !== undefined){ obt += v; max += (ind.levels || 5); }
     });
     const c = { d: se.date || '', h: se.time || '', p: present ? 1 : 0, o: obt, m: max, pr: se.processId || '' };
+    // Detalle por indicador (solo si la clase tiene más de uno): [nombre, puntaje o null, máximo]
+    if(present && inds.length > 1) c.ind = inds.map(ind=>{ const v = (entry.cotejo || {})[ind.id]; return [ind.name, (v === null || v === undefined) ? null : v, ind.levels || 5]; });
     if(p.includeObs && entry.observaciones) c.obs = entry.observaciones;
     return c;
   });
