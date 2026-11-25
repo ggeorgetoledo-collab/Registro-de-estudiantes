@@ -59,6 +59,25 @@
   h2{ font-size:1.08rem; margin:0 0 10px; font-weight:700; display:flex; align-items:center; gap:8px; }
   .row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
   .row:last-child{ border-bottom:none; }
+  .brief{ display:grid; grid-template-columns:repeat(3, 1fr); text-align:center; padding:12px 8px; }
+  .brief > div{ display:flex; flex-direction:column; gap:2px; }
+  .brief > div + div{ border-left:1px solid var(--border); }
+  .b-num{ font-size:1.45rem; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .b-num.bad{ color:var(--bad, #C62F24); }
+  .b-lbl{ color:var(--dim); font-size:0.75rem; font-weight:600; }
+  .nav-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .nav-tile{ font:inherit; text-align:left; display:flex; flex-direction:column; gap:2px; padding:14px; min-height:96px; background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); cursor:pointer; }
+  .nav-tile:active{ transform:scale(0.98); }
+  .nav-ic{ font-size:1.6rem; line-height:1; margin-bottom:6px; }
+  .nav-t{ font-weight:800; font-size:1rem; }
+  .nav-sub{ color:var(--dim); font-size:0.8rem; font-weight:600; }
+  .topbar{ display:flex; align-items:center; gap:10px; margin:2px 0 12px; }
+  .back{ font:inherit; font-weight:700; font-size:0.9rem; color:var(--primary-dark); background:var(--card); border:1px solid var(--border); border-radius:12px; padding:9px 12px; cursor:pointer; flex:none; }
+  .tb-main{ min-width:0; }
+  .tb-t{ font-weight:800; font-size:1.15rem; }
+  .unit-chips{ display:flex; gap:6px; overflow-x:auto; padding:2px 0 10px; margin-bottom:2px; scrollbar-width:none; }
+  .uchip{ font:inherit; font-weight:600; font-size:0.85rem; white-space:nowrap; padding:7px 12px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--dim); cursor:pointer; }
+  .uchip.on{ background:var(--primary-light); border-color:var(--primary-line); color:var(--primary-dark); }
   details.cls{ border-bottom:1px solid var(--border); }
   details.cls > summary.row{ border-bottom:none; cursor:pointer; list-style:none; }
   details.cls > summary.row::-webkit-details-marker{ display:none; }
@@ -308,7 +327,9 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
           ${showProc ? `<label>Unidad<select id="fProc"><option value="">Todas las unidades</option>${per.procesos.map(x=> `<option value="${esc(x.id)}"${x.id === proc ? ' selected' : ''}>${esc(x.n)}</option>`).join('')}</select></label>` : ''}
         </div>` : ''}
         <div class="dim small" style="margin-top:8px;">Datos actualizados el ${fdatetime(generado)}</div>
-      </div>
+      </div>`;
+    const tilesStart = html.length;
+    html += `
       <div class="tiles">
         <div class="tile accent"><div class="num">${num(puntos.disponibles)}</div><div class="lbl">Puntos disponibles</div></div>
         <div class="tile"><div class="num ${asistPct !== null && asistPct < 85 ? 'bad' : ''}">${asistPct === null ? '—' : asistPct + '%'}</div><div class="lbl">Asistencia${proc ? ' en la unidad' : ''}</div></div>
@@ -316,6 +337,9 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         <div class="tile"><div class="num ok">${num(dec.disponibles)}</div><div class="lbl">Décimas por aplicar</div></div>
       </div>`;
     if(proc) html += `<p class="dim small" style="margin:-4px 2px 12px;">Mostrando la unidad <strong>${esc(procName)}</strong>. Los puntos y las décimas corresponden a todo el periodo.</p>`;
+    const heroHtml = html.slice(0, tilesStart);
+    const procNote = proc ? `<p class="dim small" style="margin:-4px 2px 12px;">Mostrando la unidad <strong>${esc(procName)}</strong>. Los puntos y las décimas corresponden a todo el periodo.</p>` : '';
+    html = '';
 
     // Lo que viene: evaluaciones y entregas de los próximos 21 días
     {
@@ -339,6 +363,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       }
     }
 
+    const proxHtml = html; html = '';
     // Calificaciones
     const gradeRow = (e, small)=>{
       const cls = e.nota === null || e.nota === undefined ? 'none' : (e.nota < 4 ? 'bad' : '');
@@ -371,6 +396,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
         : `<div class="summary" style="margin-top:10px;"><span>Promedio simple <strong>${nota(d.notas.promedio)}</strong></span><span>Nota final <strong>${nota(final)}</strong></span></div>`;
     }
     html += `</div>`;
+    const notasHtml = html; html = '';
 
     // Asistencia y trabajo en clases
     const clases = clasesF.slice().reverse();
@@ -388,6 +414,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     };
     html += clases.length ? listWithMore(clases, claseRow, 8) : `<div class="empty">${proc ? 'No hay clases registradas en esta unidad.' : 'Aún no hay clases registradas.'}</div>`;
     html += `</div>`;
+    const clasesHtml = html; html = '';
 
     // Entregas, agrupadas por unidad (las de una misma unidad forman una nota)
     const entregas = (d.entregas || []).filter(inProc).sort((x,y)=> (y.d||'').localeCompare(x.d||''));
@@ -440,6 +467,8 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       }).join('');
     }
     html += `</div>`;
+    const entregasHtml = html; html = '';
+    const entPend = entregas.filter(e=> abierta(e) || !e.e).length;
 
     // Puntos
     html += `<div class="card"><h2>⭐ Puntos</h2>
@@ -457,6 +486,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       <div class="row"><div class="main"><div class="title">${esc(m.n)}</div><div class="sub">${fdate(m.d)}${m.h ? ' · ' + esc(m.h) : ''}</div></div>
       <div class="val ${m.v > 0 ? 'pos' : 'neg'}">${m.v > 0 ? '+' : ''}${num(m.v)}</div></div>`, 6) : '<div class="empty">Aún no tienes movimientos.</div>';
     html += `</div>`;
+    const puntosHtml = html; html = '';
 
     // Décimas
     html += `<div class="card"><h2>➕ Décimas</h2>
@@ -465,6 +495,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     const dm = (dec.movs || []).slice().reverse();
     if(dm.length) html += listWithMore(dm, m=> `<div class="row"><div class="main"><div class="title">${esc(m.n || 'Décimas')}</div><div class="sub">${fdate(m.d)}</div></div><div class="val ${m.v > 0 ? 'pos' : 'neg'}">${m.v > 0 ? '+' : ''}${num(m.v)}</div></div>`, 6);
     html += `</div>`;
+    const decimasHtml = html; html = '';
 
     // Bitácora (solo si el profesor decidió publicarla)
     if(Array.isArray(d.bitacora)){
@@ -474,8 +505,34 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       html += `</div>`;
     }
 
-    html += `<p class="note">📌 Guarda esta página en tu celular: en el menú del navegador elige <strong>"Agregar a pantalla de inicio"</strong>. Así tendrás tu registro y tu tarjeta a mano.</p>`;
-    html += `<p class="note">🔒 Este enlace es personal: no lo compartas ni prestes tu tarjeta.<br>Si la perdiste, avísale a tu profesor para que te entregue una nueva.<br>Si ves algo que no corresponde, conversa con tu profesor.</p>`;
+    const bitHtml = html; html = '';
+
+    /* ---- Pantalla de inicio (resumen + accesos) o una sección ---- */
+    const view = sel.v || 'inicio';
+    const notes = `<p class="note">📌 Guarda esta página en tu celular: en el menú del navegador elige <strong>"Agregar a pantalla de inicio"</strong>. Así tendrás tu registro y tu tarjeta a mano.</p>
+      <p class="note">🔒 Este enlace es personal: no lo compartas ni prestes tu tarjeta.<br>Si la perdiste, avísale a tu profesor para que te entregue una nueva.<br>Si ves algo que no corresponde, conversa con tu profesor.</p>`;
+    const SECCIONES = [
+      { v: 'notas', ic: '🎯', t: 'Notas', sub: proc ? 'Promedio ' + nota(final) : 'Nota final ' + nota(final), html: notasHtml, unidad: true },
+      { v: 'clases', ic: '📝', t: 'Trabajo en clases', sub: totalClases ? (logro !== null ? 'Logro ' + logro + '% · ' : '') + 'asistencia ' + asistPct + '%' : 'Sin clases', html: clasesHtml, unidad: true },
+      { v: 'entregas', ic: '📥', t: 'Entregas', sub: entPend ? entPend + ' pendiente(s)' : (entregas.length ? 'Al día' : 'Sin entregas'), html: entregasHtml, unidad: true },
+      { v: 'decimas', ic: '➕', t: 'Décimas', sub: num(dec.disponibles) + ' por aplicar', html: decimasHtml },
+      { v: 'puntos', ic: '⭐', t: 'Puntos', sub: num(puntos.disponibles) + ' disponibles', html: puntosHtml },
+    ];
+    if(bitHtml) SECCIONES.push({ v: 'bitacora', ic: '📓', t: 'Bitácora', sub: (d.bitacora || []).length + ' registro(s)', html: bitHtml });
+    const actual = SECCIONES.find(x=> x.v === view);
+    if(!actual){
+      const bad = v=> v !== null && v !== undefined && v < 4;
+      const resumen = `<div class="card brief">
+        <div><span class="b-num ${bad(final) ? 'bad' : ''}">${nota(final)}</span><span class="b-lbl">${proc ? 'Promedio unidad' : 'Nota final'}</span></div>
+        <div><span class="b-num ${asistPct !== null && asistPct < 85 ? 'bad' : ''}">${asistPct === null ? '—' : asistPct + '%'}</span><span class="b-lbl">Asistencia</span></div>
+        <div><span class="b-num">${num(puntos.disponibles)}</span><span class="b-lbl">Puntos</span></div>
+      </div>`;
+      html = heroHtml + resumen + procNote + `<div class="nav-grid">${SECCIONES.map(x=> `<button type="button" class="nav-tile" data-view="${x.v}"><span class="nav-ic" aria-hidden="true">${x.ic}</span><span class="nav-t">${x.t}</span><span class="nav-sub">${esc(x.sub)}</span></button>`).join('')}</div>` + proxHtml + notes;
+    } else {
+      const unitChips = actual.unidad && showProc ? `<div class="unit-chips" role="radiogroup" aria-label="Filtrar por unidad"><button type="button" class="uchip${!proc ? ' on' : ''}" data-proc="">Todas</button>${per.procesos.map(x=> `<button type="button" class="uchip${x.id === proc ? ' on' : ''}" data-proc="${esc(x.id)}">${esc(x.n)}</button>`).join('')}</div>` : '';
+      html = `<div class="topbar"><button type="button" class="back" data-view="inicio" aria-label="Volver al inicio">← Inicio</button><div class="tb-main"><div class="tb-t">${actual.ic} ${actual.t}</div><div class="dim small">${esc(p.nombre)} · ${esc(course.curso)}${per.n && showPer ? ' · ' + esc(per.n) : ''}</div></div></div>`
+        + unitChips + actual.html + notes;
+    }
     app.innerHTML = html;
 
     const myBtn = document.getElementById('myCardBtn');
@@ -483,14 +540,26 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
     const palBtn = document.getElementById('palBtn');
     if(palBtn) palBtn.addEventListener('click', showPalettePicker);
     const go = s=>{ try{ sessionStorage.setItem('mi-registro-sel', JSON.stringify(s)); }catch(e){} render(p, generado, s); };
+    currentGo = v=> go({ ...sel, v });
     app.querySelectorAll('.course-tab').forEach(btn=>{
-      btn.addEventListener('click', ()=>{ const c = Number(btn.dataset.idx); go({ c, per: defaultPeriodIdx(cursos[c]), proc: '' }); });
+      btn.addEventListener('click', ()=>{ const c = Number(btn.dataset.idx); go({ c, per: defaultPeriodIdx(cursos[c]), proc: '', v: view }); });
     });
     const fPer = document.getElementById('fPer');
-    if(fPer) fPer.addEventListener('change', ()=> go({ c: sel.c, per: Number(fPer.value), proc: '' }));
+    if(fPer) fPer.addEventListener('change', ()=> go({ c: sel.c, per: Number(fPer.value), proc: '', v: view }));
     const fProc = document.getElementById('fProc');
-    if(fProc) fProc.addEventListener('change', ()=> go({ c: sel.c, per: sel.per, proc: fProc.value }));
+    if(fProc) fProc.addEventListener('change', ()=> go({ c: sel.c, per: sel.per, proc: fProc.value, v: view }));
+    app.querySelectorAll('.uchip').forEach(b=> b.addEventListener('click', ()=> go({ ...sel, proc: b.dataset.proc, v: view })));
+    app.querySelectorAll('[data-view]').forEach(b=> b.addEventListener('click', ()=>{
+      const v = b.dataset.view;
+      if(v === 'inicio'){ if(history.state && history.state.rv) history.back(); else go({ ...sel, v: 'inicio' }); }
+      else { try{ history.pushState({ rv: 1 }, ''); }catch(e){} go({ ...sel, v }); }
+      window.scrollTo(0, 0);
+    }));
   }
+
+  // El botón "atrás" del celular vuelve de una sección al inicio
+  let currentGo = null;
+  window.addEventListener('popstate', ()=>{ if(currentGo){ currentGo('inicio'); window.scrollTo(0, 0); } });
 
   async function load(){
     const params = new URLSearchParams(location.hash.slice(1));
@@ -533,7 +602,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
       let sel = { c: 0, per: defaultPeriodIdx(p.cursos[0]), proc: '' };
       try{
         const saved = JSON.parse(sessionStorage.getItem('mi-registro-sel') || 'null');
-        if(saved && p.cursos[saved.c] && p.cursos[saved.c].periodos[saved.per]) sel = { c: saved.c, per: saved.per, proc: saved.proc || '' };
+        if(saved && p.cursos[saved.c] && p.cursos[saved.c].periodos[saved.per]) sel = { c: saved.c, per: saved.per, proc: saved.proc || '', v: 'inicio' };
       }catch(e){}
       render(p, data.generado, sel);
     }catch(e){
